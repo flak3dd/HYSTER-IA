@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { DeployModal } from "@/components/admin/nodes/deploy-modal"
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -23,12 +24,21 @@ type NodeItem = {
   lastHeartbeatAt: number | null
 }
 
+type ProfileItem = {
+  id: string
+  name: string
+  type: string
+  tags: string[]
+}
+
 type ModalState =
   | { kind: "closed" }
   | { kind: "new" }
   | { kind: "edit"; node: NodeItem }
   | { kind: "rotate"; node: NodeItem }
   | { kind: "delete"; node: NodeItem }
+  | { kind: "deploy" }
+  | { kind: "apply-profile" }
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -69,6 +79,7 @@ export function NodesView() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   // filters
+  const [profiles, setProfiles] = useState<ProfileItem[]>([])
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [tagFilter, setTagFilter] = useState<string>("")
@@ -92,6 +103,13 @@ export function NodesView() {
         }),
       )
       setNodes(items)
+
+      // also load profiles
+      const pRes = await fetch("/api/admin/profiles", { cache: "no-store" }).catch(() => null)
+      if (pRes?.ok) {
+        const pd = await pRes.json()
+        setProfiles((Array.isArray(pd) ? pd : pd.profiles ?? []) as ProfileItem[])
+      }
     } catch (err) {
       toast.error("Failed to load nodes", {
         description: err instanceof Error ? err.message : "unknown",
@@ -169,12 +187,22 @@ export function NodesView() {
         </div>
         <div className="flex gap-2">
           {selected.size > 0 ? (
-            <Button variant="outline" size="sm" onClick={generateConfigForSelected}>
-              Generate Config ({selected.size})
-            </Button>
+            <>
+              <Button variant="outline" size="sm" onClick={generateConfigForSelected}>
+                Generate Config ({selected.size})
+              </Button>
+              {profiles.length > 0 && (
+                <Button variant="outline" size="sm" onClick={() => setModal({ kind: "apply-profile" })}>
+                  Apply Profile ({selected.size})
+                </Button>
+              )}
+            </>
           ) : null}
-          <Button size="sm" onClick={() => setModal({ kind: "new" })}>
+          <Button size="sm" onClick={() => setModal({ kind: "deploy" })}>
             + Deploy New Node
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setModal({ kind: "new" })}>
+            + Manual Add
           </Button>
         </div>
       </div>
@@ -383,6 +411,28 @@ export function NodesView() {
           ) : null}
         </ModalOverlay>
       ) : null}
+
+      {modal.kind === "deploy" && (
+        <DeployModal
+          onClose={() => setModal({ kind: "closed" })}
+          onDeployed={() => {
+            setModal({ kind: "closed" })
+            load()
+          }}
+        />
+      )}
+
+      {modal.kind === "apply-profile" && (
+        <ApplyProfileToNodesModal
+          profiles={profiles}
+          selectedNodeIds={[...selected]}
+          onClose={() => setModal({ kind: "closed" })}
+          onApplied={() => {
+            setModal({ kind: "closed" })
+            load()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -700,6 +750,78 @@ function DeleteNodeModal({
         <Button variant="destructive" size="sm" onClick={doDelete} disabled={deleting}>
           {deleting ? "Deleting…" : "Delete Node"}
         </Button>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Apply Profile to Nodes Modal                                       */
+/* ------------------------------------------------------------------ */
+
+function ApplyProfileToNodesModal({
+  profiles,
+  selectedNodeIds,
+  onClose,
+  onApplied,
+}: {
+  profiles: ProfileItem[]
+  selectedNodeIds: string[]
+  onClose: () => void
+  onApplied: () => void
+}) {
+  const [profileId, setProfileId] = useState(profiles[0]?.id ?? "")
+  const [applying, setApplying] = useState(false)
+
+  const apply = async () => {
+    if (!profileId) { toast.error("Select a profile"); return }
+    setApplying(true)
+    try {
+      const res = await fetch(`/api/admin/profiles/${profileId}/apply`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nodeIds: selectedNodeIds }),
+      })
+      if (!res.ok) throw new Error(`${res.status}`)
+      const data = await res.json()
+      toast.success(`Profile applied to ${data.applied} node(s)`)
+      onApplied()
+    } catch (err) {
+      toast.error("Apply failed", {
+        description: err instanceof Error ? err.message : "unknown",
+      })
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold mb-2">Apply Profile</h2>
+        <p className="text-sm text-zinc-500 mb-4">
+          Apply a configuration profile to {selectedNodeIds.length} selected node(s).
+        </p>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Profile</label>
+            <select
+              value={profileId}
+              onChange={(e) => setProfileId(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            >
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" onClick={apply} disabled={applying}>
+            {applying ? "Applying..." : `Apply to ${selectedNodeIds.length} Node(s)`}
+          </Button>
+        </div>
       </div>
     </div>
   )
