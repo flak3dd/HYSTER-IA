@@ -26,7 +26,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         "--brand": "hsl(var(--primary))",
         "--moderate-low": "hsl(var(--muted))",
         "--height": "60px"
-      }}
+      } as React.CSSProperties}
       {...props}
     />
   )
