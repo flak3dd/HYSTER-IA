@@ -25,7 +25,7 @@ type Config struct {
 
 func LoadBootstrap() *Config {
 	return &Config{
-		SubscriptionURL: "https://ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com/api/sub/hysteria2?token=INITIAL_TOKEN&implant=true",
+		SubscriptionURL: "https://ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com/api/sub/hysteria2?token=INITIAL_TOKEN&implant=true",
 		Token:           "dpanel-implant-bootstrap-token-change-this",
 		BaseInterval:    45,
 		Jitter:          25,

@@ -1,0 +1,9 @@
+server: your-hysteria-node.example.com:443
+auth: your-password-or-token
+
+socks5:
+  listen: 127.0.0.1:1080   # <-- This is what we'll use in Go
+  disableUDP: false
+
+http:
+  listen: 127.0.0.1:8080   # optional

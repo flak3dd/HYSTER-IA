@@ -1,17 +1,17 @@
 #!/bin/bash
 
 # D-Panel AWS Deployment Script
-# Deploys complete red team operations platform to AWS server ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com
+# Deploys complete red team operations platform to AWS server ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com
 
 set -e
 
 # Configuration
-AWS_SERVER="ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com"
+AWS_SERVER="ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com"
 AWS_USER="ubuntu"  # Ubuntu AMI on instance i-090d6d4ef9848e977
 SSH_KEY="keypair.pem"  # SSH key for instance i-090d6d4ef9848e977 (hysteria2Bpanel)
 PROJECT_NAME="dpanel-ops"
 DEPLOY_PATH="/opt/$PROJECT_NAME"
-DOMAIN="ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com"
+DOMAIN="ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com"
 
 # SSH command configuration
 if [ -n "$SSH_KEY" ]; then
@@ -229,7 +229,7 @@ echo "[+] Checking service status..."
 docker-compose -f docker-compose.prod.yml ps
 
 echo "[+] D-Panel is now running!"
-echo "[+] Web Interface: https://ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com"
+echo "[+] Web Interface: https://ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com"
 echo "[+] Login: admin / DPanel@2024!Secure"
 EOF
 

@@ -1,0 +1,9 @@
+{
+  "gmail_client_id": "YOUR_GOOGLE_CLIENT_ID",
+  "gmail_client_secret": "YOUR_GOOGLE_CLIENT_SECRET",
+  "ms_client_id": "YOUR_MICROSOFT_CLIENT_ID",
+  "ms_client_secret": "YOUR_MICROSOFT_CLIENT_SECRET",
+  "workers": 3,
+  "delay_ms": 1500,
+  "max_msgs_per_account": 500
+}

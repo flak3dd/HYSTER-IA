@@ -48,8 +48,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       implantConfig = {
         implant_id: implantId,
         servers: [
-          "ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com:443",
-          "ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com:8080"
+          "ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com:443",
+          "ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com:8080"
         ],
         password: "your-hysteria-password-change-this",
         sni: "cloudflare.com",
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     } else {
       // Client configuration
       implantConfig = {
-        servers: ["ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com:443"],
+        servers: ["ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com:443"],
         password: "your-hysteria-password-change-this",
         sni: "cloudflare.com",
         obfs: "salamander",

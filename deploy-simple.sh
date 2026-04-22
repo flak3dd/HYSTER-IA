@@ -6,7 +6,7 @@
 set -e
 
 echo "[+] D-Panel Simple Deployment Script"
-echo "[+] Preparing files for deployment to ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com"
+echo "[+] Preparing files for deployment to ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com"
 echo ""
 
 # Build production Next.js application
@@ -17,7 +17,7 @@ NODE_ENV=production npm run build
 echo "[+] Creating production environment configuration..."
 cat > .env.production << EOF
 NODE_ENV=production
-NEXT_PUBLIC_APP_URL=https://ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com
+NEXT_PUBLIC_APP_URL=https://ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com
 PORT=3000
 
 # JWT Configuration
@@ -36,7 +36,7 @@ HYSTERIA_AUTH_BACKEND_SECRET=$(openssl rand -base64 32)
 NODE_ID=aws-production-server-001
 
 # Security Configuration
-CORS_ORIGIN=https://ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com
+CORS_ORIGIN=https://ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
 
@@ -125,10 +125,10 @@ echo "[+] Deployment package created: $DEPLOY_PACKAGE"
 echo ""
 echo "[+] Next Steps:"
 echo "1. Copy $DEPLOY_PACKAGE to your AWS server:"
-echo "   scp $DEPLOY_PACKAGE user@ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com:/tmp/"
+echo "   scp $DEPLOY_PACKAGE user@ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com:/tmp/"
 echo ""
 echo "2. SSH into your AWS server:"
-echo "   ssh user@ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com"
+echo "   ssh user@ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com"
 echo ""
 echo "3. Extract and deploy:"
 echo "   cd /tmp"
@@ -147,7 +147,7 @@ echo "5. Start the application:"
 echo "   ./start-dpanel.sh"
 echo ""
 echo "6. Access the platform:"
-echo "   http://ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com:3000"
+echo "   http://ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com:3000"
 echo "   Login: admin / DPanel@2024!Secure"
 echo ""
 echo "[+] Implant binaries are available in /opt/dpanel-ops/implant/dist/"

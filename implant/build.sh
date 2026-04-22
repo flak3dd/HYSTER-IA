@@ -101,4 +101,4 @@ echo "[+] Built files:"
 ls -la $DIST_DIR/
 
 echo ""
-echo -e "${GREEN}[+] Ready for deployment to AWS server ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com${NC}"
+echo -e "${GREEN}[+] Ready for deployment to AWS server ec2-13-55-232-246.ap-southeast-2.compute.amazonaws.com${NC}"
