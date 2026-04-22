@@ -1,0 +1,63 @@
+# Hysteria2 Redirector - News Site Masquerade
+# Deploys on public-facing VPS that forwards to teamserver
+
+listen: :443
+
+# TLS Configuration - Let's Encrypt for legitimacy
+tls:
+  mode: acme
+  domains: 
+    - "news-global-today.com"
+    - "www.news-global-today.com"
+  email: "admin@news-global-today.com"
+
+# Obfuscation - Salamander protocol
+obfs:
+  type: salamander
+  password: "GlobalNews2024SecurePass"
+
+# Masquerade as CNN news site
+masquerade:
+  type: proxy
+  proxy:
+    url: https://edition.cnn.com
+    rewriteHost: true
+    headers:
+      User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      Accept-Language: "en-US,en;q=0.5"
+      Accept-Encoding: "gzip, deflate, br"
+      DNT: "1"
+      Connection: "keep-alive"
+      Upgrade-Insecure-Requests: "1"
+
+# Traffic Stats API for monitoring
+trafficStats:
+  listen: :25000
+  secret: "NewsSiteTrafficSecret2024"
+
+# Authentication - Forward to teamserver
+auth:
+  type: http
+  http:
+    url: https://teamserver.example.com/api/hysteria/auth
+    insecure: false
+
+# Bandwidth limits to appear legitimate
+bandwidth:
+  up: "100 Mbps"
+  down: "500 Mbps"
+
+# QUIC configuration for HTTP/3 masquerading
+quic:
+  initStreamReceiveWindow: 26843545
+  maxStreamReceiveWindow: 67108864
+  initConnReceiveWindow: 67108864
+  maxConnReceiveWindow: 134217728
+  maxIdleTimeout: 30s
+  keepAlivePeriod: 10s
+  disablePathMTUDiscovery: false
+
+# ACL for legitimate traffic patterns
+acl:
+  file: /etc/hysteria/acl-news.conf

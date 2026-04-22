@@ -39,3 +39,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# deployment artifacts
+dpanel-deploy-*.tar.gz
+ssl/
+cookies.txt
+logs/
+backups/
+
+# firebase credentials
+*-firebase-adminsdk-*.json
+ec2-user@ec2-*

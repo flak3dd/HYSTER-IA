@@ -34,6 +34,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 400 },
     )
   }
-  const task = createAndStartTask(parsed.data, principal.uid)
+  const task = createAndStartTask(parsed.data, principal.id)
   return NextResponse.json({ task }, { status: 201 })
 }

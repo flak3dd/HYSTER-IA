@@ -2,10 +2,8 @@
 
 import { useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { signOut } from "firebase/auth"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { clientAuth } from "@/lib/firebase/client"
 
 export function SignOutButton() {
   const router = useRouter()
@@ -14,8 +12,7 @@ export function SignOutButton() {
   function onClick() {
     startTransition(async () => {
       try {
-        await signOut(clientAuth()).catch(() => undefined)
-        const res = await fetch("/api/auth/session", { method: "DELETE" })
+        const res = await fetch("/api/auth/logout", { method: "POST" })
         if (!res.ok) {
           toast.error("sign-out failed")
           return

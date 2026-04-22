@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic"
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const admin = await verifyAdmin(req)
-    const conversations = await listConversations(admin.uid)
+    const conversations = await listConversations(admin.id)
     return NextResponse.json({ conversations })
   } catch (err) {
     return toErrorResponse(err)
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const admin = await verifyAdmin(req)
     const body = await req.json()
     const input = AiConversationCreate.parse(body)
-    const conversation = await createConversation(input, admin.uid)
+    const conversation = await createConversation(input, admin.id)
     return NextResponse.json({ conversation }, { status: 201 })
   } catch (err) {
     return toErrorResponse(err)

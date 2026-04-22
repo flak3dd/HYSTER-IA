@@ -30,7 +30,7 @@ export class SingleProxyStrategy implements ProxyStrategy {
 
   constructor(private readonly dispatcher: Dispatcher | null) {}
 
-  async resolve(ctx: ProxyResolveContext): Promise<Dispatcher | null> {
+  async resolve(_ctx: ProxyResolveContext): Promise<Dispatcher | null> {
     return this.dispatcher
   }
 }
@@ -61,7 +61,7 @@ export class RotatingProxyStrategy implements ProxyStrategy {
     private readonly selection: "round-robin" | "random" = "round-robin"
   ) {}
 
-  async resolve(ctx: ProxyResolveContext): Promise<Dispatcher | null> {
+  async resolve(_ctx: ProxyResolveContext): Promise<Dispatcher | null> {
     if (this.proxies.length === 0) return null
 
     // TODO: Dynamic proxy list from DB nodes (lib/db/nodes.ts), health-checked
@@ -92,19 +92,9 @@ export class RotatingProxyStrategy implements ProxyStrategy {
       return new ProxyAgent({ uri: rawUrl })
     }
     if (u.protocol === "socks5:" || u.protocol === "socks5h:") {
-      const socks = new SocksProxyAgent(rawUrl)
-      const agentWithCreate = socks as any
-      return new Agent({
-        connect: (opts: any, callback: any) => {
-          agentWithCreate.createConnection(
-            { hostname: opts.hostname, port: opts.port ?? 443 },
-            (err: any, socket: Socket | null) => {
-              if (err || !socket) callback(err || new Error("No socket"), null)
-              else callback(null, socket)
-            }
-          )
-        },
-      })
+      // For SOCKS5, use the SocksProxyAgent directly as the dispatcher
+      // This avoids complex undici Agent connector type issues
+      return new SocksProxyAgent(rawUrl) as unknown as Dispatcher
     }
     return null
   }

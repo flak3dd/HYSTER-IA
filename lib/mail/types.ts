@@ -43,3 +43,44 @@ export type MailAttachmentBody = {
   size: number
   checksum: string
 }
+
+/* ------------------------------------------------------------------ */
+/*  SMTP / Auto-test types                                            */
+/* ------------------------------------------------------------------ */
+
+export const SmtpConfig = z.object({
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535).default(587),
+  secure: z.boolean().default(false),
+  user: z.string().min(1),
+  password: z.string().min(1),
+  from: z.string().min(1).optional(),
+})
+export type SmtpConfig = z.infer<typeof SmtpConfig>
+
+export const SendTestPayload = z.object({
+  smtp: SmtpConfig,
+  to: z.string().email(),
+  subject: z.string().min(1).default("D-Panel Mail Test"),
+  body: z.string().min(1).default("This is an automated test message from D-Panel."),
+})
+export type SendTestPayload = z.infer<typeof SendTestPayload>
+
+export type MailTestResult = {
+  accountId: string
+  label: string | null
+  protocol: string
+  status: "pass" | "fail"
+  latencyMs: number
+  messageCount?: number
+  error?: string
+  testedAt: string
+}
+
+export type AutoTestState = {
+  enabled: boolean
+  intervalMinutes: number
+  lastRun: string | null
+  nextRun: string | null
+  results: MailTestResult[]
+}

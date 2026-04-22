@@ -14,7 +14,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const result = await runChat(
       input.conversationId,
       input.message,
-      admin.uid,
+      admin.id,
     )
     if (result.error) {
       return NextResponse.json(

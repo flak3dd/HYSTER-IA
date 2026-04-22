@@ -1,0 +1,328 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Operator {
+  id          String   @id @default(cuid())
+  username    String   @unique
+  password    String
+  role        String   @default("OPERATOR")
+  isActive    Boolean  @default(true)
+  permissions String   @default("[]")
+  skills      String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  operations      Operation[]      @relation("OperationOperator")
+  auditLogs       AuditLog[]
+  scheduledReports ScheduledReport[]
+  createdOperations Operation[] @relation("CreatedBy")
+  assignedTasks    Task[]         @relation("TaskAssignee")
+
+  @@map("operators")
+}
+
+model Operation {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  type        String   @default("PENETRATION_TEST")
+  priority    String   @default("MEDIUM")
+  status      String   @default("PLANNING")
+  team        String   @default("[]")
+  objectives  Objective[]
+  tasks       Task[]
+  deliverables Deliverable[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String
+  creator     Operator @relation("CreatedBy", fields: [createdBy], references: [id])
+
+  // Relations
+  executiveReports ExecutiveReport[]
+  technicalReports TechnicalReport[]
+  timelineReports  TimelineReport[]
+  reportPackages   ReportPackage[]
+  exfilPlans       ExfilPlan[]
+  intelligence     Intelligence[]
+  operatorId       String?
+  operator         Operator?  @relation("OperationOperator", fields: [operatorId], references: [id])
+
+  @@map("operations")
+}
+
+model Objective {
+  id          String @id @default(cuid())
+  title       String
+  description String
+  completed   Boolean @default(false)
+  operationId String
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@map("objectives")
+}
+
+model Task {
+  id            String   @id @default(cuid())
+  title         String
+  description   String
+  status        String   @default("PENDING")
+  priority      String   @default("MEDIUM")
+  assignedTo    String   @default("[]")
+  dependencies  String   @default("[]")
+  estimatedDuration Int
+  actualDuration Int?
+  operationId   String
+  operation     Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  assigneeId    String?
+  assignee      Operator?  @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("tasks")
+}
+
+model Deliverable {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  description String
+  status      String   @default("PENDING")
+  operationId String
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("deliverables")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  operatorId  String
+  action      String
+  resource    String
+  resourceId  String?
+  details     Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  operator    Operator @relation(fields: [operatorId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model ExecutiveReport {
+  id          String   @id @default(cuid())
+  title       String
+  operationId String
+  generatedAt DateTime @default(now())
+  period      Json
+  summary     Json
+  keyFindings Json
+  riskAssessment Json
+  recommendations Json
+  nextSteps   Json
+  appendix    Json
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@map("executive_reports")
+}
+
+model TechnicalReport {
+  id          String   @id @default(cuid())
+  title       String
+  operationId String
+  generatedAt DateTime @default(now())
+  methodology Json
+  findings    Json
+  vulnerabilities Json
+  exploits    Json
+  evidence    Json
+  tools       Json
+  conclusions Json
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@map("technical_reports")
+}
+
+model TimelineReport {
+  id          String   @id @default(cuid())
+  title       String
+  operationId String
+  generatedAt DateTime @default(now())
+  events      Json
+  milestones  Json
+  activities  Json
+  communications Json
+  decisions   Json
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@map("timeline_reports")
+}
+
+model ReportPackage {
+  id          String   @id @default(cuid())
+  operationId String
+  generatedAt DateTime @default(now())
+  reports     Json
+  evidence    Json
+  metadata    Json
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@map("report_packages")
+}
+
+model ScheduledReport {
+  id          String   @id @default(cuid())
+  operationId String
+  reportType  String
+  frequency   String
+  schedule    String
+  recipients  String   @default("[]")
+  options     Json?
+  isActive    Boolean  @default(true)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  operator    Operator @relation(fields: [createdBy], references: [id])
+
+  @@map("scheduled_reports")
+}
+
+model ExfilPlan {
+  id          String   @id @default(cuid())
+  operationId String
+  team        String   @default("[]")
+  data        Json
+  dataTypes   String   @default("[]")
+  methods     Json
+  status      String   @default("PLANNING")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@map("exfil_plans")
+}
+
+model Intelligence {
+  id          String   @id @default(cuid())
+  type        String
+  title       String
+  content     String
+  source      String
+  confidence  Int
+  relevance   Int
+  tags        String   @default("[]")
+  operationIds String   @default("[]")
+  sharedAt    DateTime @default(now())
+  operationId String?
+  operation   Operation? @relation(fields: [operationId], references: [id])
+
+  @@map("intelligence")
+}
+
+model TransportProtocol {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  type        String
+  config      Json
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("transport_protocols")
+}
+
+model Payload {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  loaderType  String
+  config      Json
+  obfuscated  Boolean  @default(false)
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("payloads")
+}
+
+model OSINTData {
+  id          String   @id @default(cuid())
+  type        String
+  target      String
+  data        Json
+  source      String
+  confidence  Int
+  collectedAt DateTime @default(now())
+
+  @@map("osint_data")
+}
+
+model NetworkMap {
+  id          String   @id @default(cuid())
+  target      String
+  topology    Json
+  services    Json
+  dataFlows   Json
+  scannedAt   DateTime @default(now())
+
+  @@map("network_maps")
+}
+
+model LotLTool {
+  id          String   @id @default(cuid())
+  name        String
+  binaryPath  String
+  description String
+  category    String
+  risk        String
+  createdAt   DateTime @default(now())
+
+  @@map("lotl_tools")
+}
+
+model ForensicsAction {
+  id          String   @id @default(cuid())
+  type        String
+  target      String
+  parameters  Json
+  status      String   @default("PENDING")
+  executedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@map("forensics_actions")
+}
+
+model ThreatIntel {
+  id          String   @id @default(cuid())
+  source      String
+  type        String
+  indicator   String
+  data        Json
+  confidence  Int
+  severity    String
+  createdAt   DateTime @default(now())
+
+  @@map("threat_intel")
+}
+
+model BehaviorPattern {
+  id          String   @id @default(cuid())
+  userId      String
+  pattern     Json
+  anomaly     Boolean  @default(false)
+  confidence  Float
+  detectedAt  DateTime @default(now())
+
+  @@map("behavior_patterns")
+}

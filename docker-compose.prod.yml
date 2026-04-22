@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  dpanel-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    env_file:
+      - .env.production
+    volumes:
+      - ./logs:/var/log/dpanel
+      - ./backups:/var/backups/dpanel
+    restart: unless-stopped
+    networks:
+      - dpanel-network
+
+networks:
+  dpanel-network:
+    driver: bridge
+
+volumes:
+  logs:
+  backups:

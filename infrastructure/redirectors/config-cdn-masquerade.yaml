@@ -1,0 +1,63 @@
+# Hysteria2 Redirector - CDN Masquerade
+# Deploys on public-facing VPS masquerading as Cloudflare CDN
+
+listen: :443
+
+# TLS Configuration - Wildcard certificate for CDN appearance
+tls:
+  mode: acme
+  domains: 
+    - "cdn-proxy-network.com"
+    - "*.cdn-proxy-network.com"
+  email: "admin@cdn-proxy-network.com"
+
+# Obfuscation - Salamander protocol
+obfs:
+  type: salamander
+  password: "CDNProxyNetwork2024Secure"
+
+# Masquerade as Cloudflare CDN
+masquerade:
+  type: proxy
+  proxy:
+    url: https://cloudflare.com
+    rewriteHost: true
+    headers:
+      User-Agent: "Mozilla/5.0 (compatible; Cloudflare-CDN/1.0)"
+      Accept: "*/*"
+      Accept-Encoding: "gzip, deflate, br"
+      CF-Ray: "random-ray-id"
+      CF-IPCountry: "US"
+      CF-Visitor: "{\"scheme\":\"https\"}"
+      X-Forwarded-For: "random-ip"
+
+# Traffic Stats API for monitoring
+trafficStats:
+  listen: :25000
+  secret: "CDNTrafficSecret2024"
+
+# Authentication - Forward to teamserver
+auth:
+  type: http
+  http:
+    url: https://teamserver.example.com/api/hysteria/auth
+    insecure: false
+
+# High bandwidth for CDN appearance
+bandwidth:
+  up: "1 Gbps"
+  down: "10 Gbps"
+
+# QUIC configuration optimized for CDN traffic
+quic:
+  initStreamReceiveWindow: 536870912
+  maxStreamReceiveWindow: 1073741824
+  initConnReceiveWindow: 1073741824
+  maxConnReceiveWindow: 2147483648
+  maxIdleTimeout: 60s
+  keepAlivePeriod: 30s
+  disablePathMTUDiscovery: false
+
+# CDN-specific ACL
+acl:
+  file: /etc/hysteria/acl-cdn.conf

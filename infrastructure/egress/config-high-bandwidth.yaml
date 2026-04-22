@@ -1,0 +1,60 @@
+# High-Bandwidth Egress Node Configuration
+# Used for LLM calls, data exfiltration, and high-volume operations
+
+listen: :1080
+
+# SOCKS5 proxy configuration
+protocol: socks5
+auth:
+  type: none
+  password: ""
+
+# Bandwidth configuration
+bandwidth:
+  up: "2 Gbps"
+  down: "10 Gbps"
+
+# Connection limits
+maxConnections: 1000
+timeout: 30s
+idleTimeout: 300s
+
+# Logging configuration
+logging:
+  level: info
+  file: /var/log/hysteria-egress.log
+  max-size: 100MB
+  max-files: 7
+
+# Health check endpoint
+health:
+  enabled: true
+  path: /health
+  port: 8080
+
+# Traffic monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    port: 9090
+  stats:
+    interval: 10s
+
+# Security settings
+security:
+  allowPrivateNetworks: false
+  allowedIPs:
+    - "0.0.0.0/0"
+  blockedIPs:
+    - "127.0.0.0/8"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+
+# DNS configuration
+dns:
+  servers:
+    - "8.8.8.8"
+    - "1.1.1.1"
+  timeout: 5s

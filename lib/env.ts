@@ -41,6 +41,8 @@ const ServerEnvSchema = z.object({
     .refine((s) => !s || s.split(",").every(url => /^(https?|socks5h?):\/\//.test(url.trim())), 
       "comma-separated http(s)/socks5h:// URLs"),
 
+  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+
   HYSTERIA_EGRESS_PROXY_URL: z
     .string()
     .regex(/^(https?|socks5h?):\/\/.+/, "must be http(s):// or socks5(h):// URL")
