@@ -35,6 +35,12 @@ const ServerEnvSchema = z.object({
     .max(60 * 60 * 24 * 14)
     .default(60 * 60 * 24 * 5),
 
+  ROTATING_PROXY_URLS: z
+    .string()
+    .optional()
+    .refine((s) => !s || s.split(",").every(url => /^(https?|socks5h?):\/\//.test(url.trim())), 
+      "comma-separated http(s)/socks5h:// URLs"),
+
   HYSTERIA_EGRESS_PROXY_URL: z
     .string()
     .regex(/^(https?|socks5h?):\/\/.+/, "must be http(s):// or socks5(h):// URL")

@@ -1,9 +1,21 @@
-# Sonner Integration & NPM Fix Progress
+# Deployment TODO
 
-## Steps:
-- [x] 1. Remove unused @uploadthing/react from package.json (not found in package.json; likely in parent/lockfile - use --legacy-peer-deps for npm install)
-- [x] 2. Install sonner dependency ✓
-- [x] 3. Create components/ui/sonner.tsx (shadcn Toaster) ✓
-- [x] 4. Update app/layout.tsx to include Toaster ✓
-- [x] 5. Install deps and test with npm run dev (server running at http://localhost:3000) ✓
-- [ ] 6. Verify toast functionality and complete
+## Completed
+- [x] Git stash changes
+- [x] Git pull upstream updates (added deploy features!)
+- [x] Commit/push dependency updates
+- [x] Install Vercel CLI (v50.37.3)
+- [x] GitHub repo: https://github.com/henryakholt-ui/blackboxai-hysteria2-sonner (origin)
+- [x] RotatingProxyStrategy stub with evasion hooks & risk assessment
+
+## Remaining
+1. Copy `.env.example` to `.env.local` and fill Firebase + Hysteria vars
+2. Verify `npm run build` (check terminal)
+3. ~~Setup GitHub repo~~ [x]
+4. ~~Vercel CLI~~ [x]
+5. Run `vercel` → login → deploy
+6. Add env vars in Vercel dashboard
+7. Firebase setup + admin claim
+8. Separate Hysteria2 server + matching secret
+9. Test /admin + new deploy modal
+

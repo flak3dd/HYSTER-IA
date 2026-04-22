@@ -2,7 +2,9 @@ import { Agent, ProxyAgent, type Dispatcher } from "undici"
 import { SocksProxyAgent } from "socks-proxy-agent"
 import type { Socket } from "node:net"
 import { serverEnv } from "@/lib/env"
-import { SingleProxyStrategy, type ProxyStrategy } from "@/lib/net/strategy"
+import type { ProxyStrategy } from "@/lib/net/strategy"
+import { RotatingProxyStrategy } from "@/lib/net/strategy"
+import { SingleProxyStrategy } from "@/lib/net/strategy"
 
 let cachedDispatcher: Dispatcher | null | undefined
 let cachedStrategy: ProxyStrategy | null = null
@@ -56,9 +58,22 @@ export function egressDispatcher(): Dispatcher | null {
 
 export function egressStrategy(): ProxyStrategy {
   if (cachedStrategy) return cachedStrategy
+
+  const env = serverEnv()
+  if (env.ROTATING_PROXY_URLS) {
+    // Comma-separated proxy URLs from env
+    const proxies = env.ROTATING_PROXY_URLS.split(",").map(s => s.trim()).filter(Boolean)
+    if (proxies.length > 0) {
+      cachedStrategy = new RotatingProxyStrategy(proxies)
+      return cachedStrategy
+    }
+  }
+
+  // Fallback to single
   cachedStrategy = new SingleProxyStrategy(egressDispatcher())
   return cachedStrategy
 }
+
 
 /** Test-only: drop cached dispatcher + strategy. */
 export function resetEgressCache(): void {
