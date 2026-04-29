@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -325,4 +325,143 @@ model BehaviorPattern {
   detectedAt  DateTime @default(now())
 
   @@map("behavior_patterns")
+}
+
+// ---------------------------------------------------------------------------
+// Models replacing Firebase Firestore collections & in-memory mock stores
+// ---------------------------------------------------------------------------
+
+model ClientUser {
+  id          String    @id @default(cuid())
+  displayName String
+  authToken   String    @unique
+  status      String    @default("active")
+  quotaBytes  BigInt?
+  usedBytes   BigInt    @default(0)
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  notes       String?
+
+  @@map("client_users")
+}
+
+model HysteriaNode {
+  id              String    @id @default(cuid())
+  name            String
+  hostname        String
+  region          String?
+  listenAddr      String    @default(":443")
+  status          String    @default("stopped")
+  tags            String    @default("[]")
+  provider        String?
+  profileId       String?
+  lastHeartbeatAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("nodes")
+}
+
+model HysteriaServerConfig {
+  id                  String   @id @default("current")
+  listen              String   @default(":443")
+  tls                 Json
+  obfs                Json?
+  bandwidth           Json?
+  masquerade          Json?
+  trafficStats        Json
+  authBackendUrl      String
+  authBackendInsecure Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
+
+  @@map("server_configs")
+}
+
+model UsageRecord {
+  id         String   @id @default(cuid())
+  userId     String
+  nodeId     String
+  tx         Int
+  rx         Int
+  capturedAt DateTime @default(now())
+
+  @@index([userId, capturedAt(sort: Desc)])
+  @@map("usage_records")
+}
+
+model Profile {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  description String   @default("")
+  nodeIds     String   @default("[]")
+  config      Json     @default("{}")
+  tags        String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+model AiConversation {
+  id        String       @id @default(cuid())
+  title     String       @default("New conversation")
+  createdBy String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  messages  AiMessage[]
+
+  @@index([createdBy, updatedAt(sort: Desc)])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String
+  content        String?
+  toolCalls      Json?
+  toolResult     Json?
+  sortOrder      Int
+  timestamp      DateTime       @default(now())
+
+  @@index([conversationId, sortOrder])
+  @@map("ai_messages")
+}
+
+model AgentTask {
+  id           String      @id @default(cuid())
+  status       String      @default("queued")
+  prompt       String
+  model        String
+  allowedTools String      @default("[]")
+  maxSteps     Int
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  finishedAt   DateTime?
+  createdBy    String
+  result       String?
+  error        String?
+  stepCount    Int         @default(0)
+  steps        AgentStep[]
+
+  @@map("agent_tasks")
+}
+
+model AgentStep {
+  id        String    @id @default(cuid())
+  taskId    String
+  task      AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  index     Int
+  kind      String
+  at        DateTime  @default(now())
+  content   String
+  tool      String?
+  arguments Json?
+  result    Json?
+
+  @@unique([taskId, index])
+  @@map("agent_steps")
 }

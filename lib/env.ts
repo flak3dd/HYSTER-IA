@@ -1,10 +1,8 @@
 import { z } from "zod"
 
 const ServerEnvSchema = z.object({
-  FIREBASE_PROJECT_ID: z.string().min(1).optional(),
-  FIREBASE_CLIENT_EMAIL: z.string().email().optional(),
-  FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
-  GOOGLE_APPLICATION_CREDENTIALS: z.string().min(1).optional(),
+  NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1).optional(),
 
   HYSTERIA_BIN: z.string().min(1).optional(),
   HYSTERIA_WORK_DIR: z.string().min(1).optional(),
@@ -22,11 +20,6 @@ const ServerEnvSchema = z.object({
 
   NODE_ID: z.string().min(1).default("default"),
 
-  NEXT_PUBLIC_FIREBASE_API_KEY: z.string().min(1).optional(),
-  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: z.string().min(1).optional(),
-  NEXT_PUBLIC_FIREBASE_PROJECT_ID: z.string().min(1).optional(),
-  NEXT_PUBLIC_FIREBASE_APP_ID: z.string().min(1).optional(),
-
   SESSION_COOKIE_NAME: z.string().min(1).default("__session"),
   SESSION_COOKIE_MAX_AGE_SECONDS: z.coerce
     .number()
@@ -40,8 +33,6 @@ const ServerEnvSchema = z.object({
     .optional()
     .refine((s) => !s || s.split(",").every(url => /^(https?|socks5h?):\/\//.test(url.trim())), 
       "comma-separated http(s)/socks5h:// URLs"),
-
-  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
 
   HYSTERIA_EGRESS_PROXY_URL: z
     .string()

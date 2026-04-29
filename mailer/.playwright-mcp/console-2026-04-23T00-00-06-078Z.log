@@ -1,0 +1,30 @@
+[     319ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[     331ms] [LOG] [HMR] connected @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[   76690ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[   76761ms] [LOG] [Fast Refresh] done in 153ms @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  101768ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  101777ms] [LOG] [HMR] connected @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  179094ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  179113ms] [LOG] [HMR] connected @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  210335ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  210346ms] [LOG] [HMR] connected @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  260313ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  260342ms] [LOG] [Fast Refresh] done in 131ms @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  276222ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  276306ms] [LOG] [Fast Refresh] done in 185ms @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  276408ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  276639ms] [LOG] [Fast Refresh] done in 332ms @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  283237ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  283250ms] [LOG] [Fast Refresh] done in 113ms @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  285201ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/api/admin/ai/conversations:0
+[  292510ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/api/admin/ai/conversations:0
+[  300341ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/api/admin/ai/conversations:0
+[  314124ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/api/admin/profiles:0
+[  316541ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/api/admin/profiles:0
+[  328482ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/api/admin/profiles:0
+[  329566ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/api/admin/profiles:0
+[  331601ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  332428ms] [LOG] [Fast Refresh] done in 927ms @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  343176ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/api/admin/profiles:0
+[  354317ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431
+[  354602ms] [LOG] [Fast Refresh] done in 387ms @ http://localhost:3002/_next/static/chunks/0za~_next_dist_0flbukq._.js:2431

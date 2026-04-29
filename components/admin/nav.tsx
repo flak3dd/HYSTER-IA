@@ -17,6 +17,7 @@ const LINKS = [
   { href: "/admin/analytics", label: "Analytics" },
   { href: "/admin/coordination", label: "Team Ops" },
   { href: "/admin/mail", label: "Mail Test" },
+  { href: "/admin/mail/migrator", label: "Migrator" },
   { href: "/admin/reports", label: "Reports" },
 ]
 

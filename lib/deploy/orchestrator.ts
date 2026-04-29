@@ -1,9 +1,10 @@
 import { randomUUID, randomBytes } from "node:crypto"
 import type { Deployment, DeploymentConfig, DeploymentStatus, DeploymentStep } from "./types"
-import { resolveProvider } from "./providers"
+import { resolveProviderAsync } from "./providers"
 import { generateSshKeyPair, waitForSsh, sshExec } from "./ssh"
 import { buildProvisionScript } from "./provision-script"
 import { createNode, updateNode } from "@/lib/db/nodes"
+import { getProfileById, resolveProfileConfig } from "@/lib/db/profiles"
 
 type StepListener = (step: DeploymentStep) => void
 
@@ -76,7 +77,7 @@ export async function startDeployment(config: DeploymentConfig): Promise<Deploym
 }
 
 async function runDeployment(id: string, config: DeploymentConfig): Promise<void> {
-  const provider = resolveProvider(config.provider)
+  const provider = await resolveProviderAsync(config.provider)
 
   // Generate SSH key pair
   emit(id, "creating_vps", "Generating SSH key pair...")
@@ -124,6 +125,27 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
 
   // Build and run provision script
   const trafficSecret = config.trafficStatsSecret ?? randomBytes(20).toString("hex")
+
+  // Resolve profile config if a profileId is set — profile values act as defaults
+  // that can be overridden by explicit DeploymentConfig fields
+  let profileObfsPassword = config.obfsPassword
+  let profileBandwidthUp = config.bandwidthUp
+  let profileBandwidthDown = config.bandwidthDown
+  if (config.profileId) {
+    try {
+      const profile = await getProfileById(config.profileId)
+      if (profile) {
+        const resolved = resolveProfileConfig(profile)
+        if (!profileObfsPassword && resolved.obfs) profileObfsPassword = resolved.obfs.password
+        if (!profileBandwidthUp && resolved.bandwidth?.up) profileBandwidthUp = resolved.bandwidth.up
+        if (!profileBandwidthDown && resolved.bandwidth?.down) profileBandwidthDown = resolved.bandwidth.down
+        emit(id, "provisioning", `Using profile "${profile.name}" config for provisioning`)
+      }
+    } catch {
+      emit(id, "provisioning", "Warning: could not resolve profile config, using defaults")
+    }
+  }
+
   const script = buildProvisionScript({
     domain: config.domain,
     ip,
@@ -131,10 +153,10 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     panelUrl: config.panelUrl,
     authBackendSecret: config.authBackendSecret,
     trafficStatsSecret: trafficSecret,
-    obfsPassword: config.obfsPassword,
+    obfsPassword: profileObfsPassword,
     email: config.email,
-    bandwidthUp: config.bandwidthUp,
-    bandwidthDown: config.bandwidthDown,
+    bandwidthUp: profileBandwidthUp,
+    bandwidthDown: profileBandwidthDown,
   })
 
   emit(id, "installing_hysteria", "Running Hysteria 2 installation script...")
@@ -175,8 +197,8 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     emit(id, "testing_connectivity", `Connectivity test warning: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  // Register node in Firestore
-  emit(id, "registering_node", "Registering node in Firestore...")
+  // Register node in database
+  emit(id, "registering_node", "Registering node in database...")
   try {
     const node = await createNode({
       name: config.name,
@@ -191,6 +213,7 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     await updateNode(node.id, {
       status: "running",
       lastHeartbeatAt: Date.now(),
+      profileId: config.profileId ?? null,
     })
     emit(id, "registering_node", `Node registered: ${node.id}`)
   } catch (err) {
@@ -208,7 +231,7 @@ export async function destroyDeployment(id: string): Promise<void> {
 
   emit(id, "destroying", "Destroying VPS...")
   try {
-    const provider = resolveProvider(deployment.config.provider)
+    const provider = await resolveProviderAsync(deployment.config.provider)
     await provider.destroyServer(deployment.vpsId)
   } catch (err) {
     emit(id, "failed", "Destroy failed", err instanceof Error ? err.message : String(err))

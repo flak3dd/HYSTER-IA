@@ -50,3 +50,6 @@ backups/
 # firebase credentials
 *-firebase-adminsdk-*.json
 ec2-user@ec2-*
+
+# provider keys (set via UI)
+/config/provider-keys.json

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { generateTokens, findUserByUsername } from '@/lib/auth/jwt'
+import { safeRedirectTarget } from '@/lib/auth/redirect'
 
 export async function POST(request: NextRequest) {
   try {
-    const { username, password } = await request.json()
+    const { username, password, next } = await request.json()
 
     if (!username || !password) {
       return NextResponse.json(
@@ -53,7 +54,7 @@ export async function POST(request: NextRequest) {
         role: operator.role,
         isActive: operator.isActive,
       },
-      redirect: '/admin'
+      redirect: safeRedirectTarget(next)
     })
 
     // Set access token cookie

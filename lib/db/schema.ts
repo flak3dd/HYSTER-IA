@@ -1,13 +1,5 @@
 import { z } from "zod"
 
-export const Collections = {
-  users: "users",
-  nodes: "nodes",
-  serverConfig: "serverConfig",
-  usageRecords: "usageRecords",
-  adminClaims: "adminClaims",
-} as const
-
 export const ClientUserStatus = z.enum(["active", "disabled", "expired"])
 export type ClientUserStatus = z.infer<typeof ClientUserStatus>
 
@@ -50,6 +42,7 @@ export const Node = z.object({
   status: NodeStatus.default("stopped"),
   tags: z.array(z.string().max(40)).default([]),
   provider: z.string().max(120).optional(),
+  profileId: z.string().nullable().default(null),
   lastHeartbeatAt: z.number().int().nullable().default(null),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
@@ -69,6 +62,7 @@ export type NodeCreate = z.infer<typeof NodeCreate>
 export const NodeUpdate = NodeCreate.partial().extend({
   status: NodeStatus.optional(),
   tags: z.array(z.string().max(40)).optional(),
+  profileId: z.string().nullable().optional(),
   lastHeartbeatAt: z.number().int().nullable().optional(),
 })
 export type NodeUpdate = z.infer<typeof NodeUpdate>

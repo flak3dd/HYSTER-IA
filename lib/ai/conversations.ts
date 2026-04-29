@@ -1,97 +1,118 @@
-import { randomUUID } from "node:crypto"
-import { adminFirestore } from "@/lib/firebase/admin"
+import { prisma } from "@/lib/db"
+import type { AiConversation as PrismaConv, AiMessage as PrismaMsg } from "@prisma/client"
 import {
   AiConversation,
   AiMessage,
   type AiConversationCreate,
 } from "@/lib/ai/types"
 
-const COLLECTION = "ai_conversations"
+type ConvWithMessages = PrismaConv & { messages: PrismaMsg[] }
 
-function col() {
-  return adminFirestore().collection(COLLECTION)
+function toMsgZod(row: PrismaMsg): AiMessage {
+  return {
+    role: row.role as AiMessage["role"],
+    content: row.content ?? null,
+    toolCalls: row.toolCalls ? (row.toolCalls as AiMessage["toolCalls"]) : undefined,
+    toolResult: row.toolResult ? (row.toolResult as AiMessage["toolResult"]) : undefined,
+    timestamp: row.timestamp.getTime(),
+  }
 }
 
-function now(): number {
-  return Date.now()
+function toConvZod(row: ConvWithMessages): AiConversation {
+  return {
+    id: row.id,
+    title: row.title,
+    messages: row.messages.map(toMsgZod),
+    createdBy: row.createdBy,
+    createdAt: row.createdAt.getTime(),
+    updatedAt: row.updatedAt.getTime(),
+  }
 }
 
 export async function listConversations(
   createdBy: string,
   limit = 50,
 ): Promise<AiConversation[]> {
-  const snap = await col()
-    .where("createdBy", "==", createdBy)
-    .orderBy("updatedAt", "desc")
-    .limit(limit)
-    .get()
-  return snap.docs.map((d) =>
-    AiConversation.parse({ id: d.id, ...d.data() }),
-  )
+  const rows = await prisma.aiConversation.findMany({
+    where: { createdBy },
+    orderBy: { updatedAt: "desc" },
+    take: limit,
+    include: { messages: { orderBy: { sortOrder: "asc" } } },
+  })
+  return rows.map(toConvZod)
 }
 
 export async function getConversation(
   id: string,
 ): Promise<AiConversation | null> {
-  const doc = await col().doc(id).get()
-  if (!doc.exists) return null
-  return AiConversation.parse({ id: doc.id, ...doc.data() })
+  const row = await prisma.aiConversation.findUnique({
+    where: { id },
+    include: { messages: { orderBy: { sortOrder: "asc" } } },
+  })
+  return row ? toConvZod(row) : null
 }
 
 export async function createConversation(
   input: AiConversationCreate,
   createdBy: string,
 ): Promise<AiConversation> {
-  const id = randomUUID()
-  const record = AiConversation.parse({
-    id,
-    title: input.title ?? "New conversation",
-    messages: [],
-    createdBy,
-    createdAt: now(),
-    updatedAt: now(),
+  const row = await prisma.aiConversation.create({
+    data: {
+      title: input.title ?? "New conversation",
+      createdBy,
+    },
+    include: { messages: true },
   })
-  const { id: _omit, ...rest } = record
-  void _omit
-  await col().doc(id).set(rest)
-  return record
+  return toConvZod(row)
 }
 
 export async function appendMessages(
   id: string,
   messages: AiMessage[],
 ): Promise<AiConversation | null> {
-  const ref = col().doc(id)
-  const doc = await ref.get()
-  if (!doc.exists) return null
-
-  const existing = AiConversation.parse({ id: doc.id, ...doc.data() })
-  const updated = [...existing.messages, ...messages]
-
-  await ref.update({ messages: updated, updatedAt: now() })
-
-  return AiConversation.parse({
-    ...existing,
-    messages: updated,
-    updatedAt: now(),
+  const existing = await prisma.aiConversation.findUnique({
+    where: { id },
+    include: { messages: { orderBy: { sortOrder: "desc" }, take: 1 } },
   })
+  if (!existing) return null
+
+  const startOrder = existing.messages.length > 0 ? existing.messages[0].sortOrder + 1 : 0
+
+  await prisma.$transaction([
+    ...messages.map((msg, i) =>
+      prisma.aiMessage.create({
+        data: {
+          conversationId: id,
+          role: msg.role,
+          content: msg.content,
+          toolCalls: msg.toolCalls ? (msg.toolCalls as object[]) : undefined,
+          toolResult: msg.toolResult ? (msg.toolResult as object) : undefined,
+          sortOrder: startOrder + i,
+          timestamp: new Date(msg.timestamp),
+        },
+      }),
+    ),
+    prisma.aiConversation.update({ where: { id }, data: { updatedAt: new Date() } }),
+  ])
+
+  return getConversation(id)
 }
 
 export async function updateConversationTitle(
   id: string,
   title: string,
 ): Promise<boolean> {
-  const ref = col().doc(id)
-  const doc = await ref.get()
-  if (!doc.exists) return false
-  await ref.update({ title, updatedAt: now() })
+  const existing = await prisma.aiConversation.findUnique({ where: { id } })
+  if (!existing) return false
+  await prisma.aiConversation.update({ where: { id }, data: { title } })
   return true
 }
 
 export async function deleteConversation(id: string): Promise<boolean> {
-  const ref = col().doc(id)
-  const doc = await ref.get()
-  if (!doc.exists) return false
-  await ref.delete()
-  return true
+  try {
+    await prisma.aiConversation.delete({ where: { id } })
+    return true
+  } catch {
+    return false
+  }
 }

@@ -1,5 +1,6 @@
 import { stringify as yamlStringify } from "yaml"
 import type { ClientUser, Node, ServerConfig } from "@/lib/db/schema"
+import type { ResolvedProfileConfig } from "@/lib/db/profiles"
 
 export type ClientConfigOptions = {
   // serverHost:port — defaults to node.hostname + node.listenAddr port
@@ -11,6 +12,9 @@ export type ClientConfigOptions = {
   // generate SOCKS5 + HTTP proxy client listen ports (useful for egress proxy pattern)
   socks5Listen?: string
   httpListen?: string
+  // resolved profile config — takes precedence over global ServerConfig for
+  // obfs, bandwidth, and client-side settings
+  profileConfig?: ResolvedProfileConfig
 }
 
 export type ClientConfigYamlObject = {
@@ -38,6 +42,7 @@ export function buildClientYamlObject(
 ): ClientConfigYamlObject {
   const port = parseListenPort(node.listenAddr) ?? parseListenPort(server?.listen ?? "") ?? 443
   const serverAddr = opts.serverAddr ?? `${node.hostname}:${port}`
+  const pc = opts.profileConfig
 
   const obj: ClientConfigYamlObject = {
     server: serverAddr,
@@ -47,14 +52,21 @@ export function buildClientYamlObject(
   // Infer TLS SNI from node hostname (common case). Insecure flag false by default.
   obj.tls = { sni: node.hostname, insecure: false }
 
-  if (server?.obfs) {
+  // Obfuscation: profile config takes precedence over global server config
+  if (pc?.obfs) {
+    obj.obfs = {
+      type: "salamander",
+      salamander: { password: pc.obfs.password },
+    }
+  } else if (server?.obfs) {
     obj.obfs = {
       type: "salamander",
       salamander: { password: server.obfs.password },
     }
   }
 
-  const bandwidth = opts.bandwidth ?? (server?.bandwidth ?? undefined)
+  // Bandwidth: explicit opts > profile config > global server config
+  const bandwidth = opts.bandwidth ?? pc?.bandwidth ?? (server?.bandwidth ?? undefined)
   if (bandwidth && (bandwidth.up || bandwidth.down)) {
     const bw: { up?: string; down?: string } = {}
     if (bandwidth.up) bw.up = bandwidth.up
@@ -62,8 +74,13 @@ export function buildClientYamlObject(
     obj.bandwidth = bw
   }
 
-  if (opts.lazy) obj.lazy = true
-  if (opts.socks5Listen) obj.socks5 = { listen: opts.socks5Listen }
+  // Lazy: explicit opts > profile config
+  if (opts.lazy || pc?.lazyStart) obj.lazy = true
+
+  // SOCKS5: explicit opts > profile config
+  const socks = opts.socks5Listen ?? pc?.socksListen
+  if (socks) obj.socks5 = { listen: socks }
+
   if (opts.httpListen) obj.http = { listen: opts.httpListen }
 
   return obj
@@ -94,17 +111,20 @@ export function renderClientUri(
   user: ClientUser,
   node: Node,
   server: ServerConfig | null,
+  profileConfig?: ResolvedProfileConfig,
 ): string {
   const port = parseListenPort(node.listenAddr) ?? parseListenPort(server?.listen ?? "") ?? 443
   const qs = new URLSearchParams()
   qs.set("sni", node.hostname)
   qs.set("insecure", "0")
-  if (server?.obfs) {
+  const obfs = profileConfig?.obfs ?? server?.obfs
+  if (obfs) {
     qs.set("obfs", "salamander")
-    qs.set("obfs-password", server.obfs.password)
+    qs.set("obfs-password", obfs.password)
   }
-  if (server?.bandwidth?.up) qs.set("upmbps", bandwidthToMbps(server.bandwidth.up))
-  if (server?.bandwidth?.down) qs.set("downmbps", bandwidthToMbps(server.bandwidth.down))
+  const bw = profileConfig?.bandwidth ?? server?.bandwidth
+  if (bw?.up) qs.set("upmbps", bandwidthToMbps(bw.up))
+  if (bw?.down) qs.set("downmbps", bandwidthToMbps(bw.down))
   const label = encodeURIComponent(`${node.name} · ${user.displayName}`)
   return `hysteria2://${encodeURIComponent(user.authToken)}@${node.hostname}:${port}?${qs.toString()}#${label}`
 }
@@ -125,9 +145,9 @@ function bandwidthToMbps(raw: string): string {
  * one per (user, node) pair. Compatible with subscription loaders in v2rayN, Nekoray, etc.
  */
 export function renderSubscription(
-  entries: Array<{ user: ClientUser; node: Node; server: ServerConfig | null }>,
+  entries: Array<{ user: ClientUser; node: Node; server: ServerConfig | null; profileConfig?: ResolvedProfileConfig }>,
 ): string {
-  const lines = entries.map((e) => renderClientUri(e.user, e.node, e.server))
+  const lines = entries.map((e) => renderClientUri(e.user, e.node, e.server, e.profileConfig))
   // subscription blobs are base64-encoded UTF-8 text, NOT URL-encoded
   return Buffer.from(lines.join("\n"), "utf-8").toString("base64")
 }
@@ -154,6 +174,7 @@ function buildClashMetaProxy(
   user: ClientUser,
   node: Node,
   server: ServerConfig | null,
+  profileConfig?: ResolvedProfileConfig,
 ): ClashMetaProxy {
   const port = parseListenPort(node.listenAddr) ?? parseListenPort(server?.listen ?? "") ?? 443
   const p: ClashMetaProxy = {
@@ -165,19 +186,21 @@ function buildClashMetaProxy(
     sni: node.hostname,
     "skip-cert-verify": false,
   }
-  if (server?.obfs) {
+  const obfs = profileConfig?.obfs ?? server?.obfs
+  if (obfs) {
     p.obfs = "salamander"
-    p["obfs-password"] = server.obfs.password
+    p["obfs-password"] = obfs.password
   }
-  if (server?.bandwidth?.up) p.up = server.bandwidth.up
-  if (server?.bandwidth?.down) p.down = server.bandwidth.down
+  const bw = profileConfig?.bandwidth ?? server?.bandwidth
+  if (bw?.up) p.up = bw.up
+  if (bw?.down) p.down = bw.down
   return p
 }
 
 export function renderClashMetaYaml(
-  entries: Array<{ user: ClientUser; node: Node; server: ServerConfig | null }>,
+  entries: Array<{ user: ClientUser; node: Node; server: ServerConfig | null; profileConfig?: ResolvedProfileConfig }>,
 ): string {
-  const proxies = entries.map((e) => buildClashMetaProxy(e.user, e.node, e.server))
+  const proxies = entries.map((e) => buildClashMetaProxy(e.user, e.node, e.server, e.profileConfig))
   const names = proxies.map((p) => p.name)
   const doc = {
     proxies,
@@ -220,6 +243,7 @@ function buildSingBoxOutbound(
   user: ClientUser,
   node: Node,
   server: ServerConfig | null,
+  profileConfig?: ResolvedProfileConfig,
 ): SingBoxOutbound {
   const port = parseListenPort(node.listenAddr) ?? parseListenPort(server?.listen ?? "") ?? 443
   const ob: SingBoxOutbound = {
@@ -230,24 +254,26 @@ function buildSingBoxOutbound(
     password: user.authToken,
     tls: { enabled: true, server_name: node.hostname, insecure: false },
   }
-  if (server?.obfs) {
-    ob.obfs = { type: "salamander", password: server.obfs.password }
+  const obfs = profileConfig?.obfs ?? server?.obfs
+  if (obfs) {
+    ob.obfs = { type: "salamander", password: obfs.password }
   }
-  if (server?.bandwidth?.up) {
-    const mbps = Number.parseInt(bandwidthToMbps(server.bandwidth.up), 10)
+  const bw = profileConfig?.bandwidth ?? server?.bandwidth
+  if (bw?.up) {
+    const mbps = Number.parseInt(bandwidthToMbps(bw.up), 10)
     if (!Number.isNaN(mbps)) ob.up_mbps = mbps
   }
-  if (server?.bandwidth?.down) {
-    const mbps = Number.parseInt(bandwidthToMbps(server.bandwidth.down), 10)
+  if (bw?.down) {
+    const mbps = Number.parseInt(bandwidthToMbps(bw.down), 10)
     if (!Number.isNaN(mbps)) ob.down_mbps = mbps
   }
   return ob
 }
 
 export function renderSingBoxJson(
-  entries: Array<{ user: ClientUser; node: Node; server: ServerConfig | null }>,
+  entries: Array<{ user: ClientUser; node: Node; server: ServerConfig | null; profileConfig?: ResolvedProfileConfig }>,
 ): string {
-  const outbounds = entries.map((e) => buildSingBoxOutbound(e.user, e.node, e.server))
+  const outbounds = entries.map((e) => buildSingBoxOutbound(e.user, e.node, e.server, e.profileConfig))
   const tags = outbounds.map((o) => o.tag)
   const doc = {
     outbounds: [
