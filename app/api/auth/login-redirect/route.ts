@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { getOperatorFromAccessToken } from '@/lib/auth/jwt'
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
     const store = await cookies()
     const accessToken = store.get('access_token')?.value

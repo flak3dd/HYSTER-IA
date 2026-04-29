@@ -13,7 +13,7 @@ const TaskRequestSchema = z.object({
 const pendingTasks = new Map<string, Array<{
   id: string
   type: string
-  args: Record<string, any>
+  args: Record<string, unknown>
   created_at: number
   timeout: number
 }>>()
@@ -23,7 +23,7 @@ const taskCounter = { value: 0 }
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json()
-    const { implant_id, last_seen } = TaskRequestSchema.parse(body)
+    const { implant_id } = TaskRequestSchema.parse(body)
 
     // Get pending tasks for this implant
     const tasks = pendingTasks.get(implant_id) || []
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 // Helper function to add tasks (called from other API endpoints)
-export function addTask(implantId: string, taskType: string, args: Record<string, any>) {
+export function addTask(implantId: string, taskType: string, args: Record<string, unknown>) {
   const tasks = pendingTasks.get(implantId) || []
   const task = {
     id: `task-${++taskCounter.value}`,

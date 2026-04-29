@@ -8,7 +8,7 @@ const TaskResultSchema = z.object({
   task_id: z.string(),
   implant_id: z.string(),
   status: z.string(),
-  result: z.any().optional(),
+  result: z.unknown().optional(),
   error: z.string().optional(),
   timestamp: z.number(),
   duration: z.number(),
@@ -19,7 +19,7 @@ const taskResults = new Map<string, Array<{
   task_id: string
   implant_id: string
   status: string
-  result?: any
+  result?: unknown
   error?: string
   timestamp: number
   duration: number

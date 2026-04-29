@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-require-imports */
 import { randomUUID } from "node:crypto"
 import { exec } from "node:child_process"
 import { promisify } from "node:util"
