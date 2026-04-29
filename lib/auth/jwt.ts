@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { NextRequest } from 'next/server'
+import { prisma } from '@/lib/db'
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'your-secret-key-change-in-production'
@@ -17,7 +18,7 @@ export interface JWTPayload {
   type: 'access' | 'refresh'
   iat?: number
   exp?: number
-  [key: string]: any // Add index signature for jose compatibility
+  [key: string]: unknown
 }
 
 export interface Operator {
@@ -32,30 +33,42 @@ export interface Operator {
   updatedAt: Date
 }
 
-/**
- * Generate access and refresh tokens for an operator
- */
-// Temporary in-memory user store (replace with database later)
-const users = new Map([
-  ['admin', {
-    id: 'admin-001',
-    username: 'admin',
-    password: '$2b$12$bgMOb9gOYQ6UQmeFM14wzucoxjl7o3.QfViQubBA7yLR22bHna716', // 'admin123' hashed
-    role: 'ADMIN',
-    isActive: true,
-    permissions: ['ALL'],
-    skills: ['Red Team Operations', 'Penetration Testing', 'Security Assessment'],
-    createdAt: new Date(),
-    updatedAt: new Date()
-  }]
-])
+function parseStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+async function findOperatorById(id: string): Promise<Operator | null> {
+  const operator = await prisma.operator.findUnique({ where: { id } })
+  if (!operator) return null
+
+  return {
+    ...operator,
+    permissions: parseStringArray(operator.permissions),
+    skills: parseStringArray(operator.skills),
+  }
+}
+
+async function findOperatorByUsername(username: string): Promise<Operator | null> {
+  const operator = await prisma.operator.findUnique({ where: { username } })
+  if (!operator) return null
+
+  return {
+    ...operator,
+    permissions: parseStringArray(operator.permissions),
+    skills: parseStringArray(operator.skills),
+  }
+}
 
 export async function generateTokens(operatorId: string): Promise<{
   accessToken: string
   refreshToken: string
 }> {
-  // Find operator in memory store
-  const operator = Array.from(users.values()).find(u => u.id === operatorId)
+  const operator = await findOperatorById(operatorId)
 
   if (!operator || !operator.isActive) {
     throw new Error('Operator not found or inactive')
@@ -97,7 +110,7 @@ export async function verifyAccessToken(token: string): Promise<JWTPayload> {
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET)
     return payload as JWTPayload
-  } catch (error) {
+  } catch {
     throw new Error('Invalid access token')
   }
 }
@@ -109,7 +122,7 @@ export async function verifyRefreshToken(token: string): Promise<JWTPayload> {
   try {
     const { payload } = await jwtVerify(token, JWT_REFRESH_SECRET)
     return payload as JWTPayload
-  } catch (error) {
+  } catch {
     throw new Error('Invalid refresh token')
   }
 }
@@ -124,7 +137,7 @@ export async function getOperatorFromAccessToken(token: string): Promise<Operato
     throw new Error('Invalid token type')
   }
 
-  const operator = Array.from(users.values()).find(u => u.id === payload.id)
+  const operator = await findOperatorById(payload.id)
 
   if (!operator || !operator.isActive) {
     throw new Error('Operator not found or inactive')
@@ -157,8 +170,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
     throw new Error('Invalid token type')
   }
 
-  // Verify operator still exists and is active
-  const operator = Array.from(users.values()).find(u => u.id === payload.id)
+  const operator = await findOperatorById(payload.id)
 
   if (!operator || !operator.isActive) {
     throw new Error('Operator not found or inactive')
@@ -180,9 +192,8 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
   return newAccessToken
 }
 
-// Helper function to find user by username
 export async function findUserByUsername(username: string): Promise<Operator | null> {
-  return Array.from(users.values()).find(u => u.username === username) || null
+  return findOperatorByUsername(username)
 }
 
 /**

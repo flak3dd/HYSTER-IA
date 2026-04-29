@@ -1,0 +1,173 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "D D-Panel Ops" [ref=e5] [cursor=pointer]:
+        - /url: /admin
+        - generic [ref=e6]: D
+        - generic [ref=e7]: D-Panel Ops
+      - link "Command Center" [ref=e9] [cursor=pointer]:
+        - /url: /admin
+        - img [ref=e10]
+        - text: Command Center
+      - navigation [ref=e15]:
+        - generic [ref=e16]:
+          - button "Recon" [ref=e17]:
+            - generic [ref=e18]: Recon
+            - img [ref=e20]
+          - generic [ref=e22]:
+            - link "OSINT Intelligence gathering" [ref=e23] [cursor=pointer]:
+              - /url: /admin/osint
+              - generic [ref=e24]: OSINT
+              - generic [ref=e25]: Intelligence gathering
+            - link "Network Mapping Passive recon" [ref=e26] [cursor=pointer]:
+              - /url: /admin/network
+              - generic [ref=e27]: Network Mapping
+              - generic [ref=e28]: Passive recon
+            - link "Threat Intel IOC feeds" [ref=e29] [cursor=pointer]:
+              - /url: /admin/threat
+              - generic [ref=e30]: Threat Intel
+              - generic [ref=e31]: IOC feeds
+        - generic [ref=e32]:
+          - button "Infrastructure" [ref=e33]:
+            - generic [ref=e34]: Infrastructure
+            - img [ref=e36]
+          - generic [ref=e38]:
+            - link "Nodes Server fleet" [ref=e39] [cursor=pointer]:
+              - /url: /admin/nodes
+              - generic [ref=e40]: Nodes
+              - generic [ref=e41]: Server fleet
+            - link "Protocols Transport config" [ref=e42] [cursor=pointer]:
+              - /url: /admin/transport
+              - generic [ref=e43]: Protocols
+              - generic [ref=e44]: Transport config
+            - link "Configs Client configs" [ref=e45] [cursor=pointer]:
+              - /url: /admin/configs
+              - generic [ref=e46]: Configs
+              - generic [ref=e47]: Client configs
+            - link "Deployment Infra management" [ref=e48] [cursor=pointer]:
+              - /url: /admin/infrastructure
+              - generic [ref=e49]: Deployment
+              - generic [ref=e50]: Infra management
+        - generic [ref=e51]:
+          - button "Weaponize" [ref=e52]:
+            - generic [ref=e53]: Weaponize
+            - img [ref=e55]
+          - generic [ref=e57]:
+            - link "Payloads Payload generation" [ref=e58] [cursor=pointer]:
+              - /url: /admin/payloads
+              - generic [ref=e59]: Payloads
+              - generic [ref=e60]: Payload generation
+            - link "LotL Arsenal Living off the land" [ref=e61] [cursor=pointer]:
+              - /url: /admin/lotl
+              - generic [ref=e62]: LotL Arsenal
+              - generic [ref=e63]: Living off the land
+            - link "Profiles C2 profiles" [ref=e64] [cursor=pointer]:
+              - /url: /admin/profiles
+              - generic [ref=e65]: Profiles
+              - generic [ref=e66]: C2 profiles
+        - generic [ref=e67]:
+          - button "Deliver" [ref=e68]:
+            - generic [ref=e69]: Deliver
+            - img [ref=e71]
+          - generic [ref=e73]:
+            - link "Mail Ops Phishing & mail" [ref=e74] [cursor=pointer]:
+              - /url: /admin/mail
+              - generic [ref=e75]: Mail Ops
+              - generic [ref=e76]: Phishing & mail
+            - link "Migrator IMAP XOAUTH2 migration" [ref=e77] [cursor=pointer]:
+              - /url: /admin/mail/migrator
+              - generic [ref=e78]: Migrator
+              - generic [ref=e79]: IMAP XOAUTH2 migration
+            - link "Agents LLM-driven tasks" [ref=e80] [cursor=pointer]:
+              - /url: /admin/agents
+              - generic [ref=e81]: Agents
+              - generic [ref=e82]: LLM-driven tasks
+        - generic [ref=e83]:
+          - button "Operate" [ref=e84]:
+            - generic [ref=e85]: Operate
+            - img [ref=e87]
+          - generic [ref=e89]:
+            - link "Team Ops Multi-operator" [ref=e90] [cursor=pointer]:
+              - /url: /admin/coordination
+              - generic [ref=e91]: Team Ops
+              - generic [ref=e92]: Multi-operator
+            - link "Anti-Forensics Evidence control" [ref=e93] [cursor=pointer]:
+              - /url: /admin/forensics
+              - generic [ref=e94]: Anti-Forensics
+              - generic [ref=e95]: Evidence control
+            - link "AI Assistant Config assistant" [ref=e96] [cursor=pointer]:
+              - /url: /admin/ai
+              - generic [ref=e97]: AI Assistant
+              - generic [ref=e98]: Config assistant
+        - generic [ref=e99]:
+          - button "Report" [ref=e100]:
+            - generic [ref=e101]: Report
+            - img [ref=e103]
+          - generic [ref=e105]:
+            - link "Analytics Behavioral analysis" [ref=e106] [cursor=pointer]:
+              - /url: /admin/analytics
+              - generic [ref=e107]: Analytics
+              - generic [ref=e108]: Behavioral analysis
+            - link "Reports Auto-generated" [ref=e109] [cursor=pointer]:
+              - /url: /admin/reports
+              - generic [ref=e110]: Reports
+              - generic [ref=e111]: Auto-generated
+      - paragraph [ref=e113]: "Workflow: Recon → Report"
+    - generic [ref=e114]:
+      - banner [ref=e115]:
+        - generic [ref=e116]: admin (ADMIN)
+        - button "Sign out" [ref=e117]
+      - main [ref=e118]:
+        - generic [ref=e119]:
+          - generic [ref=e120]:
+            - heading "IMAP Attachment Migrator" [level=1] [ref=e121]
+            - paragraph [ref=e122]: Download email attachments via IMAP. Uses App Passwords for Gmail / Microsoft, or regular passwords for other providers.
+          - generic [ref=e123]:
+            - generic [ref=e124]:
+              - generic [ref=e126]:
+                - generic [ref=e127]:
+                  - heading "Settings" [level=3] [ref=e128]
+                  - paragraph [ref=e129]: Worker concurrency and rate limiting
+                - button "Save" [ref=e130]
+              - generic [ref=e131]:
+                - generic [ref=e132]:
+                  - generic [ref=e133]:
+                    - text: Workers
+                    - spinbutton [ref=e134]: "3"
+                  - generic [ref=e135]:
+                    - text: Delay (ms)
+                    - spinbutton [ref=e136]: "1500"
+                  - generic [ref=e137]:
+                    - text: Max Messages
+                    - spinbutton [ref=e138]: "500"
+                - generic [ref=e139]:
+                  - paragraph [ref=e140]: App Password Setup
+                  - generic [ref=e141]:
+                    - paragraph [ref=e142]: "Gmail: Enable 2-Step Verification, then generate an App Password at myaccount.google.com/apppasswords"
+                    - paragraph [ref=e143]: "Microsoft: Go to account.microsoft.com/security and create an app password"
+                    - paragraph [ref=e144]: "Yahoo: Go to login.yahoo.com/account/security and generate an app password"
+                    - paragraph [ref=e145]: "Other: Use your regular IMAP password"
+            - generic [ref=e146]:
+              - generic [ref=e148]:
+                - generic [ref=e149]:
+                  - heading "Accounts" [level=3] [ref=e150]
+                  - paragraph [ref=e151]: 271 lines
+                - generic [ref=e152]: email:password
+              - textbox "# One account per line — email:app_password alice@gmail.com:abcd efgh ijkl mnop bob@outlook.com:myapppassword user@myserver.com:regularpassword" [ref=e154]:
+                - /placeholder: "# One account per line — email:app_password\nalice@gmail.com:abcd efgh ijkl mnop\nbob@outlook.com:myapppassword\nuser@myserver.com:regularpassword"
+                - text: nferencing.com.au:m4cfgntw bmich44@eq.edu.au:sasha125 charlie@everythingid.com.au:sqrain130 john.matta@nodeone.com.au:wahib12345! edward@martin.com.au:p@55w0rd jac0016@vic.edu.au:abishua nodeone.support@comcoms.com.au:logical2016 james.barsden.83.cpe@node1.com.au:logical2016 dean.niehsner@nt.gov.au:formcomplete_pw james.alker@henleyhs.sa.edu.au:jalker06 michael.okine@henleyhs.sa.edu.au:19042001 jaydan.hanshaw@sydstu.catholic.edu.au:jaydan2001 admin@yellowfin.com.au:test scanner@ausdrillcloud.com.au:ausdr!ll blay@cuttingedge.com.au:supermetroid94 bfreshwater@mybce.catholic.edu.au:fpa2qq robertzh@ggs.vic.edu.au:zhangzhecheng122 sam.farhan@dpie.nsw.gov.au:overachiever360 baxter.capp@education.nsw.gov.au:narrabri2390 bjlewh@schools.vic.edu.au:poopbut7 bpalfram@usc.edu.au:bodhi1313 nigel.eaves@abs.gov.au:nbnjpjara40 josh_marsden@amp.com.au:daily.bugl3 emilyl@gemconcepts.com.au:purple12! tanmaya@student.unimelb.edu.au:hahaha123 alex.yan2@education.nsw.gov.au:alexyan2 darren@biostim.com.au:poka1234# s3384014@student.rmit.edu.au:fangzj8686626 s3384014@student.rmit.edu.au:qjgc445jg dipika@media365.com.au:dipika@123 cameron@supergeek.com.au:13g33k13g33k$ support@supergeek.com.au:b23051998b johnrayner@optusnet.com.au:immortal zuel@faqinteractive.com.au:gxmpmyg3 info@dockezy.com.au:byag30_2 info@floatingdock.com.au:msx3q0^1 steve@ezydigitalmarketing.com.au:ifc91f9# admin@freocarwash.com.au:4i?3frj5 info@anselpropertyinspections.com.au:6mt5q7~b info@awals.com.au:inqq255! info@freocarwash.com.au:cvk3$0e7 info@incredibleclean.com.au:ap4i?00p info@mahersfencing.com.au:wrn4j^92 peter@awals.com.au:7vxze62^ william@ezydigitalmarketing.com.au:oaz84j_7 contactus@mephone.com.au:-j#xmrwxzdg_gnv2 tokyo@faqi.com.au:2157.11030 kerwin.ang@solgen.com.au:drnk14me2! ewa.lindelof@solgen.com.au:cristian1234 jcorr@stantons.com.au:stantons2023@ jethro.clayton@smservcorp.com.au:123456 jzhu16@salesian.vic.edu.au:jacky86871 maloo@spin.net.au:maloo_2010 agerje@shckyneton.catholic.edu.au:ja-2c2c7h chiu@bluebungalow.com.au:lulu1221! cmorgan@dodo.com.au:1234@1234c denzass@hotmail.com.au:jarmila55 edward@martin.com.au:p@55w0rdten joeanth@tpg.com.au:hamrun1937 johnlaurie@x-analysis.com.au:satanic1979! kbbell@dodo.com.au:w5+_dxyjv)^ygvq kdbell@dodo.com.au:6hsksnn8x5xz&ft maloo@adam.com.au:maloo_2010 mgarvey@eftel.net.au:mg080959 sasqld@outlook.com.au:%tgdrc1212 steve@theprintcartel.com.au:pa55w0rd01! teddybear@westnet.com.au:poohbear333 allanfnewman60@outlook.com.au:miltonthemonster#092023 beggsboys@optusnet.com.au:cameron24 chellene@iinet.net.au:urgr8$158 deage@dstech.net.au:080220a0 info@nicreative.com.au:defqon170 jv_knox@optusnet.com.au:sofq3cjk! odonnellmg@optusnet.com.au:aa290489# fingers@creativethreshold.com.au:zam!msf2 bar0098@kew.vic.edu.au:theosux!1 jasperlindsay-mate@iinet.net.au:jasper0201- jordan@chefline.com.au:mali123s@ jordanl@stjobarmera.catholic.edu.au:taurus7@ mtravers@bigpond.net.au:tt8mor33! tivy@iinet.net.au:17horsefield tivy@iinet.net.au:april1948 verac@esc.net.au:ymajpw6cruqxyma har0027@mountalexandercollege.vic.edu.au:aloish77! jac0037@rosehillsc.vic.edu.au:q5@sw#xk$tmesj3 kevinbl@westnet.com.au:kevin2612! maryam.bohreh@education.nsw.gov.au:reda?bohreh1 mayumivanegmond@optusnet.com.au:widentetra90775 microe@tpg.com.au:salta515 berritra@adam.com.au:2tr0a0-1bb1 kevtaylor@dodo.com.au:ggopies12! kovan@thit.com.au:w@skal932 jbavich@bigpond.net.au:82541dan! debbie@comcen.com.au:hugo1965 jacob.alpert@education.nsw.gov.au:10pl4y andrew@theberries.com.au:f7rzwm85m4mym65? dalrymple@iinet.net.au:skollie fnq@bigpond.net.au:bazpam194146 hotoole@outlook.com.au:stronger@01 j.mcglinn@iinet.net.au:sarah1988# joe@jc-grou.net.au:formula#123 john.wall@iinet.net.au:domain15jw! nzdavid@bigpond.net.au:2crombay raelen@iinet.net.au:r50093fesr redxt@exemail.com.au:larry@1956 scottgeorge777@dodo.com.au:jericho1 viceast@thedocshop.com.au:a@rian4097 yote@netspace.net.au:yianni2019 info@aandbpest.com.au:10to8account benn.probett@outlook.com.au:y3znk7zn4kr4kpwu87c matt@alltoneshutters.com.au:uzqkgwqx zeppo@ejet.com.au:zosolz1971 peter@petergibson.id.au:hyundai8910 kreissen@bigpond.net.au:shebapluto1 bethlagos@priorityresidential.com.au:rulli221 ertaz@theacs.com.au:haque21t glponder@tpg.com.au:[not_saved] joel.domina@visionstream.com.au:chickballs1 kreissen@bigpond.net.au:shebapluto@7 mr@alltilt.com.au:sydney786 sai.barker@northern.com.au:krokus1963! stephen@prodevproperty.com.au:sn00py stuart@stallardmeek.com.au:stuartmeek2014 ben@bisonent.com.au:vtju!x8k michael@cannatelli.com.au:x_gcflm5 production@spsprint.com.au:production01 robrien@i2c.com.au:ltjb$ah5 prosa@lunamac.com.au:12345678 robbi@thewebsitemarketinggroup.com.au:123456 purchasing@tubeworx.com.au:tubeworx!1 dave.rebello@graduate.curtin.edu.au:7256 barry-e@bigpond.net.au:barrye1524 jane.driscoll@poolwerx.com.au:hayward1966& g0422844308@optusnet.com.au:iik4ait4 shanesmith@blueflamecomputers.com.au:7423aa!! fridawang@sydneyspring.com.au:sydney123456 support@webclub.com.au:iamcityhunter@@@@420420 support@webclub.com.au:tofxzynm3pydks5m58uz#raqj support@webclub.com.au:mao#1234 leo.zeng@education.nsw.gov.au:0404285588 zhirui.zheng@cvc.wa.edu.au:jpeg1923 babwy001@mymail.unisa.edu.au:reset celia6@eq.edu.au:password.01 cherrie@ymd.com.au:xuspek6d sarahaze@optusnet.com.au:broadwater94 zorank@atcwilliams.com.au:#ids@335335# marie@adminfocus.com.au:46yf+g/foisn josh@skinrejuvenate.com.au:sb6o@b2u@5rl karen.w@atama.com.au:#ashu@8968226168# tim.reynolds@codesquad.com.au:testing123! cmmaa1@iprimus.com.au:hanstpia lee-kass@adam.com.au:sasseykassey mallesh@media365.com.au:anju5362 guy@bridgeit.com.au:spachrome1qdd mallesh@media365.com.au:manju5362 mallesh@media365.com.au:6p2ze4hzkzqs!yfp sandeep@media365.com.au:manju5362 mallesh@media365.com.au:whiteglassescup guy@wsit.com.au:spchrome1qdd guy@wsit.com.au:chrome1qdd guy@wsit.com.au:n0tt3llingu8 mallesh@media365.com.au:demouser mallesh@media365.com.au:suma@123 mallesh@media365.com.au:41io6svizi mallesh@media365.com.au:sahasreddy@9026 mallesh@media365.com.au:vonprickle,1993 mallesh@media365.com.au:harish!23 mallesh@media365.com.au:kumar mallesh@media365.com.au:password mallesh@media365.com.au:123456 mallesh@media365.com.au:bitbitbyte admin@nubit.com.au:hyperlink12345 z5258222@unsw.edu.au:lollyslayer1 jimmyc@resonatesolutions.com.au:r3son@te peter+membership@filmtime.com.au:pass cp-karli@healthybusiness.net.au:password@12 apps@elegantmedia.com.au:12345678 admin@switcher.com.au:12345678 campaigns@clicksmarketing.com.au:aaaaaaaa peter+admin@filmtime.com.au:pass mallesh+1@media365.com.au:manju5362 zuel@faqinteractive.com.au:abcd1234 client@faqi.com.au:abcd1234$ bws1975@outlook.com.au:bws01091975 systemadmin@cbtrafficsolutions.com.au:leazajane0601 gorton.paul.j@edumail.vic.gov.au:password mallesh@media365.com.au:abc@123456 mallesh@media365.com.au:geo@123 rao@quezone.com.au:rao@5uut oliver@digitalmonopoly.com.au:digital2017!@! ahmad@digitalmonopoly.com.au:digital2017!@! cderby@iprimus.com.au:p0r7r0yala russell@interfaction.com.au:rjc$$194806 john@adap.com.au:testing pearla.hermes@education.nsw.gov.au:davo1977 david.trajcevski@education.nsw.gov.au:davo1977 corban.condos@sydstu.catholic.edu.au:r+qbpgbm?b?hp4j zeref925@outlook.com.au:julian95 service2@airtoolswa.com.au:nickname service@airtoolswa.com.au:2counter123 david.coventry1@education.nsw.gov.au:ccyna!7ktevsvg9 ahmad@hyperionstudios.com.au:amx_5421261 sulochana@eblix.com.au:sulo12345 chamila@eblix.com.au:20onroom20 rejikanth.ap@evolution.edu.au:evolution2020! dov@time2travel.net.au:gadsar1975givati pblack@dataoutsource.com.au:p@ssword123 alexander@capstonefunds.com.au:barburasa1@ jp_reseller@datacom.com.au:datac0m@1 info@roooz.com.au:aw@stfsh#brisbane432# support@smebusinesssupport.com.au:anthony12345 ngill11@mybce.catholic.edu.au:017568nathan glen@goalsolar.com.au:pa55word@123 admin@goalsolar.com.au:goal@2022 brandon@bus4x4.com.au:bus4x42020/10/01 sallya@westnet.com.au:arm@172630 robbi@twmg.com.au:t7#\sf^b&#clk#gr admin@acangroup.com.au:admin waqar.ahmad@uqconnect.edu.au:saad123 peterturnbull02@optusnet.com.au:maddi30511 slage5@eq.edu.au:strawb3rry afree106@eq.edu.au:snivysnivy123 anthonychen@outlook.com.au:thinkpad_e14 bunnjipbx@bunnji.com.au:p@ssword1122 zachary+aus-admin@convertdigital.com.au:testing123 eric@hexaspace.com.au:pp3kh4tp0bt! info@hexaspace.com.au:hexa6space ameenur.rahman@carisma-solutions.com.au:buepa0286m sriram@dualengraving.com.au:testing@1234 haresh@oneit.com.au:vjt%o&6f8f anna@annadesign.com.au:n095c7sw denise@ozframes.com.au:pj91nw5r jvase@bcr.com.au:r7k9cwg5 info.nepal@meritservices.com.au:7k;vw?^52r& m.mughal@allspicetech.com.au:?bh?ggpingaad2 r5y0013@87ouinsc.vic.edu.au:a1dison2018 patrick.luza@mynetfone.com.au:mnfpennytel1914 sandeep.kumar@wellcom.com.au:kumar66 shaun@westpac.com.au:shaun.westpac tony@walkingpacemedia.com.au:7003sc info@mkspropertyservices.com.au:wacuhmbb-iet hywycomb@optusnet.com.au:api98663 dbeer344159@optusnet.com.au:daegh3er deadebear@optusnet.com.au:4getfull! kfcoffee@optusnet.com.au:dungyweepynwwk4 john_citizen@optusnet.com.au:optus adamsalagaras@iprimus.com.au:funk11278 adamsalagaras@iprimus.net.au:funk11278 hlaw@optushome.com.au:ge0rge1956 jenniferanne123@optusnet.com.au:vmrh3jbr x370397891142@ul.letztalk.net.au:letztalk123 dicont@iinet.net.au:virgil003 robsky26@dodo.com.au:rainbow48 sean_holden@netspace.net.au:knackers88997 benvictorien@optusnet.com.au:ben603 carroll1@bigpond.com.au:leah4232 florence.c@eftel.net.au:[not_saved] florence.c@eftel.net.au:abxmf733 inekeric@tpg.com.au:rich0000 alanhewett84@dodo.com.au:alanhewett84hpadsl xiao.wang86@optusnet.com.au:****** darren_daly@gjames.com.au:keyboard1 matthewchilds@nuskope.com.au:197739324 pranav1sood@dodo.com.au:abc123 fazi-bt@au:fazechaamir121200 a0882849095@sa.hellonbn.com.au:xoxncj7e2a4pm andrea@adam.com.au:andrea13 davisg@iinet.net.au:e3kmdlqbdth pranav1sood@dodo.com.au:iloveu@83 paulbwilliams@optusnet.com.au:pintie42 pjs100@optusnet.com.au:hannah12
+            - generic [ref=e155]:
+              - generic [ref=e157]:
+                - generic [ref=e158]:
+                  - heading "Run Migration" [level=3] [ref=e159]
+                  - paragraph [ref=e160]: Connects via IMAP TLS, downloads all attachments from selected folders
+                - generic [ref=e161]:
+                  - generic [ref=e162]:
+                    - text: Folders
+                    - textbox "INBOX,Sent,Archive" [ref=e163]: INBOX
+                  - button "Run Migrator" [ref=e164]
+              - generic [ref=e166]: Logs will appear here when you run the migrator...
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e172] [cursor=pointer]:
+    - img [ref=e173]
+  - alert [ref=e176]

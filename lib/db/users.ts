@@ -1,183 +1,108 @@
-import { randomUUID } from "node:crypto"
-import {
-  ClientUser,
-  ClientUserCreate,
-  ClientUserUpdate,
-  Collections,
-} from "@/lib/db/schema"
+import { prisma } from "@/lib/db"
+import type { ClientUser as PrismaClientUser } from "@prisma/client"
+import { ClientUser, ClientUserCreate, ClientUserUpdate } from "@/lib/db/schema"
 
-// In-memory database simulation for demonstration
-// In production, this would be replaced with actual database connections
-class UserDatabase {
-  private users: Map<string, ClientUser> = new Map()
-
-  constructor() {
-    this.initializeDefaultUsers()
+function toClientUserZod(row: PrismaClientUser): ClientUser {
+  return {
+    id: row.id,
+    displayName: row.displayName,
+    authToken: row.authToken,
+    status: row.status as ClientUser["status"],
+    quotaBytes: row.quotaBytes ? Number(row.quotaBytes) : null,
+    usedBytes: Number(row.usedBytes),
+    expiresAt: row.expiresAt ? row.expiresAt.getTime() : null,
+    createdAt: row.createdAt.getTime(),
+    updatedAt: row.updatedAt.getTime(),
+    notes: row.notes ?? undefined,
   }
-
-  private initializeDefaultUsers() {
-    const defaultUsers: ClientUser[] = [
-      {
-        id: "user-001",
-        displayName: "Demo User 1",
-        authToken: "token-abc123",
-        status: "active",
-        quotaBytes: 1073741824, // 1GB
-        usedBytes: 536870912, // 512MB
-        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days from now
-        createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000, // 7 days ago
-        updatedAt: Date.now() - 3600000, // 1 hour ago
-        notes: "Primary demo account"
-      },
-      {
-        id: "user-002",
-        displayName: "Demo User 2", 
-        authToken: "token-def456",
-        status: "active",
-        quotaBytes: 536870912, // 512MB
-        usedBytes: 134217728, // 128MB
-        expiresAt: Date.now() + 15 * 24 * 60 * 60 * 1000, // 15 days from now
-        createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000, // 3 days ago
-        updatedAt: Date.now() - 1800000, // 30 minutes ago
-        notes: "Secondary demo account"
-      },
-      {
-        id: "user-003",
-        displayName: "Inactive User",
-        authToken: "token-ghi789",
-        status: "disabled",
-        quotaBytes: 214748364, // 256MB
-        usedBytes: 0,
-        expiresAt: Date.now() - 5 * 24 * 60 * 60 * 1000, // 5 days ago (expired)
-        createdAt: Date.now() - 10 * 24 * 60 * 60 * 1000, // 10 days ago
-        updatedAt: Date.now() - 2 * 24 * 60 * 60 * 1000, // 2 days ago
-        notes: "Disabled account"
-      }
-    ]
-
-    defaultUsers.forEach(user => this.users.set(user.id, user))
-  }
-
-  async findAll(): Promise<ClientUser[]> {
-    return Array.from(this.users.values()).sort((a, b) => b.createdAt - a.createdAt)
-  }
-
-  async findById(id: string): Promise<ClientUser | null> {
-    return this.users.get(id) || null
-  }
-
-  async findByAuthToken(authToken: string): Promise<ClientUser | null> {
-    for (const user of this.users.values()) {
-      if (user.authToken === authToken) {
-        return user
-      }
-    }
-    return null
-  }
-
-  async create(data: ClientUserCreate): Promise<ClientUser> {
-    const id = randomUUID()
-    const now = Date.now()
-    const user: ClientUser = {
-      id,
-      displayName: data.displayName,
-      authToken: data.authToken,
-      status: data.status ?? "active",
-      quotaBytes: data.quotaBytes ?? null,
-      usedBytes: 0,
-      expiresAt: data.expiresAt ?? null,
-      createdAt: now,
-      updatedAt: now,
-      notes: data.notes,
-    }
-    this.users.set(id, user)
-    return user
-  }
-
-  async update(id: string, data: ClientUserUpdate): Promise<ClientUser | null> {
-    const existing = this.users.get(id)
-    if (!existing) return null
-
-    const updated: ClientUser = {
-      ...existing,
-      ...data,
-      updatedAt: Date.now(),
-    }
-    this.users.set(id, updated)
-    return updated
-  }
-
-  async delete(id: string): Promise<boolean> {
-    return this.users.delete(id)
-  }
-
-  async incrementUsage(id: string, tx: number, rx: number): Promise<void> {
-    const user = this.users.get(id)
-    if (user) {
-      const delta = Math.max(0, tx) + Math.max(0, rx)
-      user.usedBytes += delta
-      user.updatedAt = Date.now()
-    }
-  }
-
-  async getUserStats() {
-    const users = await this.findAll()
-    const now = Date.now()
-    return {
-      total: users.length,
-      active: users.filter(u => u.status === 'active' && (!u.expiresAt || u.expiresAt > now)).length,
-      expired: users.filter(u => u.expiresAt && u.expiresAt <= now).length,
-      disabled: users.filter(u => u.status === 'disabled').length,
-      totalQuota: users.reduce((sum, u) => sum + (u.quotaBytes || 0), 0),
-      totalUsed: users.reduce((sum, u) => sum + u.usedBytes, 0),
-    }
-  }
-}
-
-// Global database instance
-const userDb = new UserDatabase()
-
-function now(): number {
-  return Date.now()
 }
 
 export async function listUsers(): Promise<ClientUser[]> {
-  return await userDb.findAll()
+  const rows = await prisma.clientUser.findMany({ orderBy: { createdAt: "desc" } })
+  return rows.map(toClientUserZod)
 }
 
 export async function getUserById(id: string): Promise<ClientUser | null> {
-  return await userDb.findById(id)
+  const row = await prisma.clientUser.findUnique({ where: { id } })
+  return row ? toClientUserZod(row) : null
 }
 
 export async function getUserByAuthToken(authToken: string): Promise<ClientUser | null> {
-  return await userDb.findByAuthToken(authToken)
+  const row = await prisma.clientUser.findUnique({ where: { authToken } })
+  return row ? toClientUserZod(row) : null
 }
 
 export async function createUser(input: ClientUserCreate): Promise<ClientUser> {
-  return await userDb.create(input)
+  const parsed = ClientUserCreate.parse(input)
+  const row = await prisma.clientUser.create({
+    data: {
+      displayName: parsed.displayName,
+      authToken: parsed.authToken,
+      status: parsed.status ?? "active",
+      quotaBytes: parsed.quotaBytes ?? null,
+      usedBytes: 0,
+      expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : null,
+      notes: parsed.notes,
+    },
+  })
+  return toClientUserZod(row)
 }
 
 export async function updateUser(
   id: string,
   patch: ClientUserUpdate,
 ): Promise<ClientUser | null> {
-  return await userDb.update(id, patch)
+  const existing = await prisma.clientUser.findUnique({ where: { id } })
+  if (!existing) return null
+
+  const parsed = ClientUserUpdate.parse(patch)
+  const data: Record<string, unknown> = {}
+  if (parsed.displayName !== undefined) data.displayName = parsed.displayName
+  if (parsed.authToken !== undefined) data.authToken = parsed.authToken
+  if (parsed.status !== undefined) data.status = parsed.status
+  if (parsed.quotaBytes !== undefined) data.quotaBytes = parsed.quotaBytes
+  if (parsed.expiresAt !== undefined) {
+    data.expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null
+  }
+  if (parsed.notes !== undefined) data.notes = parsed.notes
+
+  const row = await prisma.clientUser.update({ where: { id }, data })
+  return toClientUserZod(row)
 }
 
 export async function deleteUser(id: string): Promise<boolean> {
-  return await userDb.delete(id)
+  try {
+    await prisma.clientUser.delete({ where: { id } })
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function incrementUsage(id: string, tx: number, rx: number): Promise<void> {
-  await userDb.incrementUsage(id, tx, rx)
+  const delta = Math.max(0, tx) + Math.max(0, rx)
+  await prisma.clientUser.update({
+    where: { id },
+    data: { usedBytes: { increment: delta } },
+  })
 }
 
-// Additional helper functions for dashboard
 export async function getUserStats() {
-  return await userDb.getUserStats()
+  const users = await prisma.clientUser.findMany()
+  const now = Date.now()
+  return {
+    total: users.length,
+    active: users.filter(
+      (u) => u.status === "active" && (!u.expiresAt || u.expiresAt.getTime() > now),
+    ).length,
+    expired: users.filter((u) => u.expiresAt && u.expiresAt.getTime() <= now).length,
+    disabled: users.filter((u) => u.status === "disabled").length,
+    totalQuota: users.reduce((sum, u) => sum + Number(u.quotaBytes ?? 0), 0),
+    totalUsed: users.reduce((sum, u) => sum + Number(u.usedBytes), 0),
+  }
 }
 
 export async function getActiveUserCount() {
-  const stats = await userDb.getUserStats()
+  const stats = await getUserStats()
   return stats.active
 }

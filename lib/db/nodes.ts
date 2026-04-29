@@ -1,153 +1,94 @@
-import { randomUUID } from "node:crypto"
-import { Collections, Node, NodeCreate, NodeUpdate } from "@/lib/db/schema"
+import { prisma } from "@/lib/db"
+import type { HysteriaNode } from "@prisma/client"
+import { Node, NodeCreate, NodeUpdate } from "@/lib/db/schema"
 
-// In-memory database simulation for demonstration
-// In production, this would be replaced with actual database connections
-class NodeDatabase {
-  private nodes: Map<string, Node> = new Map()
-
-  constructor() {
-    this.initializeDefaultNodes()
+function toNodeZod(row: HysteriaNode): Node {
+  return {
+    id: row.id,
+    name: row.name,
+    hostname: row.hostname,
+    region: row.region ?? undefined,
+    listenAddr: row.listenAddr,
+    status: row.status as Node["status"],
+    tags: JSON.parse(row.tags) as string[],
+    provider: row.provider ?? undefined,
+    profileId: row.profileId ?? null,
+    lastHeartbeatAt: row.lastHeartbeatAt ? row.lastHeartbeatAt.getTime() : null,
+    createdAt: row.createdAt.getTime(),
+    updatedAt: row.updatedAt.getTime(),
   }
-
-  private initializeDefaultNodes() {
-    const defaultNodes: Node[] = [
-      {
-        id: "node-001",
-        name: "US-East-Primary",
-        hostname: "us-east.example.com",
-        region: "us-east",
-        listenAddr: ":443",
-        status: "running",
-        tags: ["primary", "production"],
-        provider: "aws",
-        lastHeartbeatAt: Date.now() - 30000,
-        createdAt: Date.now() - 86400000,
-        updatedAt: Date.now() - 30000,
-      },
-      {
-        id: "node-002", 
-        name: "EU-West-Backup",
-        hostname: "eu-west.example.com",
-        region: "eu-west",
-        listenAddr: ":443",
-        status: "stopped",
-        tags: ["backup", "eu"],
-        provider: "gcp",
-        lastHeartbeatAt: Date.now() - 300000,
-        createdAt: Date.now() - 172800000,
-        updatedAt: Date.now() - 300000,
-      },
-      {
-        id: "node-003",
-        name: "Asia-Pacific-Edge",
-        hostname: "ap-south.example.com", 
-        region: "ap-south",
-        listenAddr: ":443",
-        status: "running",
-        tags: ["edge", "asia"],
-        provider: "azure",
-        lastHeartbeatAt: Date.now() - 15000,
-        createdAt: Date.now() - 259200000,
-        updatedAt: Date.now() - 15000,
-      }
-    ]
-
-    defaultNodes.forEach(node => this.nodes.set(node.id, node))
-  }
-
-  async findAll(): Promise<Node[]> {
-    return Array.from(this.nodes.values()).sort((a, b) => b.createdAt - a.createdAt)
-  }
-
-  async findById(id: string): Promise<Node | null> {
-    return this.nodes.get(id) || null
-  }
-
-  async create(data: NodeCreate): Promise<Node> {
-    const id = randomUUID()
-    const now = Date.now()
-    const node: Node = {
-      id,
-      name: data.name,
-      hostname: data.hostname,
-      region: data.region,
-      listenAddr: data.listenAddr ?? ":443",
-      status: "stopped",
-      tags: data.tags ?? [],
-      provider: data.provider,
-      lastHeartbeatAt: null,
-      createdAt: now,
-      updatedAt: now,
-    }
-    this.nodes.set(id, node)
-    return node
-  }
-
-  async update(id: string, data: NodeUpdate): Promise<Node | null> {
-    const existing = this.nodes.get(id)
-    if (!existing) return null
-
-    const updated: Node = {
-      ...existing,
-      ...data,
-      updatedAt: Date.now(),
-    }
-    this.nodes.set(id, updated)
-    return updated
-  }
-
-  async delete(id: string): Promise<boolean> {
-    return this.nodes.delete(id)
-  }
-
-  async updateHeartbeat(id: string): Promise<void> {
-    const node = this.nodes.get(id)
-    if (node) {
-      node.lastHeartbeatAt = Date.now()
-      node.updatedAt = Date.now()
-    }
-  }
-}
-
-// Global database instance
-const nodeDb = new NodeDatabase()
-
-function now(): number {
-  return Date.now()
 }
 
 export async function listNodes(): Promise<Node[]> {
-  return await nodeDb.findAll()
+  const rows = await prisma.hysteriaNode.findMany({ orderBy: { createdAt: "desc" } })
+  return rows.map(toNodeZod)
 }
 
 export async function getNodeById(id: string): Promise<Node | null> {
-  return await nodeDb.findById(id)
+  const row = await prisma.hysteriaNode.findUnique({ where: { id } })
+  return row ? toNodeZod(row) : null
 }
 
 export async function createNode(input: NodeCreate): Promise<Node> {
-  return await nodeDb.create(input)
+  const parsed = NodeCreate.parse(input)
+  const row = await prisma.hysteriaNode.create({
+    data: {
+      name: parsed.name,
+      hostname: parsed.hostname,
+      region: parsed.region,
+      listenAddr: parsed.listenAddr ?? ":443",
+      status: "stopped",
+      tags: JSON.stringify(parsed.tags ?? []),
+      provider: parsed.provider,
+    },
+  })
+  return toNodeZod(row)
 }
 
 export async function updateNode(id: string, patch: NodeUpdate): Promise<Node | null> {
-  return await nodeDb.update(id, patch)
+  const parsed = NodeUpdate.parse(patch)
+  const existing = await prisma.hysteriaNode.findUnique({ where: { id } })
+  if (!existing) return null
+
+  const data: Record<string, unknown> = {}
+  if (parsed.name !== undefined) data.name = parsed.name
+  if (parsed.hostname !== undefined) data.hostname = parsed.hostname
+  if (parsed.region !== undefined) data.region = parsed.region
+  if (parsed.listenAddr !== undefined) data.listenAddr = parsed.listenAddr
+  if (parsed.status !== undefined) data.status = parsed.status
+  if (parsed.tags !== undefined) data.tags = JSON.stringify(parsed.tags)
+  if (parsed.provider !== undefined) data.provider = parsed.provider
+  if (parsed.profileId !== undefined) data.profileId = parsed.profileId
+  if (parsed.lastHeartbeatAt !== undefined) {
+    data.lastHeartbeatAt = parsed.lastHeartbeatAt ? new Date(parsed.lastHeartbeatAt) : null
+  }
+
+  const row = await prisma.hysteriaNode.update({ where: { id }, data })
+  return toNodeZod(row)
 }
 
 export async function deleteNode(id: string): Promise<boolean> {
-  return await nodeDb.delete(id)
+  try {
+    await prisma.hysteriaNode.delete({ where: { id } })
+    return true
+  } catch {
+    return false
+  }
 }
 
-// Additional helper functions for real-time updates
 export async function updateNodeHeartbeat(id: string): Promise<void> {
-  await nodeDb.updateHeartbeat(id)
+  await prisma.hysteriaNode.update({
+    where: { id },
+    data: { lastHeartbeatAt: new Date() },
+  })
 }
 
 export async function getNodeStats() {
-  const nodes = await listNodes()
-  return {
-    total: nodes.length,
-    running: nodes.filter(n => n.status === 'running').length,
-    stopped: nodes.filter(n => n.status === 'stopped').length,
-    errored: nodes.filter(n => n.status === 'errored').length,
-  }
+  const [total, running, stopped, errored] = await Promise.all([
+    prisma.hysteriaNode.count(),
+    prisma.hysteriaNode.count({ where: { status: "running" } }),
+    prisma.hysteriaNode.count({ where: { status: "stopped" } }),
+    prisma.hysteriaNode.count({ where: { status: "errored" } }),
+  ])
+  return { total, running, stopped, errored }
 }

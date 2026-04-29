@@ -1,8 +1,6 @@
-import { randomUUID } from "node:crypto"
 import { z } from "zod"
-import { adminFirestore } from "@/lib/firebase/admin"
-
-const COLLECTION = "profiles"
+import { prisma } from "@/lib/db"
+import type { Profile as PrismaProfile } from "@prisma/client"
 
 export const ProfileType = z.enum([
   "basic_tls_proxy",
@@ -64,56 +62,69 @@ export type ProfileCreate = z.infer<typeof ProfileCreate>
 export const ProfileUpdate = ProfileCreate.partial()
 export type ProfileUpdate = z.infer<typeof ProfileUpdate>
 
-function col() {
-  return adminFirestore().collection(COLLECTION)
-}
-
-function now(): number {
-  return Date.now()
+function toProfileZod(row: PrismaProfile): Profile {
+  return Profile.parse({
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    description: row.description,
+    nodeIds: JSON.parse(row.nodeIds),
+    config: row.config,
+    tags: JSON.parse(row.tags),
+    createdAt: row.createdAt.getTime(),
+    updatedAt: row.updatedAt.getTime(),
+  })
 }
 
 export async function listProfiles(): Promise<Profile[]> {
-  const snap = await col().orderBy("createdAt", "desc").get()
-  return snap.docs.map((d) => Profile.parse({ id: d.id, ...d.data() }))
+  const rows = await prisma.profile.findMany({ orderBy: { createdAt: "desc" } })
+  return rows.map(toProfileZod)
 }
 
 export async function getProfileById(id: string): Promise<Profile | null> {
-  const doc = await col().doc(id).get()
-  if (!doc.exists) return null
-  return Profile.parse({ id: doc.id, ...doc.data() })
+  const row = await prisma.profile.findUnique({ where: { id } })
+  return row ? toProfileZod(row) : null
 }
 
 export async function createProfile(input: ProfileCreate): Promise<Profile> {
   const parsed = ProfileCreate.parse(input)
-  const id = randomUUID()
-  const record = Profile.parse({
-    id,
-    ...parsed,
-    createdAt: now(),
-    updatedAt: now(),
+  const row = await prisma.profile.create({
+    data: {
+      name: parsed.name,
+      type: parsed.type,
+      description: parsed.description ?? "",
+      nodeIds: JSON.stringify(parsed.nodeIds ?? []),
+      config: (parsed.config ?? {}) as object,
+      tags: JSON.stringify(parsed.tags ?? []),
+    },
   })
-  const { id: _omit, ...rest } = record
-  void _omit
-  await col().doc(id).set(rest)
-  return record
+  return toProfileZod(row)
 }
 
 export async function updateProfile(id: string, patch: ProfileUpdate): Promise<Profile | null> {
+  const existing = await prisma.profile.findUnique({ where: { id } })
+  if (!existing) return null
+
   const parsed = ProfileUpdate.parse(patch)
-  const ref = col().doc(id)
-  const existing = await ref.get()
-  if (!existing.exists) return null
-  await ref.update({ ...parsed, updatedAt: now() })
-  const updated = await ref.get()
-  return Profile.parse({ id: updated.id, ...updated.data() })
+  const data: Record<string, unknown> = {}
+  if (parsed.name !== undefined) data.name = parsed.name
+  if (parsed.type !== undefined) data.type = parsed.type
+  if (parsed.description !== undefined) data.description = parsed.description
+  if (parsed.nodeIds !== undefined) data.nodeIds = JSON.stringify(parsed.nodeIds)
+  if (parsed.config !== undefined) data.config = parsed.config as object
+  if (parsed.tags !== undefined) data.tags = JSON.stringify(parsed.tags)
+
+  const row = await prisma.profile.update({ where: { id }, data })
+  return toProfileZod(row)
 }
 
 export async function deleteProfile(id: string): Promise<boolean> {
-  const ref = col().doc(id)
-  const existing = await ref.get()
-  if (!existing.exists) return false
-  await ref.delete()
-  return true
+  try {
+    await prisma.profile.delete({ where: { id } })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Preset configs for each profile type */
@@ -153,4 +164,96 @@ export function getProfilePreset(type: ProfileType): ProfileConfigOverrides {
     case "custom":
       return { port: 443 }
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Profile config resolver                                            */
+/*                                                                     */
+/*  Resolves a profile's stored config overrides into the structures   */
+/*  consumed by client-config generation and node provisioning.        */
+/* ------------------------------------------------------------------ */
+
+export type ResolvedProfileConfig = {
+  /** Listen address string (e.g. ":443") */
+  listen: string
+  /** Obfuscation config — undefined means no obfuscation */
+  obfs?: { type: "salamander"; password: string }
+  /** Bandwidth hints — undefined means no limit specified */
+  bandwidth?: { up?: string; down?: string }
+  /** Masquerade proxy URL — undefined means no masquerade */
+  masquerade?: { type: "proxy"; proxy: { url: string; rewriteHost: boolean } }
+  /** TLS mode from the profile (acme | self-signed | manual) */
+  tlsMode: "acme" | "self-signed" | "manual"
+  /** ACME domains list (when tlsMode is acme) */
+  acmeDomains?: string[]
+  /** ACME email (when tlsMode is acme) */
+  acmeEmail?: string
+  /** Client-side: SOCKS5 listen address */
+  socksListen?: string
+  /** Client-side: TUN enabled */
+  tunEnabled?: boolean
+  /** Client-side: TUN MTU */
+  tunMtu?: number
+  /** Client-side: lazy connect */
+  lazyStart?: boolean
+}
+
+/**
+ * Resolve a profile into a concrete config object.
+ *
+ * Merges the profile's stored config with its type preset (stored config wins).
+ * Generates a random obfs password if salamander is enabled but no password is set.
+ */
+export function resolveProfileConfig(profile: Profile): ResolvedProfileConfig {
+  const preset = getProfilePreset(profile.type as ProfileType)
+  const cfg = { ...preset, ...(profile.config as ProfileConfigOverrides) }
+
+  const result: ResolvedProfileConfig = {
+    listen: `:${cfg.port ?? 443}`,
+    tlsMode: cfg.tlsMode ?? "acme",
+  }
+
+  // Obfuscation
+  if (cfg.obfsType === "salamander") {
+    result.obfs = {
+      type: "salamander",
+      password: cfg.obfsPassword ?? generateObfsPassword(),
+    }
+  }
+
+  // Bandwidth
+  if (cfg.bandwidthUp || cfg.bandwidthDown) {
+    result.bandwidth = {}
+    if (cfg.bandwidthUp) result.bandwidth.up = cfg.bandwidthUp
+    if (cfg.bandwidthDown) result.bandwidth.down = cfg.bandwidthDown
+  }
+
+  // Masquerade
+  if (cfg.masqueradeUrl) {
+    result.masquerade = {
+      type: "proxy",
+      proxy: { url: cfg.masqueradeUrl, rewriteHost: true },
+    }
+  }
+
+  // ACME
+  if (cfg.acmeDomains) result.acmeDomains = cfg.acmeDomains
+  if (cfg.acmeEmail) result.acmeEmail = cfg.acmeEmail
+
+  // Client-side hints
+  if (cfg.socksListen) result.socksListen = cfg.socksListen
+  if (cfg.tunEnabled) result.tunEnabled = cfg.tunEnabled
+  if (cfg.tunMtu) result.tunMtu = cfg.tunMtu
+  if (cfg.lazyStart) result.lazyStart = cfg.lazyStart
+
+  return result
+}
+
+function generateObfsPassword(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  let pw = ""
+  for (let i = 0; i < 24; i++) {
+    pw += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return pw
 }

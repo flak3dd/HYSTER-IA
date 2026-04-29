@@ -1,0 +1,185 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "D D-Panel Ops" [ref=e5] [cursor=pointer]:
+        - /url: /admin
+        - generic [ref=e6]: D
+        - generic [ref=e7]: D-Panel Ops
+      - link "Command Center" [ref=e9] [cursor=pointer]:
+        - /url: /admin
+        - img [ref=e10]
+        - text: Command Center
+      - navigation [ref=e15]:
+        - generic [ref=e16]:
+          - button "Recon" [ref=e17]:
+            - generic [ref=e18]: Recon
+            - img [ref=e20]
+          - generic [ref=e22]:
+            - link "OSINT Intelligence gathering" [ref=e23] [cursor=pointer]:
+              - /url: /admin/osint
+              - generic [ref=e24]: OSINT
+              - generic [ref=e25]: Intelligence gathering
+            - link "Network Mapping Passive recon" [ref=e26] [cursor=pointer]:
+              - /url: /admin/network
+              - generic [ref=e27]: Network Mapping
+              - generic [ref=e28]: Passive recon
+            - link "Threat Intel IOC feeds" [ref=e29] [cursor=pointer]:
+              - /url: /admin/threat
+              - generic [ref=e30]: Threat Intel
+              - generic [ref=e31]: IOC feeds
+        - generic [ref=e32]:
+          - button "Infrastructure" [ref=e33]:
+            - generic [ref=e34]: Infrastructure
+            - img [ref=e36]
+          - generic [ref=e38]:
+            - link "Nodes Server fleet" [ref=e39] [cursor=pointer]:
+              - /url: /admin/nodes
+              - generic [ref=e40]: Nodes
+              - generic [ref=e41]: Server fleet
+            - link "Protocols Transport config" [ref=e42] [cursor=pointer]:
+              - /url: /admin/transport
+              - generic [ref=e43]: Protocols
+              - generic [ref=e44]: Transport config
+            - link "Configs Client configs" [ref=e45] [cursor=pointer]:
+              - /url: /admin/configs
+              - generic [ref=e46]: Configs
+              - generic [ref=e47]: Client configs
+            - link "Deployment Infra management" [ref=e48] [cursor=pointer]:
+              - /url: /admin/infrastructure
+              - generic [ref=e49]: Deployment
+              - generic [ref=e50]: Infra management
+        - generic [ref=e51]:
+          - button "Weaponize" [ref=e52]:
+            - generic [ref=e53]: Weaponize
+            - img [ref=e55]
+          - generic [ref=e57]:
+            - link "Payloads Payload generation" [ref=e58] [cursor=pointer]:
+              - /url: /admin/payloads
+              - generic [ref=e59]: Payloads
+              - generic [ref=e60]: Payload generation
+            - link "LotL Arsenal Living off the land" [ref=e61] [cursor=pointer]:
+              - /url: /admin/lotl
+              - generic [ref=e62]: LotL Arsenal
+              - generic [ref=e63]: Living off the land
+            - link "Profiles C2 profiles" [ref=e64] [cursor=pointer]:
+              - /url: /admin/profiles
+              - generic [ref=e65]: Profiles
+              - generic [ref=e66]: C2 profiles
+        - generic [ref=e67]:
+          - button "Deliver" [ref=e68]:
+            - generic [ref=e69]: Deliver
+            - img [ref=e71]
+          - generic [ref=e73]:
+            - link "Mail Ops Phishing & mail" [ref=e74] [cursor=pointer]:
+              - /url: /admin/mail
+              - generic [ref=e75]: Mail Ops
+              - generic [ref=e76]: Phishing & mail
+            - link "Migrator IMAP XOAUTH2 migration" [ref=e77] [cursor=pointer]:
+              - /url: /admin/mail/migrator
+              - generic [ref=e78]: Migrator
+              - generic [ref=e79]: IMAP XOAUTH2 migration
+            - link "Agents LLM-driven tasks" [ref=e80] [cursor=pointer]:
+              - /url: /admin/agents
+              - generic [ref=e81]: Agents
+              - generic [ref=e82]: LLM-driven tasks
+        - generic [ref=e83]:
+          - button "Operate" [ref=e84]:
+            - generic [ref=e85]: Operate
+            - img [ref=e87]
+          - generic [ref=e89]:
+            - link "Team Ops Multi-operator" [ref=e90] [cursor=pointer]:
+              - /url: /admin/coordination
+              - generic [ref=e91]: Team Ops
+              - generic [ref=e92]: Multi-operator
+            - link "Anti-Forensics Evidence control" [ref=e93] [cursor=pointer]:
+              - /url: /admin/forensics
+              - generic [ref=e94]: Anti-Forensics
+              - generic [ref=e95]: Evidence control
+            - link "AI Assistant Config assistant" [ref=e96] [cursor=pointer]:
+              - /url: /admin/ai
+              - generic [ref=e97]: AI Assistant
+              - generic [ref=e98]: Config assistant
+        - generic [ref=e99]:
+          - button "Report" [ref=e100]:
+            - generic [ref=e101]: Report
+            - img [ref=e103]
+          - generic [ref=e105]:
+            - link "Analytics Behavioral analysis" [ref=e106] [cursor=pointer]:
+              - /url: /admin/analytics
+              - generic [ref=e107]: Analytics
+              - generic [ref=e108]: Behavioral analysis
+            - link "Reports Auto-generated" [ref=e109] [cursor=pointer]:
+              - /url: /admin/reports
+              - generic [ref=e110]: Reports
+              - generic [ref=e111]: Auto-generated
+      - paragraph [ref=e113]: "Workflow: Recon → Report"
+    - generic [ref=e114]:
+      - banner [ref=e115]:
+        - generic [ref=e116]: admin (ADMIN)
+        - button "Sign out" [ref=e117]
+      - main [ref=e118]:
+        - generic [ref=e461]:
+          - generic [ref=e462]:
+            - heading "IMAP XOAUTH2 Migrator" [level=1] [ref=e463]
+            - paragraph [ref=e464]: Migrate email attachments via OAuth2 device-code flow. Supports Gmail, Microsoft 365, and self-hosted IMAP.
+          - generic [ref=e465]:
+            - generic [ref=e466]:
+              - generic [ref=e468]:
+                - generic [ref=e469]:
+                  - heading "OAuth Credentials" [level=3] [ref=e470]
+                  - paragraph [ref=e471]: Gmail & Microsoft OAuth2 client credentials
+                - button "Save" [ref=e472]
+              - generic [ref=e473]:
+                - paragraph [ref=e474]: Gmail
+                - generic [ref=e475]:
+                  - text: Client ID
+                  - textbox "your-gmail-client-id" [ref=e476]: YOUR_GOOGLE_CLIENT_ID
+                - generic [ref=e477]:
+                  - text: Client Secret
+                  - textbox "secret" [ref=e478]: YOUR_GOOGLE_CLIENT_SECRET
+                - paragraph [ref=e479]: Microsoft 365
+                - generic [ref=e480]:
+                  - text: Client ID
+                  - textbox "your-ms-client-id" [ref=e481]: YOUR_MICROSOFT_CLIENT_ID
+                - generic [ref=e482]:
+                  - text: Client Secret
+                  - textbox "secret" [ref=e483]: YOUR_MICROSOFT_CLIENT_SECRET
+                - paragraph [ref=e484]: Performance
+                - generic [ref=e485]:
+                  - generic [ref=e486]:
+                    - text: Workers
+                    - spinbutton [ref=e487]: "3"
+                  - generic [ref=e488]:
+                    - text: Delay (ms)
+                    - spinbutton [ref=e489]: "1500"
+                  - generic [ref=e490]:
+                    - text: Max Messages
+                    - spinbutton [ref=e491]: "500"
+            - generic [ref=e492]:
+              - generic [ref=e494]:
+                - generic [ref=e495]:
+                  - heading "Accounts" [level=3] [ref=e496]
+                  - paragraph [ref=e497]: "3 accountsconfigured • Format: email or email:password"
+                - generic [ref=e498]: accounts.txt
+              - textbox "# One account per line alice@gmail.com bob@company.onmicrosoft.com user@myserver.com:password123" [ref=e500]:
+                - /placeholder: "# One account per line\nalice@gmail.com\nbob@company.onmicrosoft.com\nuser@myserver.com:password123"
+                - text: user1@company.com:password123 alice@gmail.com bob@company.onmicrosoft.com
+            - generic [ref=e501]:
+              - generic [ref=e503]:
+                - generic [ref=e504]:
+                  - heading "Run Migration" [level=3] [ref=e505]
+                  - paragraph [ref=e506]: Execute the IMAP XOAUTH2 attachment migrator
+                - generic [ref=e507]:
+                  - generic [ref=e508]:
+                    - text: Folders
+                    - textbox "INBOX,Sent,Archive" [ref=e509]: INBOX
+                  - button "Run Migrator" [ref=e510]
+              - generic [ref=e512]: Logs will appear here when you run the migrator...
+  - region "Notifications alt+T":
+    - list:
+      - listitem [ref=e513]:
+        - img [ref=e515]
+        - generic [ref=e519]: Configuration saved
+  - button "Open Next.js Dev Tools" [ref=e456] [cursor=pointer]:
+    - img [ref=e457]
+  - alert [ref=e460]

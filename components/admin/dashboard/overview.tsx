@@ -1,19 +1,11 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import Link from "next/link"
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  type QuerySnapshot,
-  type DocumentData,
-} from "firebase/firestore"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { clientFirestore } from "@/lib/firebase/client"
+import { supabaseClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import { WORKFLOW_STAGES } from "@/components/admin/sidebar"
 
@@ -221,12 +213,10 @@ function emitNodeDeltaToasts(
 export function DashboardOverview() {
   const [data, setData] = useState<Overview | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [liveNodes, setLiveNodes] = useState<LiveNode[] | null>(null)
   const [activity, setActivity] = useState<ActivityEvent[]>([])
   const prevRef = useRef<Overview | null>(null)
   const prevNodesRef = useRef<Map<string, string>>(new Map())
   const firstLoad = useRef(true)
-  const firstNodesSnapshot = useRef(true)
   const activityIdRef = useRef(0)
 
   const pushActivity = (message: string, type: ActivityEvent["type"]) => {
@@ -256,9 +246,11 @@ export function DashboardOverview() {
         const prev = prevRef.current
         if (prev && !firstLoad.current) {
           emitServerClientDeltaToasts(prev, next, pushActivity)
+          emitNodeDeltaToasts(prevNodesRef.current, next.nodes.items, pushActivity)
         }
         firstLoad.current = false
         prevRef.current = next
+        prevNodesRef.current = new Map(next.nodes.items.map((n) => [n.id, n.status]))
         setData(next)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "overview failed")
@@ -271,54 +263,46 @@ export function DashboardOverview() {
       clearInterval(interval)
     }
   }, [])
-
-  // Realtime Firestore listener for nodes
-  useEffect(() => {
-    let unsub: (() => void) | null = null
+  // Supabase Realtime: trigger an immediate poll when nodes table changes
+  const fetchNodesNow = useCallback(async () => {
     try {
-      const db = clientFirestore()
-      const q = query(collection(db, "nodes"), orderBy("createdAt", "desc"))
-      unsub = onSnapshot(
-        q,
-        (snap: QuerySnapshot<DocumentData>) => {
-          const nodes: LiveNode[] = snap.docs.map((d) => {
-            const raw = d.data() as Record<string, unknown>
-            return {
-              id: d.id,
-              name: typeof raw.name === "string" ? raw.name : d.id,
-              region: typeof raw.region === "string" ? raw.region : null,
-              status: typeof raw.status === "string" ? raw.status : "unknown",
-              hostname: typeof raw.hostname === "string" ? raw.hostname : "",
-              tags: Array.isArray(raw.tags) ? (raw.tags as string[]) : [],
-              provider: typeof raw.provider === "string" ? raw.provider : null,
-              lastHeartbeatAt:
-                typeof raw.lastHeartbeatAt === "number" ? raw.lastHeartbeatAt : null,
-            }
-          })
-          if (!firstNodesSnapshot.current) {
-            emitNodeDeltaToasts(prevNodesRef.current, nodes, pushActivity)
-          }
-          firstNodesSnapshot.current = false
-          prevNodesRef.current = new Map(nodes.map((n) => [n.id, n.status]))
-          setLiveNodes(nodes)
-        },
-        (err) => {
-          setError((prev) => prev ?? `nodes snapshot: ${err.message}`)
-        },
-      )
+      const res = await fetch("/api/admin/overview", { cache: "no-store" })
+      if (!res.ok) return
+      const next = (await res.json()) as Overview
+
+      const prev = prevRef.current
+      if (prev && !firstLoad.current) {
+        emitServerClientDeltaToasts(prev, next, pushActivity)
+        emitNodeDeltaToasts(prevNodesRef.current, next.nodes.items, pushActivity)
+      }
+      prevRef.current = next
+      prevNodesRef.current = new Map(next.nodes.items.map((n) => [n.id, n.status]))
+      setData(next)
     } catch {
-      // firebase client not configured; polling fallback is enough
-    }
-    return () => {
-      if (unsub) unsub()
+      // polling fallback will catch up
     }
   }, [])
 
-  const nodesSource = liveNodes ?? data?.nodes.items ?? []
+  useEffect(() => {
+    const sb = supabaseClient()
+    if (!sb) return // env vars missing — polling fallback only
+
+    const channel = sb
+      .channel("nodes-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "nodes" }, () => {
+        fetchNodesNow()
+      })
+      .subscribe()
+
+    return () => {
+      sb.removeChannel(channel)
+    }
+  }, [fetchNodesNow])
+
+  const nodesSource = data?.nodes.items ?? []
   const totalNodes = nodesSource.length
   const onlineNodes = nodesSource.filter((n) => n.status === "running").length
   const connections = data?.online.available ? data.online.count : 0
-  const isLive = liveNodes != null
 
   return (
     <div className="flex flex-col gap-6">
@@ -328,11 +312,6 @@ export function DashboardOverview() {
           <h1 className="text-xl font-bold">Command Center</h1>
           <p className="text-sm text-muted-foreground">
             Unified operation dashboard &mdash; all modules, one view.
-            {isLive ? (
-              <span className="ml-2 inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> live
-              </span>
-            ) : null}
           </p>
           {error ? (
             <p className="mt-1 text-sm text-red-600 dark:text-red-400">{error}</p>
@@ -343,6 +322,9 @@ export function DashboardOverview() {
 
       {/* ---- Workflow Pipeline ---- */}
       <WorkflowPipeline />
+
+      {/* ---- Quick Start Guide ---- */}
+      <QuickStartGuide totalNodes={totalNodes} onlineNodes={onlineNodes} />
 
       {/* ---- Infrastructure Stats ---- */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -450,6 +432,122 @@ function WorkflowPipeline() {
               )}
             </div>
           ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Quick Start Guide                                                 */
+/* ------------------------------------------------------------------ */
+
+const QUICK_START_STEPS = [
+  {
+    step: 1,
+    title: "Deploy or add a node",
+    description: "Register your first Hysteria2 node to the fleet",
+    href: "/admin/nodes",
+    cta: "Manage Nodes",
+    doneKey: "hasNodes" as const,
+  },
+  {
+    step: 2,
+    title: "Create a profile",
+    description: "Set up a reusable configuration template for your nodes",
+    href: "/admin/profiles",
+    cta: "Manage Profiles",
+    doneKey: "always" as const,
+  },
+  {
+    step: 3,
+    title: "Generate client configs",
+    description: "Produce subscription URLs and configs for your users",
+    href: "/admin/configs",
+    cta: "Config Generator",
+    doneKey: "always" as const,
+  },
+  {
+    step: 4,
+    title: "Verify connectivity",
+    description: "Check that nodes are online and clients can connect",
+    href: "/admin",
+    cta: "View Dashboard",
+    doneKey: "hasOnlineNodes" as const,
+  },
+] as const
+
+function QuickStartGuide({
+  totalNodes,
+  onlineNodes,
+}: {
+  totalNodes: number
+  onlineNodes: number
+}) {
+  const checks = {
+    hasNodes: totalNodes > 0,
+    hasOnlineNodes: onlineNodes > 0,
+    always: false,
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">Quick Start</CardTitle>
+        <CardDescription className="text-xs">
+          Get operational in four steps
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {QUICK_START_STEPS.map((s) => {
+            const done = checks[s.doneKey]
+            return (
+              <div
+                key={s.step}
+                className={cn(
+                  "flex flex-col gap-2 rounded-lg border p-3 transition-colors",
+                  done
+                    ? "border-emerald-500/30 bg-emerald-500/5"
+                    : "border-border",
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+                      done
+                        ? "bg-emerald-500 text-white"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {done ? (
+                      <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      s.step
+                    )}
+                  </span>
+                  <span className="text-sm font-medium leading-tight">
+                    {s.title}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-tight">
+                  {s.description}
+                </p>
+                <Link href={s.href} className="mt-auto">
+                  <Button
+                    variant={done ? "outline" : "default"}
+                    size="sm"
+                    className="w-full text-xs"
+                  >
+                    {s.cta}
+                  </Button>
+                </Link>
+              </div>
+            )
+          })}
         </div>
       </CardContent>
     </Card>

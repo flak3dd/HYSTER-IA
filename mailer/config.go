@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
@@ -14,27 +13,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/emersion/go-imap/v2"
-	"github.com/emersion/go-imap/v2/client"
+	"github.com/emersion/go-imap"
+	"github.com/emersion/go-imap/client"
 	"github.com/jhillyerd/enmime"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
-	"golang.org/x/oauth2/microsoft"
 )
 
+// ───── TYPES ─────
+
 type Config struct {
-	GmailClientID     string `json:"gmail_client_id"`
-	GmailClientSecret string `json:"gmail_client_secret"`
-	MSClientID        string `json:"ms_client_id"`
-	MSClientSecret    string `json:"ms_client_secret"`
-	Workers           int    `json:"workers"`
-	DelayMs           int    `json:"delay_ms"`
-	MaxMsgs           int    `json:"max_msgs_per_account"`
+	Workers int `json:"workers"`
+	DelayMs int `json:"delay_ms"`
+	MaxMsgs int `json:"max_msgs_per_account"`
 }
 
 type Account struct {
-	Email    string `json:"email"`
-	Password string `json:"password,omitempty"` // only for self-hosted basic auth
+	Email    string
+	Password string
 }
 
 type Result struct {
@@ -43,35 +37,30 @@ type Result struct {
 	Platform    string
 	Attachments int
 	Error       string
+	Folders     string
 }
 
-type CachedToken struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	Expiry       time.Time `json:"expiry"`
-	TokenType    string    `json:"token_type"`
-}
+// ───── FLAGS ─────
 
 var (
-	configFile   = flag.String("config", "config.json", "Config file (OAuth credentials)")
-	accountsFile = flag.String("accounts", "accounts.txt", "Accounts file: email or email:password")
+	configFile   = flag.String("config", "config.json", "Config file")
+	accountsFile = flag.String("accounts", "accounts.txt", "Accounts file: email:password")
 	outDir       = flag.String("out", "migrated_attachments", "Directory for downloaded attachments")
-	tokensDir    = "tokens"
+	foldersFlag  = flag.String("folders", "INBOX", "Comma-separated folders to scan (e.g. INBOX,Sent,Archive)")
 )
 
-var tokenMu sync.Map // per-email mutex for thread-safe refresh/save
+// ───── MAIN ─────
 
 func main() {
 	flag.Parse()
 
-	// Setup directories
 	os.MkdirAll(*outDir, 0755)
-	os.MkdirAll(tokensDir, 0700)
 
 	cfg := loadConfig(*configFile)
 	accounts := loadAccounts(*accountsFile)
+	folders := parseFolders(*foldersFlag)
 
-	log.Printf("🚀 Full IMAP XOAUTH2 Migrator with Token Caching started — %d accounts", len(accounts))
+	log.Printf("IMAP Migrator — %d accounts | Folders: %v | Workers: %d", len(accounts), folders, cfg.Workers)
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, cfg.Workers)
@@ -86,13 +75,13 @@ func main() {
 
 			time.Sleep(time.Duration(cfg.DelayMs) * time.Millisecond)
 
-			res := processAccount(acc, cfg)
+			res := processAccount(acc, cfg, folders)
 			results <- res
 
 			if res.Status == "SUCCESS" {
-				log.Printf("✅ %s (%s) — %d attachments downloaded", res.Email, res.Platform, res.Attachments)
+				log.Printf("OK %s (%s) — %d attachments from folders: %s", res.Email, res.Platform, res.Attachments, res.Folders)
 			} else {
-				log.Printf("❌ %s — %s", res.Email, res.Error)
+				log.Printf("FAIL %s — %s", res.Email, res.Error)
 			}
 		}(acc)
 	}
@@ -101,7 +90,24 @@ func main() {
 	close(results)
 	writeReport(results)
 
-	log.Println("✅ Process finished. Tokens cached in ./tokens/ | Attachments in " + *outDir)
+	log.Println("Finished. Attachments saved in " + *outDir)
+}
+
+// ───── CONFIG & ACCOUNTS ─────
+
+func parseFolders(flagValue string) []string {
+	if flagValue == "" {
+		return []string{"INBOX"}
+	}
+	parts := strings.Split(flagValue, ",")
+	var clean []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			clean = append(clean, p)
+		}
+	}
+	return clean
 }
 
 func loadConfig(path string) Config {
@@ -140,207 +146,99 @@ func loadAccounts(path string) []Account {
 			continue
 		}
 		parts := strings.SplitN(line, ":", 2)
-		email := strings.TrimSpace(parts[0])
-		pass := ""
-		if len(parts) == 2 {
-			pass = strings.TrimSpace(parts[1])
+		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+			log.Printf("Skipping line (no password): %s", line)
+			continue
 		}
-		accounts = append(accounts, Account{Email: email, Password: pass})
+		accounts = append(accounts, Account{
+			Email:    strings.TrimSpace(parts[0]),
+			Password: strings.TrimSpace(parts[1]),
+		})
 	}
 	return accounts
 }
 
-// ───── TOKEN CACHING (FULL IMPLEMENTATION) ─────
+// ───── ACCOUNT PROCESSING ─────
 
-func loadCachedToken(email string) (*oauth2.Token, error) {
-	path := filepath.Join(tokensDir, sanitizeEmail(email)+".json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var ct CachedToken
-	if err := json.Unmarshal(data, &ct); err != nil {
-		return nil, err
-	}
-	return &oauth2.Token{
-		AccessToken:  ct.AccessToken,
-		RefreshToken: ct.RefreshToken,
-		Expiry:       ct.Expiry,
-		TokenType:    ct.TokenType,
-	}, nil
-}
-
-func saveToken(email string, token *oauth2.Token) error {
-	ct := CachedToken{
-		AccessToken:  token.AccessToken,
-		RefreshToken: token.RefreshToken,
-		Expiry:       token.Expiry,
-		TokenType:    token.TokenType,
-	}
-	data, _ := json.MarshalIndent(ct, "", "  ")
-	path := filepath.Join(tokensDir, sanitizeEmail(email)+".json")
-	return os.WriteFile(path, data, 0600) // secure permissions
-}
-
-func sanitizeEmail(email string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(email, "@", "_at_"), ".", "_")
-}
-
-type SavingTokenSource struct {
-	source oauth2.TokenSource
-	email  string
-	mu     *sync.Mutex
-}
-
-func (s *SavingTokenSource) Token() (*oauth2.Token, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	t, err := s.source.Token()
-	if err != nil {
-		return nil, err
-	}
-	_ = saveToken(s.email, t) // save on every refresh
-	return t, nil
-}
-
-// ───── MAIN ACCOUNT PROCESSOR ─────
-
-func processAccount(acc Account, cfg Config) Result {
-	domain := strings.Split(acc.Email, "@")[1]
-	platform := detectPlatform(domain)
+func processAccount(acc Account, cfg Config, folders []string) Result {
+	platform := detectPlatform(acc.Email)
 	res := Result{Email: acc.Email, Platform: platform}
 
-	if platform == "selfhosted" {
-		return doIMAPBasic(acc, res) // basic auth fallback
+	totalAttach := 0
+	var processed []string
+
+	for _, folder := range folders {
+		count, err := processFolder(acc, folder)
+		if err != nil {
+			log.Printf("Warning: folder %s failed for %s: %v", folder, acc.Email, err)
+			continue
+		}
+		processed = append(processed, folder)
+		totalAttach += count
 	}
 
-	// Cloud OAuth2 with full caching
-	token, err := getTokenWithCache(acc.Email, platform, cfg)
-	if err != nil {
+	res.Attachments = totalAttach
+	res.Folders = strings.Join(processed, ";")
+	if len(processed) == 0 {
 		res.Status = "FAIL"
-		res.Error = "OAuth token: " + err.Error()
-		return res
+		res.Error = "all folders failed"
+	} else {
+		res.Status = "SUCCESS"
 	}
-
-	err = doIMAPXOAuth(acc.Email, token.AccessToken, platform, &res)
-	if err != nil {
-		res.Status = "FAIL"
-		res.Error = "IMAP XOAUTH2: " + err.Error()
-		return res
-	}
-
-	res.Status = "SUCCESS"
 	return res
 }
 
-func getTokenWithCache(email, platform string, cfg Config) (*oauth2.Token, error) {
-	// Try cache first
-	if token, err := loadCachedToken(email); err == nil && token.Valid() {
-		log.Printf("🔑 Using cached token for %s", email)
-		return token, nil
-	}
+func processFolder(acc Account, folder string) (int, error) {
+	host := getIMAPHost(acc.Email)
+	addr := host + ":993"
 
-	// Build OAuth config
-	var conf *oauth2.Config
-	if platform == "gmail" {
-		conf = &oauth2.Config{
-			ClientID:     cfg.GmailClientID,
-			ClientSecret: cfg.GmailClientSecret,
-			Scopes:       []string{"https://mail.google.com/"},
-			Endpoint:     google.Endpoint,
-		}
-	} else {
-		conf = &oauth2.Config{
-			ClientID:     cfg.MSClientID,
-			ClientSecret: cfg.MSClientSecret,
-			Scopes:       []string{"https://outlook.office.com/IMAP.AccessAsUser.All", "offline_access"},
-			Endpoint:     microsoft.AzureADEndpoint("common"),
-		}
-	}
-
-	// Device code flow (only when needed)
-	token, err := performDeviceCodeFlow(conf, email)
+	c, err := client.DialTLS(addr, &tls.Config{ServerName: host})
 	if err != nil {
-		return nil, err
-	}
-	return token, nil
-}
-
-func performDeviceCodeFlow(conf *oauth2.Config, email string) (*oauth2.Token, error) {
-	ctx := context.Background()
-	code, err := conf.DeviceAuth(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	fmt.Printf("\n🔐 OAuth2 Device Flow for %s\n", email)
-	fmt.Printf("1. Go to: %s\n", code.VerificationURI)
-	fmt.Printf("2. Enter code: %s\n", code.UserCode)
-	fmt.Println("Waiting for approval...")
-
-	token, err := conf.DeviceAccessToken(ctx, code)
-	if err != nil {
-		return nil, err
-	}
-
-	_ = saveToken(email, token)
-	return token, nil
-}
-
-// ───── XOAUTH2 + ATTACHMENT DOWNLOAD ─────
-
-func doIMAPXOAuth(email, accessToken, platform string, res *Result) error {
-	host := getIMAPHost(email)
-
-	c, err := client.DialTLS(host+":993", &tls.Config{ServerName: host})
-	if err != nil {
-		return fmt.Errorf("dial: %w", err)
+		return 0, fmt.Errorf("dial %s: %w", addr, err)
 	}
 	defer c.Logout()
 
-	// XOAUTH2 SASL
-	xoauth := &xoauth2Client{user: email, token: accessToken}
-	if err := c.Authenticate(xoauth); err != nil {
-		return fmt.Errorf("XOAUTH2 auth: %w", err)
+	// Plain IMAP LOGIN — works with app passwords for Gmail/Microsoft
+	if err := c.Login(acc.Email, acc.Password); err != nil {
+		return 0, fmt.Errorf("login: %w", err)
 	}
 
-	return downloadAttachments(c, email, res)
-}
-
-type xoauth2Client struct {
-	user  string
-	token string
-}
-
-func (a *xoauth2Client) Start() (string, []byte, error) {
-	resp := fmt.Sprintf("user=%s\x01auth=Bearer %s\x01\x01", a.user, a.token)
-	return "XOAUTH2", []byte(resp), nil
-}
-
-func (a *xoauth2Client) Next([]byte) ([]byte, error) { return nil, nil }
-
-func downloadAttachments(c *client.Client, email string, res *Result) error {
-	_, err := c.Select("INBOX", false)
+	// Select folder
+	_, err = c.Select(folder, true) // read-only
 	if err != nil {
-		return err
+		// Try common variations
+		if folder == "Sent" {
+			_, err = c.Select("Sent Items", true)
+		} else if folder == "Trash" {
+			_, err = c.Select("[Gmail]/Trash", true)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("select %s: %w", folder, err)
+		}
 	}
 
-	seqSet := &imap.SeqSet{}
-	seqSet.AddRange(1, uint32(500)) // safety limit
+	return downloadAttachments(c, acc.Email, folder)
+}
 
-	fetch := []imap.FetchItem{imap.FetchRFC822}
+// ───── ATTACHMENT DOWNLOAD ─────
+
+func downloadAttachments(c *client.Client, email, folder string) (int, error) {
+	seqSet := new(imap.SeqSet)
+	seqSet.AddRange(1, 500)
+
+	section := &imap.BodySectionName{}
+	items := []imap.FetchItem{section.FetchItem()}
 	msgs := make(chan *imap.Message, 20)
 	done := make(chan error, 1)
 
-	go func() { done <- c.Fetch(seqSet, fetch, msgs) }()
+	go func() { done <- c.Fetch(seqSet, items, msgs) }()
 
 	count := 0
 	for msg := range msgs {
 		if msg == nil {
 			continue
 		}
-		body := msg.GetBody(imap.FetchRFC822)
+		body := msg.GetBody(section)
 		if body == nil {
 			continue
 		}
@@ -352,65 +250,63 @@ func downloadAttachments(c *client.Client, email string, res *Result) error {
 
 		for _, att := range append(env.Attachments, env.Inlines...) {
 			if len(att.Content) > 0 {
-				saveAttachment(email, env.GetHeader("Subject"), att)
+				saveAttachment(email, folder, att)
 				count++
 			}
 		}
 	}
 	<-done
-	res.Attachments = count
-	return nil
+	return count, nil
 }
 
-func saveAttachment(email, subject string, att *enmime.Part) {
-	safeEmail := strings.ReplaceAll(email, "@", "_at_")
-	folder := filepath.Join(*outDir, safeEmail)
-	os.MkdirAll(folder, 0755)
+func saveAttachment(email, folder string, att *enmime.Part) {
+	safeEmail := strings.ReplaceAll(strings.ReplaceAll(email, "@", "_at_"), ".", "_")
+	folderPath := filepath.Join(*outDir, safeEmail, folder)
+	os.MkdirAll(folderPath, 0755)
 
 	fname := att.FileName
 	if fname == "" {
 		fname = fmt.Sprintf("attachment_%s", time.Now().Format("20060102_150405"))
 	}
-	path := filepath.Join(folder, fname)
+	path := filepath.Join(folderPath, fname)
 	_ = os.WriteFile(path, att.Content, 0644)
 }
+
+// ───── HELPERS ─────
 
 func getIMAPHost(email string) string {
 	domain := strings.ToLower(strings.Split(email, "@")[1])
 	switch {
 	case strings.Contains(domain, "gmail") || strings.Contains(domain, "google"):
 		return "imap.gmail.com"
-	case strings.Contains(domain, "outlook") || strings.Contains(domain, "office365") || strings.Contains(domain, "microsoft"):
+	case strings.Contains(domain, "outlook") || strings.Contains(domain, "office365") || strings.Contains(domain, "microsoft") || strings.Contains(domain, "hotmail") || strings.Contains(domain, "live"):
 		return "outlook.office365.com"
+	case strings.Contains(domain, "yahoo"):
+		return "imap.mail.yahoo.com"
 	default:
 		return "imap." + domain
 	}
 }
 
-func detectPlatform(domain string) string {
-	domain = strings.ToLower(domain)
-	if strings.Contains(domain, "gmail") || strings.Contains(domain, "google") {
+func detectPlatform(email string) string {
+	domain := strings.ToLower(strings.Split(email, "@")[1])
+	switch {
+	case strings.Contains(domain, "gmail") || strings.Contains(domain, "google"):
 		return "gmail"
-	}
-	if strings.Contains(domain, "outlook") || strings.Contains(domain, "office365") || strings.Contains(domain, "microsoft") {
+	case strings.Contains(domain, "outlook") || strings.Contains(domain, "office365") || strings.Contains(domain, "microsoft") || strings.Contains(domain, "hotmail") || strings.Contains(domain, "live"):
 		return "microsoft"
+	case strings.Contains(domain, "yahoo"):
+		return "yahoo"
+	default:
+		return "other"
 	}
-	return "selfhosted"
-}
-
-func doIMAPBasic(acc Account, res Result) Result {
-	// Basic auth fallback for private servers (same as earlier versions)
-	// ... (implement if needed — omitted for brevity, uses standard LOGIN)
-	res.Status = "SUCCESS"
-	res.Attachments = 0
-	return res
 }
 
 func writeReport(results chan Result) {
 	f, _ := os.Create("migration-report.csv")
 	defer f.Close()
-	fmt.Fprintln(f, "email,status,platform,attachments,error")
+	fmt.Fprintln(f, "email,status,platform,attachments,folders,error")
 	for r := range results {
-		fmt.Fprintf(f, "%s,%s,%s,%d,%s\n", r.Email, r.Status, r.Platform, r.Attachments, r.Error)
+		fmt.Fprintf(f, "%s,%s,%s,%d,%s,%s\n", r.Email, r.Status, r.Platform, r.Attachments, r.Folders, r.Error)
 	}
 }

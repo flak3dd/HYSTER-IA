@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
-import { getProfileById, updateProfile } from "@/lib/db/profiles"
+import { getProfileById, updateProfile, resolveProfileConfig } from "@/lib/db/profiles"
 import { getNodeById, updateNode } from "@/lib/db/nodes"
 
 export const runtime = "nodejs"
@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic"
  * POST /api/admin/profiles/:id/apply
  * Body: { nodeIds: string[] }
  *
- * Links nodes to this profile and applies profile tags to each node.
+ * Links nodes to this profile, applies profile tags to each node,
+ * and sets profileId so config generation uses the profile's resolved config.
  */
 export async function POST(
   req: NextRequest,
@@ -35,18 +36,25 @@ export async function POST(
       return NextResponse.json({ error: "nodes_not_found", missing }, { status: 404 })
     }
 
+    // Resolve the profile config (generates obfs password if needed)
+    const resolved = resolveProfileConfig(profile)
+
     // Update profile to include these node IDs
     const existingIds = new Set(profile.nodeIds)
     for (const nid of nodeIds) existingIds.add(nid)
     await updateProfile(id, { nodeIds: [...existingIds] })
 
-    // Apply profile tags to each node
+    // Apply profile tags + profileId + listen address to each node
     const results: { nodeId: string; ok: boolean }[] = []
     for (let i = 0; i < nodeIds.length; i++) {
       const node = nodes[i]!
       const mergedTags = [...new Set([...node.tags, ...profile.tags])]
       try {
-        await updateNode(nodeIds[i], { tags: mergedTags })
+        await updateNode(nodeIds[i], {
+          tags: mergedTags,
+          profileId: id,
+          listenAddr: resolved.listen,
+        })
         results.push({ nodeId: nodeIds[i], ok: true })
       } catch {
         results.push({ nodeId: nodeIds[i], ok: false })
@@ -57,6 +65,7 @@ export async function POST(
       applied: results.filter((r) => r.ok).length,
       failed: results.filter((r) => !r.ok).length,
       results,
+      resolvedConfig: resolved,
     })
   } catch (err) {
     return toErrorResponse(err)

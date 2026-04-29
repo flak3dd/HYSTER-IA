@@ -46,7 +46,7 @@ function LoginForm() {
         const res = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ username: email, password }),
+          body: JSON.stringify({ username: email, password, next }),
         })
         
         if (!res.ok) {
@@ -64,7 +64,7 @@ function LoginForm() {
           
           // Wait a moment for cookies to be set, then redirect
           setTimeout(() => {
-            window.location.href = data.redirect || next
+            window.location.href = data.redirect || "/admin"
           }, 500)
         } else {
           setError("Login failed")
