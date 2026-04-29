@@ -1,7 +1,7 @@
 "use client"
 
 import { Suspense, useState, useTransition } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,7 +28,6 @@ function LoginSkeleton() {
 }
 
 function LoginForm() {
-  const router = useRouter()
   const params = useSearchParams()
   const next = params.get("next") ?? "/admin"
 
