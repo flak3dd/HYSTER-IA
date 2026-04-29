@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
 import { writeFile, unlink } from "node:fs/promises"

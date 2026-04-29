@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { verifyAdmin } from "@/lib/auth/admin"
 import { EgressManager } from "@/lib/infrastructure/egress-manager"
-import { EgressNode, EgressNodeStatus, ProxyRotationStrategy } from "@/lib/infrastructure/egress-manager"
 
 // Global egress manager instance
 let egressManager: EgressManager | null = null

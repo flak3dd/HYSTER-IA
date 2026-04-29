@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -149,9 +149,13 @@ export default function ConfigAuditPage() {
     }
   }, [])
 
+  const didMount = useRef(false)
   useEffect(() => {
-    runAudit()
-  }, [runAudit])
+    if (!didMount.current) {
+      didMount.current = true
+      void runAudit()
+    }
+  })
 
   const filteredFindings = result?.findings
     .filter((f) => {

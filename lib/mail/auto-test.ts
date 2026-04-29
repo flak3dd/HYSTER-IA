@@ -6,7 +6,7 @@ import type { MailTestResult, AutoTestState } from "@/lib/mail/types"
 /*  In-memory auto-test state (survives across requests in dev/prod)  */
 /* ------------------------------------------------------------------ */
 
-let state: AutoTestState = {
+const state: AutoTestState = {
   enabled: false,
   intervalMinutes: 30,
   lastRun: null,

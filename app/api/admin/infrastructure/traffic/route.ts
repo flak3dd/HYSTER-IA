@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { verifyAdmin } from "@/lib/auth/admin"
 import { TrafficRouter } from "@/lib/infrastructure/traffic-router"
-import { TrafficType, RoutingStrategy } from "@/lib/infrastructure/traffic-router"
 
 // Global traffic router instance
 let trafficRouter: TrafficRouter | null = null
 
 function getTrafficRouter(): TrafficRouter {
   if (!trafficRouter) {
-    // Initialize with egress manager and fronting manager
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { EgressManager } = require("@/lib/infrastructure/egress-manager")
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { DomainFrontingManager } = require("@/lib/infrastructure/domain-fronting")
     
     const egressManager = new EgressManager({

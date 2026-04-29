@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any */
 import { ImplantGenerator } from "./lib/implants/generator"
 import { RedTeamPlanner } from "./lib/redteam/planner"
 import { TrafficBlender } from "./lib/traffic/blending"
