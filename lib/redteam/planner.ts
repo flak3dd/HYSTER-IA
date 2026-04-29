@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 

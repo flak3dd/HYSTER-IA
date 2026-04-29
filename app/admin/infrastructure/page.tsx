@@ -1,6 +1,3 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { InfrastructureOverview } from "@/components/admin/infrastructure/overview"
 
 export const dynamic = "force-dynamic"
