@@ -68,5 +68,5 @@ export type AiTemplate = {
   label: string
   description: string
   prompt: string
-  category: "config" | "traffic" | "troubleshoot" | "management"
+  category: "config" | "traffic" | "troubleshoot" | "management" | "payload"
 }

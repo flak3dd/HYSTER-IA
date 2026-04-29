@@ -549,3 +549,63 @@ model ScheduledWorkflow {
 
   @@map("scheduled_workflows")
 }
+
+// ShadowGrok-specific models for autonomous C2 operations
+
+model ShadowGrokExecution {
+  id              String   @id @default(cuid())
+  conversationId  String?
+  userId          String
+  userMessage     String
+  finalResponse   String
+  model           String
+  toolExecutions  Int      @default(0)
+  successfulExecutions Int   @default(0)
+  failedExecutions Int     @default(0)
+  approvalRequired Boolean @default(false)
+  status          String   @default("completed") // completed, failed, pending_approval, cancelled
+  error           String?
+  executionTimeMs Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  toolCalls       ShadowGrokToolCall[]
+
+  @@map("shadowgrok_executions")
+}
+
+model ShadowGrokToolCall {
+  id              String   @id @default(cuid())
+  executionId     String
+  execution       ShadowGrokExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  toolName        String
+  arguments       Json
+  result          Json?
+  success         Boolean
+  requiresApproval Boolean @default(false)
+  approvalGranted Boolean?
+  approvedBy      String?
+  approvedAt      DateTime?
+  executionTimeMs Int?
+  error           String?
+  executedAt      DateTime @default(now())
+
+  @@map("shadowgrok_tool_calls")
+}
+
+model ShadowGrokApproval {
+  id              String   @id @default(cuid())
+  toolCallId      String
+  toolName        String
+  arguments       Json
+  requestedBy     String
+  requestedAt     DateTime @default(now())
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  reason          String?
+  status          String   @default("pending") // pending, approved, rejected, expired
+  expiresAt       DateTime?
+
+  @@map("shadowgrok_approvals")
+}

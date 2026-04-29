@@ -29,7 +29,7 @@
     "jose": "^6.2.2",
     "lucide-react": "^1.8.0",
     "mailparser": "^3.9.8",
-    "next": "16.2.4",
+    "next": "^16.2.4",
     "node-pop3": "^0.11.0",
     "nodemailer": "^8.0.5",
     "rate-limiter-flexible": "^5.0.3",

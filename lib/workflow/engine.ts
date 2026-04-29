@@ -11,9 +11,11 @@ import type {
   WorkflowStepResponse,
 } from './types'
 import { ResponseGenerator } from './response-generator'
+import { getProactiveIntelligence } from './proactive-intelligence'
 
 const prisma = new PrismaClient()
 const responseGenerator = new ResponseGenerator()
+const proactiveIntelligence = getProactiveIntelligence()
 
 export class WorkflowEngine {
   /**
@@ -85,11 +87,38 @@ export class WorkflowEngine {
       // Analyze the user's intent based on the initial request or response
       const intentAnalysis = await this.analyzeIntent(session, currentStep)
 
-      // Generate enhanced response using the response generator
-      const enhancedMessage = responseGenerator.generateResponse(
+      // Get proactive suggestions
+      const proactiveSuggestions = await proactiveIntelligence.generatePredictiveSuggestions({
+        currentWorkflow: intentAnalysis.suggestedChaining,
+        systemState: session.context as Record<string, unknown>
+      })
+
+      // Generate enhanced response using the response generator with proactive suggestions
+      let enhancedMessage = responseGenerator.generateResponse(
         intentAnalysis,
         session.context as Record<string, unknown>
       )
+
+      // Add proactive suggestions to the response
+      if (proactiveSuggestions.length > 0) {
+        enhancedMessage += '\n\n**💡 Proactive Suggestions:**\n'
+        proactiveSuggestions.slice(0, 3).forEach((suggestion, index) => {
+          enhancedMessage += `${index + 1}. **${suggestion.title}** (${suggestion.priority}): ${suggestion.description}\n`
+        })
+      }
+
+      // Optimize workflow if chaining is suggested
+      if (intentAnalysis.suggestedChaining && intentAnalysis.suggestedChaining.length > 2) {
+        const optimization = proactiveIntelligence.optimizeWorkflow(intentAnalysis.suggestedChaining)
+        if (optimization.improvements.length > 0) {
+          enhancedMessage += `\n\n**⚡ Workflow Optimization:**\n`
+          enhancedMessage += `Found ${optimization.improvements.length} optimization(s):\n`
+          optimization.improvements.forEach(improvement => {
+            enhancedMessage += `- ${improvement}\n`
+          })
+          enhancedMessage += `Estimated time saved: ${optimization.timeSaved}s\n`
+        }
+      }
 
       // Determine the next action based on intent analysis
       if (intentAnalysis.requiresClarification) {
@@ -107,6 +136,7 @@ export class WorkflowEngine {
             context: JSON.parse(JSON.stringify({
               ...(typeof session.context === 'object' ? session.context : {}),
               intentAnalysis,
+              proactiveSuggestions,
             })),
           },
         })
@@ -140,6 +170,7 @@ export class WorkflowEngine {
             context: JSON.parse(JSON.stringify({
               ...(typeof session.context === 'object' ? session.context : {}),
               intentAnalysis,
+              proactiveSuggestions,
             })),
           },
         })
@@ -187,11 +218,17 @@ export class WorkflowEngine {
         }
       }
     } catch (error) {
-      // Enhanced error handling with recovery suggestions
+      // Enhanced error handling with recovery suggestions and proactive analysis
       const errorMessage = responseGenerator.generateErrorRecovery(
         error instanceof Error ? error : new Error(String(error)),
         session.context as Record<string, unknown>
       )
+
+      // Log error for proactive learning
+      await proactiveIntelligence.generatePredictiveSuggestions({
+        recentErrors: [error instanceof Error ? error.message : String(error)],
+        systemState: session.context as Record<string, unknown>
+      })
 
       // Handle errors
       await prisma.workflowSession.update({

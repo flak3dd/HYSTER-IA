@@ -54,6 +54,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   traffic: "bg-green-500/10 text-green-700 dark:text-green-300",
   troubleshoot: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
   management: "bg-purple-500/10 text-purple-700 dark:text-purple-300",
+  payload: "bg-red-500/10 text-red-700 dark:text-red-300",
 }
 
 /* ------------------------------------------------------------------ */
@@ -242,7 +243,7 @@ export function AiChatView() {
         <h1 className="text-xl font-bold">AI Assistant</h1>
         <p className="text-sm text-muted-foreground">
           Multi-tool agent for config generation, traffic analysis, troubleshooting,
-          and infrastructure management. Conversations are stored in Firestore for audit.
+          payload creation, and infrastructure management. Conversations are stored in Firestore for audit.
         </p>
       </div>
 
@@ -402,6 +403,10 @@ export function AiChatView() {
               <ToolBadge name="troubleshoot" desc="Diagnostic checks" />
               <ToolBadge name="list_profiles" desc="List config profiles" />
               <ToolBadge name="get_server_logs" desc="View server logs" />
+              <ToolBadge name="generate_payload" desc="Build EXE/ELF/PS1/Python payloads" />
+              <ToolBadge name="list_payloads" desc="List payload builds" />
+              <ToolBadge name="get_payload_status" desc="Check build status" />
+              <ToolBadge name="delete_payload" desc="Delete payload artifacts" />
             </CardContent>
           </Card>
 
@@ -417,7 +422,7 @@ export function AiChatView() {
               </p>
               <p>
                 All conversations and tool calls are persisted in Firestore for audit.
-                Generated configs are <strong>previews only</strong>.
+                Generated configs and payloads are <strong>previews only</strong> — review before deployment.
               </p>
             </CardContent>
           </Card>

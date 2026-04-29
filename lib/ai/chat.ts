@@ -5,9 +5,65 @@ import type { AiMessage } from "@/lib/ai/types"
 
 const MAX_TOOL_ROUNDS = 10
 
+// Format tool results for human-readable summary
+function formatToolResultSummary(toolName: string, result: unknown): string {
+  if (toolName === "generate_payload") {
+    const r = result as { buildId: string; preview: { name: string; type: string; status: string }; explanation: string }
+    return `**Payload Build Started**
+
+**Build ID**: \`${r.buildId}\`
+**Name**: ${r.preview.name}
+**Type**: ${r.preview.type.replace("_", " ").toUpperCase()}
+**Status**: ${r.preview.status}
+
+${r.explanation}
+
+The build is now in progress. Use "Check status of ${r.buildId}" to see when it's ready for download.`
+  }
+  
+  if (toolName === "list_payloads") {
+    const r = result as { payloads: Array<{ id: string; name: string; type: string; status: string; sizeBytes?: number }>; total: number }
+    if (r.payloads.length === 0) {
+      return "No payload builds found. Generate one with: \"Build a Windows EXE payload\""
+    }
+    const list = r.payloads.map(p => 
+      `- **${p.name}** (\`${p.id.slice(0, 8)}\`) — ${p.type.replace("_", " ").toUpperCase()} — ${p.status}${p.sizeBytes ? ` — ${(p.sizeBytes / 1024 / 1024).toFixed(1)} MB` : ""}`
+    ).join("\n")
+    return `**Your Payload Builds** (${r.total} total)\n\n${list}`
+  }
+  
+  return `Tool \`${toolName}\` executed successfully.`
+}
+
+// Simple rule-based payload intent detection (used when LLM unavailable)
+function detectPayloadIntent(message: string): { toolName: string; args: Record<string, unknown> } | null {
+  const lower = message.toLowerCase()
+  
+  // List payloads intent
+  if (lower.includes("list") && (lower.includes("payload") || lower.includes("build"))) {
+    return { toolName: "list_payloads", args: { limit: 20 } }
+  }
+  
+  // Generate payload intent
+  if (lower.includes("generate") || lower.includes("build") || lower.includes("create")) {
+    if (lower.includes("payload") || lower.includes("exe") || lower.includes("elf") || 
+        lower.includes("powershell") || lower.includes("python") || lower.includes("script")) {
+      return { toolName: "generate_payload", args: { description: message } }
+    }
+  }
+  
+  // Get payload status intent
+  if ((lower.includes("status") || lower.includes("ready") || lower.includes("done")) && 
+      (lower.includes("payload") || lower.includes("build"))) {
+    return { toolName: "list_payloads", args: { limit: 10 } }
+  }
+  
+  return null
+}
+
 const SYSTEM_PROMPT = [
   "You are a multi-tool operations assistant inside a Hysteria 2 admin panel.",
-  "You help administrators manage their Hysteria2 proxy infrastructure.",
+  "You help administrators manage their Hysteria2 proxy infrastructure and create payloads for security testing.",
   "",
   "Available capabilities:",
   "- Generate Hysteria2 server configurations from natural language descriptions",
@@ -16,13 +72,23 @@ const SYSTEM_PROMPT = [
   "- Troubleshoot server issues (TLS, throughput, connectivity, auth)",
   "- List configuration profiles",
   "- View server logs",
+  "- **Generate payloads** (Windows EXE, Linux ELF, macOS APP, PowerShell, Python) with obfuscation",
+  "- **List and monitor payload builds** with download links when ready",
+  "- **Delete payloads** when no longer needed",
   "",
-  "Guidelines:",
+  "Payload Guidelines:",
+  "- Always ask for platform preference if not specified (Windows/Linux/macOS)",
+  "- Recommend obfuscation level based on use case (light=testing, heavy=stealth)",
+  "- Explain the build process and estimated completion time",
+  "- Provide download links when builds complete",
+  "- Remind users that payloads include embedded Hysteria2 client configs",
+  "",
+  "General Guidelines:",
   "- Use tools to gather real data before answering questions about the system state.",
-  "- When generating configs, always remind the admin to review before applying.",
+  "- When generating configs or payloads, always remind the admin to review before applying.",
   "- Be concise and actionable. Prefer tool calls over speculation.",
   "- If you cannot accomplish something with the available tools, say so clearly.",
-  "- Format configs and technical output in code blocks.",
+  "- Format configs, code, and technical output in code blocks.",
   "- Do not attempt to evade rate limits or bypass access controls on external sites.",
 ].join("\n")
 
@@ -86,11 +152,65 @@ export async function runChat(
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const result = await chatComplete({
-        messages: llmMessages,
-        tools,
-        temperature: 0.3,
-      })
+      let result: { content: string | null; toolCalls: { id: string; type: "function"; function: { name: string; arguments: string } }[]; finishReason: string | null }
+      
+      try {
+        result = await chatComplete({
+          messages: llmMessages,
+          tools,
+          temperature: 0.3,
+        })
+      } catch (llmErr) {
+        // LLM unavailable - try rule-based fallback for payload intents
+        const payloadIntent = detectPayloadIntent(userMessage)
+        if (payloadIntent) {
+          // Execute the tool directly
+          const toolResult = await runAiTool(
+            payloadIntent.toolName,
+            payloadIntent.args,
+            { signal: AbortSignal.timeout(60_000), invokerUid }
+          )
+          
+          // Create synthetic responses
+          const assistantMsg: AiMessage = {
+            role: "assistant",
+            content: `I'll help you with that. Executing ${payloadIntent.toolName}...`,
+            toolCalls: [{
+              id: `fallback-${Date.now()}`,
+              name: payloadIntent.toolName,
+              arguments: JSON.stringify(payloadIntent.args),
+            }],
+            timestamp: Date.now(),
+          }
+          newMessages.push(assistantMsg)
+          
+          const toolMsg: AiMessage = {
+            role: "tool",
+            content: null,
+            toolResult: {
+              toolCallId: `fallback-${Date.now()}`,
+              name: payloadIntent.toolName,
+              content: JSON.stringify(toolResult),
+            },
+            timestamp: Date.now(),
+          }
+          newMessages.push(toolMsg)
+          
+          // Add final summary message
+          const summaryMsg: AiMessage = {
+            role: "assistant",
+            content: formatToolResultSummary(payloadIntent.toolName, toolResult),
+            timestamp: Date.now(),
+          }
+          newMessages.push(summaryMsg)
+          
+          await appendMessages(conversationId, newMessages)
+          return { messages: newMessages }
+        }
+        
+        // No payload intent detected, re-throw the LLM error
+        throw llmErr
+      }
 
       if (result.toolCalls.length > 0) {
         // Assistant message with tool calls

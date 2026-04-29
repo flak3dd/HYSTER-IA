@@ -1,6 +1,4 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+const nextConfig = {
   serverExternalPackages: ["ssh2"],
   // Production deployment configuration
   output: process.env.NODE_ENV === 'production' ? 'standalone' : undefined,
@@ -38,4 +36,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+module.exports = nextConfig;

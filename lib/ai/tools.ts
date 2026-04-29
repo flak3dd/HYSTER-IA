@@ -7,6 +7,14 @@ import { listProfiles } from "@/lib/db/profiles"
 import { getServerConfig } from "@/lib/db/server-config"
 import { getStatus as getManagerStatus, getLogs } from "@/lib/hysteria/manager"
 import { fetchTraffic, fetchOnline } from "@/lib/hysteria/traffic"
+import {
+  createPayloadBuild,
+  getPayloadBuild,
+  listPayloadBuilds,
+  deletePayloadBuild,
+  generatePayloadFromDescription,
+  type PayloadBuild,
+} from "@/lib/payloads/generator"
 
 /* ------------------------------------------------------------------ */
 /*  Tool: generate_config                                             */
@@ -512,6 +520,183 @@ export const getServerLogsTool: AgentTool<
 }
 
 /* ------------------------------------------------------------------ */
+/*  Tool: generate_payload                                            */
+/* ------------------------------------------------------------------ */
+
+const GeneratePayloadInput = z.object({
+  description: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe("Natural language description of the payload to build. Include platform (Windows/Linux/macOS), format (EXE/ELF/APP/PowerShell/Python), obfuscation level (none/light/medium/heavy), and any specific features needed."),
+})
+
+export const generatePayloadTool: AgentTool<
+  z.infer<typeof GeneratePayloadInput>,
+  { buildId: string; preview: PayloadBuild; explanation: string }
+> = {
+  name: "generate_payload",
+  description:
+    "Generate a new payload from natural language description. Creates Windows EXE, Linux ELF, macOS app, PowerShell script, or Python payload with optional obfuscation and code signing. Returns a build ID to track progress.",
+  parameters: GeneratePayloadInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      description: {
+        type: "string",
+        description: "Describe the payload: platform, format, obfuscation level, signing requirements",
+      },
+    },
+    required: ["description"],
+  },
+  async run(input, ctx) {
+    const { config, explanation } = await generatePayloadFromDescription(
+      input.description,
+      ctx.invokerUid
+    )
+    const build = await createPayloadBuild(config, ctx.invokerUid)
+    return { buildId: build.id, preview: build, explanation }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: list_payloads                                               */
+/* ------------------------------------------------------------------ */
+
+const ListPayloadsInput = z.object({
+  limit: z.number().int().min(1).max(100).default(20),
+})
+
+export const listPayloadsTool: AgentTool<
+  z.infer<typeof ListPayloadsInput>,
+  {
+    payloads: Array<{
+      id: string
+      name: string
+      type: string
+      status: string
+      sizeBytes?: number
+      createdAt: number
+    }>
+    total: number
+  }
+> = {
+  name: "list_payloads",
+  description: "List all payload builds with their status, type, and download availability",
+  parameters: ListPayloadsInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+    },
+  },
+  async run(input, ctx) {
+    const builds = await listPayloadBuilds(ctx.invokerUid, input.limit)
+    return {
+      payloads: builds.map((b) => ({
+        id: b.id,
+        name: b.name,
+        type: b.type,
+        status: b.status,
+        sizeBytes: b.sizeBytes,
+        createdAt: b.createdAt,
+      })),
+      total: builds.length,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: get_payload_status                                          */
+/* ------------------------------------------------------------------ */
+
+const GetPayloadStatusInput = z.object({
+  buildId: z.string().min(1).describe("The payload build ID to check"),
+})
+
+export const getPayloadStatusTool: AgentTool<
+  z.infer<typeof GetPayloadStatusInput>,
+  {
+    found: boolean
+    payload?: {
+      id: string
+      name: string
+      type: string
+      status: string
+      buildLogs: string[]
+      downloadUrl?: string
+      sizeBytes?: number
+      createdAt: number
+      completedAt?: number
+      errorMessage?: string
+    }
+  }
+> = {
+  name: "get_payload_status",
+  description: "Get detailed status of a specific payload build including build logs and download URL when ready",
+  parameters: GetPayloadStatusInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      buildId: { type: "string", description: "Payload build ID" },
+    },
+    required: ["buildId"],
+  },
+  async run(input) {
+    const build = await getPayloadBuild(input.buildId)
+    if (!build) {
+      return { found: false }
+    }
+    return {
+      found: true,
+      payload: {
+        id: build.id,
+        name: build.name,
+        type: build.type,
+        status: build.status,
+        buildLogs: build.buildLogs.slice(-20), // Last 20 log entries
+        downloadUrl: build.downloadUrl,
+        sizeBytes: build.sizeBytes,
+        createdAt: build.createdAt,
+        completedAt: build.completedAt,
+        errorMessage: build.errorMessage,
+      },
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: delete_payload                                              */
+/* ------------------------------------------------------------------ */
+
+const DeletePayloadInput = z.object({
+  buildId: z.string().min(1).describe("The payload build ID to delete"),
+})
+
+export const deletePayloadTool: AgentTool<
+  z.infer<typeof DeletePayloadInput>,
+  { success: boolean; message: string }
+> = {
+  name: "delete_payload",
+  description: "Delete a payload build and its artifacts",
+  parameters: DeletePayloadInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      buildId: { type: "string", description: "Payload build ID to delete" },
+    },
+    required: ["buildId"],
+  },
+  async run(input) {
+    const ok = await deletePayloadBuild(input.buildId)
+    return {
+      success: ok,
+      message: ok ? "Payload deleted successfully" : "Payload not found",
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
 /*  Registry of all AI chat tools                                     */
 /* ------------------------------------------------------------------ */
 
@@ -522,6 +707,10 @@ export const AI_TOOLS = {
   [troubleshootTool.name]: troubleshootTool,
   [listProfilesTool.name]: listProfilesTool,
   [getServerLogsTool.name]: getServerLogsTool,
+  [generatePayloadTool.name]: generatePayloadTool,
+  [listPayloadsTool.name]: listPayloadsTool,
+  [getPayloadStatusTool.name]: getPayloadStatusTool,
+  [deletePayloadTool.name]: deletePayloadTool,
 } as const
 
 export const AI_TOOL_NAMES = Object.keys(AI_TOOLS)

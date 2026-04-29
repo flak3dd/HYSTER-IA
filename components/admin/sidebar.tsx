@@ -70,6 +70,7 @@ const WORKFLOW_STAGES = [
       { href: "/admin/coordination", label: "Team Ops", shortDesc: "Multi-operator" },
       { href: "/admin/forensics", label: "Anti-Forensics", shortDesc: "Evidence control" },
       { href: "/admin/ai", label: "AI Assistant", shortDesc: "Config assistant" },
+      { href: "/admin/workflow", label: "Workflow", shortDesc: "AI orchestration" },
     ],
   },
   {

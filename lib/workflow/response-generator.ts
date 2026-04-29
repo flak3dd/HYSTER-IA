@@ -14,12 +14,27 @@ export class ResponseGenerator {
     // Add intent acknowledgment
     response += this.acknowledgeIntent(analysis)
 
+    // Add multi-step workflow information if applicable
+    if (analysis.suggestedChaining && analysis.suggestedChaining.length > 0) {
+      response += this.addWorkflowPlan(analysis)
+    }
+
+    // Add risk assessment if available
+    if (analysis.riskLevel) {
+      response += this.addRiskAssessment(analysis)
+    }
+
     // Add context-aware information
     response += this.addContextInfo(analysis, systemState)
 
     // Add execution results if available
     if (executionResult) {
       response += this.formatExecutionResult(executionResult)
+    }
+
+    // Add alternative approaches if available
+    if (analysis.alternativeApproaches && analysis.alternativeApproaches.length > 0) {
+      response += this.addAlternativeApproaches(analysis)
     }
 
     // Add proactive suggestions
@@ -131,6 +146,16 @@ export class ResponseGenerator {
       suggestions += '- Check specific node health\n'
       suggestions += '- Review recent activity logs\n'
       suggestions += '- Analyze traffic patterns\n\n'
+    } else if (analysis.suggestedFunction === 'enumerate_domain') {
+      suggestions += '**💡 Based on domain enumeration, you might want to:**\n'
+      suggestions += '- Analyze discovered subdomains\n'
+      suggestions += '- Perform threat intelligence on interesting targets\n'
+      suggestions += '- Check for DNS misconfigurations\n\n'
+    } else if (analysis.suggestedFunction?.includes('threat')) {
+      suggestions += '**💡 Based on threat analysis, you might want to:**\n'
+      suggestions += '- Generate a comprehensive threat report\n'
+      suggestions += '- Investigate high-risk indicators further\n'
+      suggestions += '- Set up monitoring for ongoing threats\n\n'
     }
 
     // Add workflow completion suggestions
@@ -142,6 +167,67 @@ export class ResponseGenerator {
     }
 
     return suggestions
+  }
+
+  /**
+   * Add workflow plan for multi-step operations
+   */
+  private addWorkflowPlan(analysis: IntentAnalysis): string {
+    let plan = '**📋 Multi-Step Workflow Plan**\n\n'
+    
+    if (analysis.estimatedSteps) {
+      plan += `**Estimated Steps:** ${analysis.estimatedSteps}\n\n`
+    }
+
+    plan += '**Execution Plan:**\n'
+    analysis.suggestedChaining?.forEach((step, index) => {
+      const emoji = index === 0 ? '🚀' : '➡️'
+      plan += `${index + 1}. ${emoji} ${step}\n`
+    })
+    plan += '\n'
+
+    if (analysis.dependencies && analysis.dependencies.length > 0) {
+      plan += '**Dependencies:**\n'
+      analysis.dependencies.forEach(dep => {
+        plan += `- ${dep}\n`
+      })
+      plan += '\n'
+    }
+
+    return plan
+  }
+
+  /**
+   * Add risk assessment for operations
+   */
+  private addRiskAssessment(analysis: IntentAnalysis): string {
+    let risk = '**⚠️ Risk Assessment**\n\n'
+    
+    const riskConfig = {
+      low: { emoji: '🟢', level: 'Low', message: 'This operation is safe to proceed.' },
+      medium: { emoji: '🟡', level: 'Medium', message: 'Proceed with caution. Review parameters carefully.' },
+      high: { emoji: '🔴', level: 'High', message: 'High risk operation. Ensure you have authorization and backups.' },
+    }
+
+    const config = riskConfig[analysis.riskLevel || 'low']
+    risk += `${config.emoji} **Risk Level:** ${config.level}\n`
+    risk += `${config.message}\n\n`
+
+    return risk
+  }
+
+  /**
+   * Add alternative approaches if available
+   */
+  private addAlternativeApproaches(analysis: IntentAnalysis): string {
+    let alternatives = '**🔄 Alternative Approaches**\n\n'
+    
+    analysis.alternativeApproaches?.forEach((alt, index) => {
+      alternatives += `${index + 1}. ${alt}\n`
+    })
+    alternatives += '\n'
+
+    return alternatives
   }
 
   /**

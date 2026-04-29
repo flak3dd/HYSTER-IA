@@ -1,33 +1,41 @@
-# Mailer Configuration Task
-Current working directory: /Users/adminuser/vsc/blackboxai-hysteria2-sonner-1
+# Project TODO
 
-## Task Overview
-Configure the mailer tool (Go IMAP migrator) and app SMTP/IMAP features.
+## Overview
+This document tracks pending tasks and future improvements for the Hysteria 2 Admin Panel project.
 
-## Steps to Complete (Approved Plan Breakdown)
+## Completed Tasks
+- ✅ Phase 2 Implementation: OSINT Domain Enumeration and Threat Intelligence (see PHASE2_IMPLEMENTATION_SUMMARY.md)
+- ✅ AI Workflow Assistant enhancements
+- ✅ Config Audit, Universal Settings, Provider Keys UI
+- ✅ Docker support and deployment scripts
+- ✅ Mail Operations basic functionality
 
-### 1. Setup Go Module & Dependencies [PENDING]
-- Create `mailer/go.mod`
-- Run `cd mailer && go mod tidy` (resolve imports: go-imap/v2, enmime, oauth2)
-- Fix: Multiple main packages warning (rename mail-migrator-xoauth2-folders.go → migrator.go or ignore)
+## Current Priorities (From FEATURE_ROADMAP.md)
 
-### 2. Configure Mailer Tool [PENDING]
-- Edit `mailer/config.json`: Replace OAuth placeholders (awaiting user creds)
-- Edit `mailer/client.yaml`: Hysteria2 proxy (awaiting server details)
-- Test: `cd mailer && go run config.go`
+### Phase 3: Weaponization Arsenal
+- Dynamic Payload Generation (P0)
+- Living-off-the-Land (LotL) Arsenal (P3)
 
-### 3. App Integration [PENDING]
-- Add `.env.local`: MAIL_ACCOUNTS_FILE=mailer/accounts.txt
-- Implement missing `/api/admin/mail/*` routes if needed
-- Test UI: `npm run dev` → /admin/mail
+### Phase 4: Delivery & Operations Enhancement
+- Mail Operations Enhancement (P2)
+- Team Coordination (P2)
+- Anti-Forensics Toolkit (P3)
 
-### 4. Verification [PENDING]
-- Run Go migrator → check migrated_attachments/
-- App mail tests pass
+### Phase 5: Reporting & Analytics
+- Behavioral Analytics (P3)
+- Automated Reporting (P2)
 
-## Progress
-- [x] Analyzed files & plan approved
-- [ ] Steps 1-4 complete
+### Infrastructure Improvements
+- Traffic Stats API Integration (P1)
+- Config Audit Strength Testing (P1)
+- Network Mapping (P1)
+- Email Harvesting (P1)
 
-*Next: User provides OAuth creds to proceed.*
+## Notes
+- See FEATURE_ROADMAP.md for comprehensive implementation roadmap
+- See PHASE2_IMPLEMENTATION_SUMMARY.md for details on completed reconnaissance features
+- See INFRASTRUCTURE_ARCHITECTURE.md for system architecture documentation
+
+---
+*Last updated: April 2026*
 

@@ -11,6 +11,7 @@ import { WorkflowProgress } from './workflow-progress'
 import { WorkflowAnalytics } from './workflow-analytics'
 import { FunctionDiscovery } from './function-discovery'
 import { WorkflowScheduler } from './workflow-scheduler'
+import { ProactiveInsights } from './proactive-insights'
 import { 
   Send, 
   Loader2, 
@@ -32,6 +33,7 @@ import {
   ChevronUp,
   Download,
   Upload,
+  Brain,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -57,6 +59,8 @@ const QUICK_ACTIONS = [
   { icon: RefreshCw, label: 'Restart Service', prompt: 'Restart the Hysteria2 service' },
   { icon: Zap, label: 'Generate Config', prompt: 'Generate client configuration' },
   { icon: Sparkles, label: 'Complex Task', prompt: 'I need help with a complex operation' },
+  { icon: Command, label: 'OSINT Scan', prompt: 'Perform OSINT domain enumeration for example.com' },
+  { icon: AlertCircle, label: 'Threat Analysis', prompt: 'Analyze threats for IP 8.8.8.8' },
 ]
 
 const SUGGESTIONS = [
@@ -66,6 +70,9 @@ const SUGGESTIONS = [
   "Check system health status",
   "Generate config for user",
   "Show recent activity",
+  "Enumerate subdomains for example.com",
+  "Analyze threats for domain google.com",
+  "Perform multi-step reconnaissance then threat analysis",
 ]
 
 export function WorkflowChat() {
@@ -77,6 +84,7 @@ export function WorkflowChat() {
   const [showSuggestions, setShowSuggestions] = useState(true)
   const [showHistory, setShowHistory] = useState(false)
   const [showProgress, setShowProgress] = useState(false)
+  const [showProactiveInsights, setShowProactiveInsights] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -425,6 +433,7 @@ export function WorkflowChat() {
   }
 
   return (
+    <>
     <Card className="h-[700px] flex flex-col shadow-lg">
       <CardHeader className="flex-shrink-0 border-b">
         <div className="flex items-center justify-between">
@@ -452,6 +461,15 @@ export function WorkflowChat() {
                 Progress
               </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowProactiveInsights(true)}
+              className="gap-2"
+              title="Proactive Intelligence"
+            >
+              <Brain className="h-4 w-4" />
+            </Button>
             <WorkflowScheduler />
             <WorkflowAnalytics />
             <FunctionDiscovery />
@@ -644,5 +662,12 @@ export function WorkflowChat() {
         </div>
       </CardContent>
     </Card>
+    
+    {/* Proactive Insights Modal */}
+    <ProactiveInsights 
+      isOpen={showProactiveInsights} 
+      onClose={() => setShowProactiveInsights(false)} 
+    />
+    </>
   )
 }

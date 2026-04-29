@@ -92,6 +92,11 @@ export const IntentAnalysis = z.object({
   suggestedFunction: z.string().optional(),
   requiresClarification: z.boolean().default(false),
   clarificationQuestions: z.array(z.string()).default([]),
+  suggestedChaining: z.array(z.string()).optional(),
+  alternativeApproaches: z.array(z.string()).optional(),
+  dependencies: z.array(z.string()).optional(),
+  estimatedSteps: z.number().optional(),
+  riskLevel: z.enum(['low', 'medium', 'high']).optional(),
 })
 export type IntentAnalysis = z.infer<typeof IntentAnalysis>
 

