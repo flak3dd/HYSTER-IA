@@ -465,3 +465,87 @@ model AgentStep {
   @@unique([taskId, index])
   @@map("agent_steps")
 }
+
+model OsintTask {
+  id          String   @id @default(cuid())
+  type        String   // domain, email, social, darkweb, threatintel
+  target      String
+  status      String   @default("pending") // pending, running, completed, failed
+  results     Json?
+  error       String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+  metadata    Json?
+
+  @@map("osint_tasks")
+}
+
+model WorkflowSession {
+  id              String   @id @default(cuid())
+  userId          String
+  status          String   @default("initialized") // initialized, awaiting_input, processing, executing, completed, failed, cancelled
+  currentStepOrder Int     @default(0)
+  workflowType    String?
+  context         Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  completedAt     DateTime?
+  steps           WorkflowStep[]
+
+  @@map("workflow_sessions")
+}
+
+model WorkflowStep {
+  id                String   @id @default(cuid())
+  sessionId         String
+  session           WorkflowSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type              String   // ai_question, user_response, backend_execution, result_display, error_handling
+  order             Int
+  content           String?
+  aiPrompt          String?
+  userResponse      String?
+  functionToExecute String?
+  functionParameters Json?
+  executionResult   Json?
+  error             String?
+  timestamp         DateTime @default(now())
+  completed         Boolean  @default(false)
+
+  @@map("workflow_steps")
+}
+
+model BackendFunction {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  description    String
+  category       String
+  parameters     Json     @default("[]")
+  implementation String
+  requiresAuth   Boolean  @default(true)
+  dangerous      Boolean  @default(false)
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("backend_functions")
+}
+
+model ScheduledWorkflow {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  description     String?
+  initialRequest  String
+  scheduledFor    DateTime
+  interval        String?  // cron expression or interval (e.g., "0 9 * * *" for daily at 9am, "1h" for hourly)
+  status          String   @default("pending") // pending, running, completed, failed, cancelled
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  runCount        Int      @default(0)
+  context         Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("scheduled_workflows")
+}
