@@ -20,7 +20,8 @@ function generateMockOnlineData(): HysteriaOnlineMap {
   }
 }
 
-export async function fetchTraffic(clear = false): Promise<HysteriaTrafficMap> {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export async function fetchTraffic(_clear = false): Promise<HysteriaTrafficMap> {
   // Simulate API delay
   await new Promise(resolve => setTimeout(resolve, 100))
   

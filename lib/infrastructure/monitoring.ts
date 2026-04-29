@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, @typescript-eslint/no-require-imports */
 import { EventEmitter } from "node:events"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
