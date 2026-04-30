@@ -93,11 +93,11 @@ export function WorkflowAnalytics() {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <BarChart3 className="h-4 w-4" />
-          Analytics
-        </Button>
+      <DialogTrigger
+        render={<Button variant="outline" size="sm" className="gap-2" />}
+      >
+        <BarChart3 className="h-4 w-4" />
+        Analytics
       </DialogTrigger>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>

@@ -609,3 +609,18 @@ model ShadowGrokApproval {
 
   @@map("shadowgrok_approvals")
 }
+
+model EmailLog {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  type      String   // tunnel_script | notification
+  tunnelType String?
+  nodeId    String?
+  notificationType String?
+  messageId String?
+  sentAt    DateTime @default(now())
+
+  @@index([to, sentAt])
+  @@map("email_logs")
+}

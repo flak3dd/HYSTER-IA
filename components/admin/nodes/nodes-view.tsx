@@ -180,7 +180,7 @@ export function NodesView() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">Nodes</h1>
+          <h1 className="text-heading-xl">Nodes</h1>
           <p className="text-sm text-muted-foreground">
             Manage your Hysteria2 node inventory
           </p>

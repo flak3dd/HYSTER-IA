@@ -8,7 +8,7 @@ export default function ForensicsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">Anti-Forensics Toolkit</h1>
+        <h1 className="text-heading-xl">Anti-Forensics Toolkit</h1>
         <p className="text-sm text-muted-foreground">
           Tools and techniques for evidence obfuscation and anti-forensic operations.
         </p>

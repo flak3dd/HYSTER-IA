@@ -164,11 +164,11 @@ export function WorkflowScheduler() {
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Calendar className="h-4 w-4" />
-          Schedule
-        </Button>
+      <DialogTrigger
+        render={<Button variant="outline" size="sm" className="gap-2" />}
+      >
+        <Calendar className="h-4 w-4" />
+        Schedule
       </DialogTrigger>
       <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>

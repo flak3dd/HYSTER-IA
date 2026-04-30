@@ -8,7 +8,7 @@ export default function NetworkPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">Passive Network Mapping</h1>
+        <h1 className="text-heading-xl">Passive Network Mapping</h1>
         <p className="text-sm text-muted-foreground">
           Passive network reconnaissance and topology mapping capabilities.
         </p>

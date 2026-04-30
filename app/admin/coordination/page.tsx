@@ -8,7 +8,7 @@ export default function CoordinationPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">Multi-Operator Coordination</h1>
+        <h1 className="text-heading-xl">Multi-Operator Coordination</h1>
         <p className="text-sm text-muted-foreground">
           Coordinate team operations and manage collaborative red team activities.
         </p>

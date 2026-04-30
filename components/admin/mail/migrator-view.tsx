@@ -224,7 +224,7 @@ export function MigratorView() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-bold">IMAP Attachment Migrator</h1>
+        <h1 className="text-heading-xl">IMAP Attachment Migrator</h1>
         <p className="text-sm text-muted-foreground">
           Download email attachments via IMAP. Uses App Passwords for Gmail /
           Microsoft, or regular passwords for other providers.

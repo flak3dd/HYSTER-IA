@@ -35,41 +35,52 @@ type InstallState =
   | { open: true; phase: "form"; node: NodeStatus }
   | { open: true; phase: "script"; node: NodeStatus; script: string }
 
+type ConfigureState =
+  | { open: false }
+  | { open: true; node: NodeStatus; loading: boolean }
+
 export function InfrastructureOverview() {
   const [nodes, setNodes] = useState<NodeStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [shell, setShell] = useState<ShellState>({ open: false })
   const [install, setInstall] = useState<InstallState>({ open: false })
+  const [configure, setConfigure] = useState<ConfigureState>({ open: false })
   const preRef = useRef<HTMLPreElement>(null)
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      try {
-        const res = await fetch("/api/admin/nodes", { cache: "no-store" })
-        if (res.ok) {
-          const data = await res.json()
-          const items: NodeStatus[] = (data.nodes ?? data ?? []).map((n: Record<string, unknown>) => ({
-            id: n.id as string,
-            name: n.name as string,
-            status: (n.status as string) ?? "stopped",
-            region: (n.region as string) ?? "unknown",
-            provider: (n.provider as string) ?? "unknown",
-            hostname: (n.hostname as string) ?? "",
-            lastHeartbeatAt: (n.lastHeartbeatAt as number | null) ?? null,
-          }))
-          setNodes(items)
-        }
-      } catch {
-        // fallback to empty
+  const loadNodes = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch("/api/admin/nodes", { cache: "no-store" })
+      if (res.ok) {
+        const data = await res.json()
+        const items: NodeStatus[] = (data.nodes ?? data ?? []).map((n: Record<string, unknown>) => ({
+          id: n.id as string,
+          name: n.name as string,
+          status: (n.status as string) ?? "stopped",
+          region: (n.region as string) ?? "unknown",
+          provider: (n.provider as string) ?? "unknown",
+          hostname: (n.hostname as string) ?? "",
+          lastHeartbeatAt: (n.lastHeartbeatAt as number | null) ?? null,
+        }))
+        setNodes(items)
       }
-      setLoading(false)
+    } catch {
+      // fallback to empty
     }
-    load()
+    setLoading(false)
   }, [])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadNodes()
+  }, [loadNodes])
 
   const handleNodeAction = (nodeId: string, action: string) => {
     toast.success(`Node ${nodeId}: ${action} action initiated`)
+  }
+
+  const handleConfigure = (node: NodeStatus) => {
+    setConfigure({ open: true, node, loading: false })
   }
 
   const getStatusColor = (status: string) => {
@@ -242,7 +253,7 @@ export function InfrastructureOverview() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleNodeAction(node.id, "configure")}
+                      onClick={() => handleConfigure(node)}
                     >
                       Configure
                     </Button>
@@ -318,6 +329,19 @@ export function InfrastructureOverview() {
           state={install}
           onClose={() => setInstall({ open: false })}
           onGenerated={(script) => setInstall({ open: true, phase: "script", node: install.node, script })}
+        />
+      )}
+
+      {/* Configure Node Modal */}
+      {configure.open && (
+        <ConfigureNodeModal
+          node={configure.node}
+          onClose={() => setConfigure({ open: false })}
+          onUpdate={() => {
+            // Reload nodes after update
+            loadNodes()
+            setConfigure({ open: false })
+          }}
         />
       )}
     </div>
@@ -662,4 +686,138 @@ function randomHex(bytes: number): string {
     for (let i = 0; i < bytes; i++) arr[i] = Math.floor(Math.random() * 256)
   }
   return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+/* ------------------------------------------------------------------ */
+/*  Configure Node Modal                                             */
+/* ------------------------------------------------------------------ */
+
+function ConfigureNodeModal({
+  node,
+  onClose,
+  onUpdate,
+}: {
+  node: NodeStatus
+  onClose: () => void
+  onUpdate: () => void
+}) {
+  const [name, setName] = useState(node.name)
+  const [hostname, setHostname] = useState(node.hostname)
+  const [region, setRegion] = useState(node.region)
+  const [provider, setProvider] = useState(node.provider)
+  const [status, setStatus] = useState(node.status)
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/admin/nodes/${node.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          hostname,
+          region,
+          provider,
+          status,
+        }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }))
+        toast.error("Failed to update node", { description: err.error ?? String(res.status) })
+        setSaving(false)
+        return
+      }
+
+      toast.success("Node updated successfully")
+      onUpdate()
+    } catch {
+      toast.error("Failed to update node")
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Configure Node</CardTitle>
+              <CardDescription>{node.name}</CardDescription>
+            </div>
+            <Button size="sm" variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Node Name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Hostname/IP</label>
+            <input
+              value={hostname}
+              onChange={(e) => setHostname(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Region</label>
+            <input
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Provider</label>
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="hetzner">Hetzner</option>
+              <option value="digitalocean">DigitalOcean</option>
+              <option value="vultr">Vultr</option>
+              <option value="aws">AWS</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Status</label>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value as "running" | "stopped" | "errored")}
+              className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="running">Running</option>
+              <option value="stopped">Stopped</option>
+              <option value="errored">Errored</option>
+            </select>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
 }
