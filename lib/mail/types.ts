@@ -84,3 +84,28 @@ export type AutoTestState = {
   nextRun: string | null
   results: MailTestResult[]
 }
+
+/* ------------------------------------------------------------------ */
+/*  Enhanced Mail Operations Types                                     */
+/* ------------------------------------------------------------------ */
+
+export type EmailAttachment = {
+  filename: string
+  contentType: string
+  content: Buffer
+  size: number
+}
+
+export type EmailSendOptions = {
+  to: string
+  subject: string
+  htmlContent: string
+  textContent: string
+  from?: string
+  attachments?: EmailAttachment[]
+  tracking?: {
+    enabled: boolean
+    messageId: string
+  }
+  metadata?: Record<string, unknown>
+}

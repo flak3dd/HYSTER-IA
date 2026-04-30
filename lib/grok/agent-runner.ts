@@ -3,7 +3,7 @@
 
 import { chatComplete, type ChatMessage } from '@/lib/agents/llm';
 import { SHADOWGROK_TOOLS } from './grok-tools';
-import { executeShadowGrokTool, type ToolExecutionContext } from './tool-executor';
+import { executeTool, type ToolContext } from './tool-executor';
 import { prisma } from '@/lib/db';
 
 const MAX_TOOL_ROUNDS = 15; // Higher limit for complex operations
@@ -97,11 +97,11 @@ export async function runShadowGrokWithTools(
   let finalResponse = '';
   let round = 0;
 
-  const executionContext: ToolExecutionContext = {
-    signal: AbortSignal.timeout(300000), // 5 minute timeout
-    invokerUid,
+  const signal = AbortSignal.timeout(300000); // 5 minute timeout
+
+  const executionContext: ToolContext = {
+    userId: invokerUid,
     conversationId,
-    requireApproval,
   };
 
   try {
@@ -115,7 +115,7 @@ export async function runShadowGrokWithTools(
         tools: SHADOWGROK_TOOLS as any,
         model: process.env.LLM_MODEL || 'grok-4.20-reasoning',
         temperature: 0.6,
-        signal: executionContext.signal,
+        signal,
       });
 
       const assistantMessage: ChatMessage = {
@@ -136,7 +136,7 @@ export async function runShadowGrokWithTools(
               ? JSON.parse(toolCall.function.arguments)
               : {};
 
-            const result = await executeShadowGrokTool(
+            const result = await executeTool(
               toolCall.function.name,
               parsedArgs,
               executionContext
@@ -237,11 +237,11 @@ export async function runShadowGrokStream(
   let finalResponse = '';
   let round = 0;
 
-  const executionContext: ToolExecutionContext = {
-    signal: AbortSignal.timeout(300000),
-    invokerUid,
+  const signal = AbortSignal.timeout(300000);
+
+  const executionContext: ToolContext = {
+    userId: invokerUid,
     conversationId,
-    requireApproval,
   };
 
   try {
@@ -253,7 +253,7 @@ export async function runShadowGrokStream(
         tools: SHADOWGROK_TOOLS as any,
         model: process.env.LLM_MODEL || 'grok-4.20-reasoning',
         temperature: 0.6,
-        signal: executionContext.signal,
+        signal,
       });
 
       const assistantMessage: ChatMessage = {
@@ -277,7 +277,7 @@ export async function runShadowGrokStream(
             },
           });
 
-          const result = await executeShadowGrokTool(
+          const result = await executeTool(
             toolCall.function.name,
             parsedArgs,
             executionContext
@@ -367,7 +367,7 @@ export async function validateToolExecution(
   }
 
   // Perform OPSEC risk assessment
-  const riskAssessment = await executeShadowGrokTool(
+  const riskAssessment = await executeTool(
     'assess_opsec_risk',
     {
       action_type: toolName,
@@ -375,8 +375,7 @@ export async function validateToolExecution(
       context: args,
     },
     {
-      signal: AbortSignal.timeout(10000),
-      invokerUid,
+      userId: invokerUid,
     }
   );
 

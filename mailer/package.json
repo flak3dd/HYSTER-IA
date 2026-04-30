@@ -1,0 +1,12 @@
+{
+  "name": "@shadowgrok/mailer",
+  "version": "1.0.0",
+  "description": "ShadowGrok mailer for sending hidden Hysteria2 tunnel scripts and C2 notifications",
+  "main": "index.ts",
+  "dependencies": {
+    "nodemailer": "^6.9.13"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^6.4.15"
+  }
+}

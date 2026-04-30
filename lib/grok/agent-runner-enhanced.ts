@@ -7,12 +7,7 @@
 import { prisma } from "@/lib/db";
 import { executeTool, ToolContext, ToolResult } from "./tool-executor";
 import { SHADOWGROK_TOOLS, ALL_TOOL_NAMES } from "./grok-tools";
-import { createOpenAI } from "@ai-sdk/openai";
-
-const grok = createOpenAI({
-  baseURL: process.env.LLM_PROVIDER_BASE_URL || "https://api.x.ai/v1",
-  apiKey: process.env.LLM_PROVIDER_API_KEY!,
-});
+import { chatComplete, type ChatMessage } from "@/lib/agents/llm";
 
 const SHADOWGROK_SYSTEM_PROMPT = `You are ShadowGrok, an elite AI red team operative and stealth C2 specialist.
 
@@ -54,6 +49,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
     data: {
       userId,
       userMessage: prompt,
+      finalResponse: "",
       model,
       status: "running",
       approvalRequired: false,
@@ -72,7 +68,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
     },
   });
 
-  const messages: any[] = [
+  const messages: ChatMessage[] = [
     { role: "system", content: SHADOWGROK_SYSTEM_PROMPT },
     { role: "user", content: prompt },
   ];
@@ -85,16 +81,18 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
     while (stepCount < maxSteps) {
       stepCount++;
 
-      const response = await grok.chat.completions.create({
-        model,
+      const response = await chatComplete({
         messages,
         tools: SHADOWGROK_TOOLS.filter(t => allowedTools.includes(t.function.name)),
-        tool_choice: "auto",
+        model,
         temperature: 0.6,
-        stream: false,
       });
 
-      const assistantMsg = response.choices[0].message;
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: response.content ?? "",
+        tool_calls: response.toolCalls,
+      };
       messages.push(assistantMsg);
 
       // Record step
