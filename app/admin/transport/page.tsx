@@ -8,7 +8,7 @@ export default function TransportPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">Multi-Transport Protocols</h1>
+        <h1 className="text-heading-xl">Multi-Transport Protocols</h1>
         <p className="text-sm text-muted-foreground">
           Configure and manage transport protocols for secure communication channels.
         </p>

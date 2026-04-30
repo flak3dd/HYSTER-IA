@@ -69,11 +69,11 @@ export function WorkflowTemplates({ onSelectTemplate }: WorkflowTemplatesProps) 
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <List className="h-4 w-4" />
-          Templates
-        </Button>
+      <DialogTrigger
+        render={<Button variant="outline" size="sm" className="gap-2" />}
+      >
+        <List className="h-4 w-4" />
+        Templates
       </DialogTrigger>
       <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
         <DialogHeader>

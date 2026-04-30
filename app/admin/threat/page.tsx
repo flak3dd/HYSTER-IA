@@ -102,7 +102,7 @@ export default function ThreatPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">Threat Intelligence Feeds</h1>
+        <h1 className="text-heading-xl">Threat Intelligence Feeds</h1>
         <p className="text-sm text-muted-foreground">
           Integrated threat intelligence feeds and IOC management system.
         </p>

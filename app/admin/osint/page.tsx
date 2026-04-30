@@ -95,7 +95,7 @@ export default function OSINTPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">OSINT Integration</h1>
+        <h1 className="text-heading-xl">OSINT Integration</h1>
         <p className="text-sm text-muted-foreground">
           Automated Open Source Intelligence gathering and analysis tools.
         </p>

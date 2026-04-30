@@ -8,7 +8,7 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">Behavioral Analytics</h1>
+        <h1 className="text-heading-xl">Behavioral Analytics</h1>
         <p className="text-sm text-muted-foreground">
           Advanced behavioral analysis and anomaly detection for security monitoring.
         </p>

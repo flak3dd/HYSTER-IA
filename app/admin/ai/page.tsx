@@ -1,7 +1,7 @@
-import { AiChatView } from "@/components/admin/ai/ai-chat-view"
+import { AiPageTabs } from "@/components/admin/ai/ai-page-tabs"
 
 export const dynamic = "force-dynamic"
 
 export default function AiPage() {
-  return <AiChatView />
+  return <AiPageTabs />
 }

@@ -212,7 +212,7 @@ function ClientConfigsViewInner() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-bold">Client Configs &amp; Subscriptions</h1>
+        <h1 className="text-heading-xl">Client Configs &amp; Subscriptions</h1>
         <p className="text-sm text-muted-foreground">
           Generate Hysteria2 client configs for your users across nodes.
         </p>

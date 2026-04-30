@@ -173,7 +173,7 @@ export default function ConfigAuditPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">Config Strength Audit</h1>
+          <h1 className="text-heading-xl">Config Strength Audit</h1>
           <p className="text-sm text-muted-foreground">
             Analyze your server configuration for security weaknesses and best practices.
           </p>

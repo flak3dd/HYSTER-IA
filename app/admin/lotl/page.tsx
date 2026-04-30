@@ -8,7 +8,7 @@ export default function LotlPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold">Living-off-the-Land Arsenal</h1>
+        <h1 className="text-heading-xl">Living-off-the-Land Arsenal</h1>
         <p className="text-sm text-muted-foreground">
           Curated collection of legitimate tools and binaries for stealth operations.
         </p>
