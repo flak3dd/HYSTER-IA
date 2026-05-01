@@ -12,7 +12,7 @@ A Next.js-based administrative panel for managing [Hysteria 2](https://v2.hyster
   - Clash Meta (mihomo) YAML with proxies, proxy-groups (select + url-test), rules
   - sing-box JSON with outbounds and selector
 - **Subscription endpoint** — public token-authenticated endpoint (`GET /api/sub/hysteria2?token=X&tags=Y&format=base64|clash|singbox`) compatible with Clash Meta, Nekoray, v2rayN.
-- **AI Config Assistant** — clean chat UI powered by any OpenAI-compatible LLM (Blackbox AI, OpenAI, Anthropic via gateway, etc.). Generates Hysteria2 server configurations from natural-language prompts with preset suggestions. Preview-only — admin must review before applying.
+- **AI Config Assistant** — clean chat UI powered by OpenRouter (supports Anthropic Claude, OpenAI GPT, Google Gemini, and more). Generates Hysteria2 server configurations from natural-language prompts with preset suggestions. Preview-only — admin must review before applying.
 - **AI Workflow Assistant** — advanced natural language workflow orchestration system with:
   - Session management with loading and resuming capabilities
   - 10 pre-built workflow templates for common operations
@@ -81,10 +81,15 @@ HYSTERIA_TRAFFIC_API_SECRET=
 # --- Hysteria egress (for agent outbound HTTP) ---
 HYSTERIA_EGRESS_PROXY_URL=socks5://127.0.0.1:1080
 
-# --- LLM provider (any OpenAI-compatible) ---
-LLM_PROVIDER_BASE_URL=https://api.blackbox.ai/api/chat
+# --- LLM provider (OpenRouter recommended) ---
+OPENROUTER_API_KEY=your-openrouter-api-key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+
+# Alternative: Direct OpenAI (fallback)
+LLM_PROVIDER_BASE_URL=https://api.openai.com/v1
 LLM_PROVIDER_API_KEY=
-LLM_MODEL=blackboxai/openai/gpt-4o
+LLM_MODEL=gpt-4o
 
 # --- OSINT & Threat Intelligence API Keys ---
 REDIS_URL=redis://localhost:6379  # Optional: for rate limiting and caching
@@ -103,6 +108,12 @@ XAI_MODEL=grok-4.20-reasoning     # Model to use for ShadowGrok operations
 SHADOWGROK_REQUIRE_APPROVAL=true  # Require approval for high-risk operations
 SHADOWGROK_MAX_TOOL_ROUNDS=15     # Maximum tool execution rounds per operation
 SHADOWGROK_RISK_THRESHOLD=70      # Risk score threshold for requiring approval
+
+# --- Email Service Configuration ---
+MAIL_FROM=noreply@example.com     # Default from address for emails
+RESEND_API_KEY=                   # Resend API key (alternative email service)
+MYSMTP_API_KEY=                   # my.smtp.com API key
+MYSMTP_API_URL=https://my.smtp.com/api/v1  # my.smtp.com API endpoint
 ```
 
 Initialize the PostgreSQL schema locally with:
@@ -115,17 +126,39 @@ npm run setup:admin
 
 `setup:admin` reads `ADMIN_USERNAME` and `ADMIN_PASSWORD` if provided; otherwise it creates an `admin` user with password `admin123`. It also seeds 3 demo nodes and 3 demo client users.
 
-### Blackbox AI
+### AI Provider Configuration
 
-The LLM layer is OpenAI-compatible, so [Blackbox AI](https://www.blackbox.ai) works out of the box. To use it:
+The LLM layer uses OpenRouter by default, which provides access to multiple AI models through a single API:
 
+**OpenRouter (Recommended):**
+```env
+OPENROUTER_API_KEY=your-openrouter-api-key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+```
+
+OpenRouter supports many models including:
+- `anthropic/claude-3.5-sonnet` - Anthropic Claude 3.5 Sonnet
+- `openai/gpt-4o` - OpenAI GPT-4o
+- `google/gemini-pro-1.5` - Google Gemini Pro 1.5
+- `meta-llama/llama-3.1-70b-instruct` - Meta Llama 3.1 70B
+- And many more at [openrouter.ai/models](https://openrouter.ai/models)
+
+**Alternative: Direct OpenAI:**
+```env
+LLM_PROVIDER_BASE_URL=https://api.openai.com/v1
+LLM_PROVIDER_API_KEY=your-openai-api-key
+LLM_MODEL=gpt-4o
+```
+
+**Alternative: Blackbox AI:**
 ```env
 LLM_PROVIDER_BASE_URL=https://api.blackbox.ai/api/chat
 LLM_PROVIDER_API_KEY=your-blackbox-api-key
 LLM_MODEL=blackboxai/openai/gpt-4o
 ```
 
-You can swap in OpenAI, Together, Groq, or any other OpenAI-compatible API by changing `LLM_PROVIDER_BASE_URL` and `LLM_MODEL`.
+The system automatically prefers OpenRouter configuration if available, falling back to legacy LLM configuration if not.
 
 ## Scripts
 
@@ -147,7 +180,7 @@ app/
     page.tsx            — dashboard (4-card layout, nodes health, activity feed)
     nodes/              — node inventory management
     configs/            — 3-panel client config generator
-    ai/                 — Blackbox AI chat assistant
+    ai/                 — AI chat assistant (OpenRouter-powered)
     agents/             — LLM agent task runner
     workflow/           — AI Workflow Assistant with orchestration
     osint/              — OSINT domain enumeration and intelligence gathering
@@ -178,6 +211,7 @@ lib/
 ## Architecture Notes
 
 - **Database**: PostgreSQL via Prisma ORM. All data (operators, nodes, users, profiles, AI conversations, agent tasks, usage records, workflow sessions, scheduled workflows, OSINT tasks) lives in PostgreSQL tables.
+- **AI Integration**: OpenRouter-powered LLM integration supporting multiple AI models (Claude, GPT-4, Gemini, etc.) for AI chat, workflow orchestration, and autonomous operations.
 - **Realtime**: Supabase Realtime (optional) provides instant dashboard updates for node status via `postgres_changes` on the `nodes` table. Falls back to 5-second REST polling when Supabase env vars are not configured.
 - **Auth**: Operator accounts in PostgreSQL, JWT tokens via `jose`, session cookies.
 - **Workflow System**: AI-powered orchestration engine with intent analysis, function registry, and response generation. Supports session persistence, template-based workflows, progress tracking, and scheduled execution.

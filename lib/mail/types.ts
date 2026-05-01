@@ -109,3 +109,28 @@ export type EmailSendOptions = {
   }
   metadata?: Record<string, unknown>
 }
+
+/* ------------------------------------------------------------------ */
+/*  my.smtp.com API Types                                              */
+/* ------------------------------------------------------------------ */
+
+export type MySmtpConfig = {
+  apiKey: string
+  apiUrl?: string
+  defaultFrom?: string
+}
+
+export type MySmtpEmailOptions = {
+  to: string | string[]
+  subject: string
+  html?: string
+  text?: string
+  from?: string
+  attachments?: Array<{
+    filename: string
+    content: Buffer | string
+    contentType?: string
+  }>
+  headers?: Record<string, string>
+  tags?: Array<{ name: string; value: string }>
+}
