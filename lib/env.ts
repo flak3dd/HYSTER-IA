@@ -39,11 +39,19 @@ const ServerEnvSchema = z.object({
     .regex(/^(https?|socks5h?):\/\/.+/, "must be http(s):// or socks5(h):// URL")
     .optional(),
 
-  // OpenRouter Configuration (preferred)
+  // Azure OpenAI Configuration (highest priority when set)
+  AZURE_OPENAI_ENDPOINT: z.string().url().optional(),       // e.g. https://your-resource.openai.azure.com/
+  AZURE_OPENAI_API_KEY: z.string().min(1).optional(),
+  AZURE_OPENAI_DEPLOYMENT: z.string().min(1).default("gpt-4o"), // deployment name in Azure AI Studio
+  AZURE_OPENAI_API_VERSION: z.string().min(1).default("2024-12-01-preview"),
+  // Azure AI Foundry project endpoint (for Foundry SDK / future features)
+  AZURE_AI_FOUNDRY_ENDPOINT: z.string().url().optional(),   // e.g. https://your-resource.services.ai.azure.com/api/projects/YOUR-PROJECT
+
+  // OpenRouter Configuration (second priority)
   OPENROUTER_API_KEY: z.string().min(1).optional(),
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   OPENROUTER_MODEL: z.string().min(1).default("anthropic/claude-3.5-sonnet"),
-  
+
   // Legacy LLM Configuration (fallback)
   LLM_PROVIDER_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
   LLM_PROVIDER_API_KEY: z.string().min(1).optional(),
