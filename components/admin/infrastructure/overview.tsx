@@ -4,6 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog"
+import { Plus } from "lucide-react"
 import { toast } from "sonner"
 
 function timeAgo(ts: number | null): string {
@@ -45,7 +58,40 @@ export function InfrastructureOverview() {
   const [shell, setShell] = useState<ShellState>({ open: false })
   const [install, setInstall] = useState<InstallState>({ open: false })
   const [configure, setConfigure] = useState<ConfigureState>({ open: false })
+  const [addNodeOpen, setAddNodeOpen] = useState(false)
+  const [addNodeForm, setAddNodeForm] = useState({ name: "", hostname: "", region: "", provider: "" })
+  const [addNodeLoading, setAddNodeLoading] = useState(false)
   const preRef = useRef<HTMLPreElement>(null)
+
+  const handleAddNode = useCallback(async () => {
+    if (!addNodeForm.name.trim() || !addNodeForm.hostname.trim()) return
+    setAddNodeLoading(true)
+    try {
+      const res = await fetch("/api/admin/nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: addNodeForm.name.trim(),
+          hostname: addNodeForm.hostname.trim(),
+          region: addNodeForm.region.trim() || undefined,
+          provider: addNodeForm.provider.trim() || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }))
+        toast.error("Failed to add node", { description: err.error ?? String(res.status) })
+        return
+      }
+      toast.success("Node added successfully")
+      setAddNodeForm({ name: "", hostname: "", region: "", provider: "" })
+      setAddNodeOpen(false)
+      loadNodes()
+    } catch {
+      toast.error("Failed to add node")
+    } finally {
+      setAddNodeLoading(false)
+    }
+  }, [addNodeForm])
 
   const loadNodes = useCallback(async () => {
     setLoading(true)
@@ -219,7 +265,71 @@ export function InfrastructureOverview() {
               <CardTitle>Infrastructure Nodes</CardTitle>
               <CardDescription>Manage your deployed infrastructure nodes</CardDescription>
             </div>
-            <Button>Add Node</Button>
+            <Dialog open={addNodeOpen} onOpenChange={setAddNodeOpen}>
+              <DialogTrigger render={<Button />}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Node
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Add Infrastructure Node</DialogTitle>
+                  <DialogDescription>
+                    Register a new server node for Hysteria deployment.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="node-name">Node Name</Label>
+                    <Input
+                      id="node-name"
+                      placeholder="e.g. us-east-proxy-01"
+                      value={addNodeForm.name}
+                      onChange={(e) => setAddNodeForm((f) => ({ ...f, name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="node-hostname">Hostname / IP</Label>
+                    <Input
+                      id="node-hostname"
+                      placeholder="e.g. 203.0.113.50 or proxy.example.com"
+                      value={addNodeForm.hostname}
+                      onChange={(e) => setAddNodeForm((f) => ({ ...f, hostname: e.target.value }))}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="node-region">Region</Label>
+                      <Input
+                        id="node-region"
+                        placeholder="e.g. us-east-1"
+                        value={addNodeForm.region}
+                        onChange={(e) => setAddNodeForm((f) => ({ ...f, region: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="node-provider">Provider</Label>
+                      <Input
+                        id="node-provider"
+                        placeholder="e.g. Vultr, AWS"
+                        value={addNodeForm.provider}
+                        onChange={(e) => setAddNodeForm((f) => ({ ...f, provider: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <DialogClose render={<Button variant="outline" />}>
+                    Cancel
+                  </DialogClose>
+                  <Button
+                    onClick={handleAddNode}
+                    disabled={!addNodeForm.name.trim() || !addNodeForm.hostname.trim() || addNodeLoading}
+                  >
+                    {addNodeLoading ? "Adding…" : "Add Node"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </CardHeader>
         <CardContent>

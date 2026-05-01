@@ -39,10 +39,19 @@ const ServerEnvSchema = z.object({
     .regex(/^(https?|socks5h?):\/\/.+/, "must be http(s):// or socks5(h):// URL")
     .optional(),
 
+  // OpenRouter Configuration (preferred)
+  OPENROUTER_API_KEY: z.string().min(1).optional(),
+  OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
+  OPENROUTER_MODEL: z.string().min(1).default("anthropic/claude-3.5-sonnet"),
+  
+  // Legacy LLM Configuration (fallback)
   LLM_PROVIDER_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
   LLM_PROVIDER_API_KEY: z.string().min(1).optional(),
   LLM_MODEL: z.string().min(1).default("gpt-4o-mini"),
   LLM_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.2),
+
+  // SSH Public Key for Server Access
+  SSH_PUBLIC_KEY: z.string().min(1).optional(),
 
   AGENT_MAX_STEPS: z.coerce.number().int().min(1).max(100).default(20),
   AGENT_MAX_CONCURRENCY_PER_DOMAIN: z.coerce.number().int().min(1).max(32).default(2),

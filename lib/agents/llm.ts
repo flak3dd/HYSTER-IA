@@ -70,20 +70,30 @@ export async function chatComplete(opts: {
   signal?: AbortSignal
 }): Promise<ChatCompletionResult> {
   const env = serverEnv()
-  const apiKey = env.LLM_PROVIDER_API_KEY
+  
+  // Prefer OpenRouter configuration, fall back to legacy LLM configuration
+  const apiKey = env.OPENROUTER_API_KEY || env.LLM_PROVIDER_API_KEY
+  const baseUrl = env.OPENROUTER_API_KEY ? env.OPENROUTER_BASE_URL : env.LLM_PROVIDER_BASE_URL
+  const model = opts.model ?? (env.OPENROUTER_API_KEY ? env.OPENROUTER_MODEL : env.LLM_MODEL)
+  
   if (!apiKey) {
-    throw new Error("LLM_PROVIDER_API_KEY is not set")
+    throw new Error("Neither OPENROUTER_API_KEY nor LLM_PROVIDER_API_KEY is set")
   }
 
-  const res = await proxyFetch(`${env.LLM_PROVIDER_BASE_URL}/chat/completions`, {
+  const res = await proxyFetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     purpose: "llm",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${apiKey}`,
+      // Add OpenRouter-specific headers if using OpenRouter
+      ...(env.OPENROUTER_API_KEY ? {
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+        "X-Title": "Hysteria2 C2 Panel",
+      } : {}),
     },
     body: JSON.stringify({
-      model: opts.model ?? env.LLM_MODEL,
+      model: model,
       temperature: opts.temperature ?? env.LLM_TEMPERATURE,
       messages: opts.messages,
       tools: opts.tools,
