@@ -2,6 +2,7 @@ import { chatComplete, type ChatMessage } from "@/lib/agents/llm"
 import { aiToolDefinitions, runAiTool } from "@/lib/ai/tools"
 import { appendMessages, getConversation } from "@/lib/ai/conversations"
 import type { AiMessage } from "@/lib/ai/types"
+import { buildSystemPrompt, Role } from "@/lib/ai/system-prompt"
 
 const MAX_TOOL_ROUNDS = 10
 
@@ -61,36 +62,7 @@ function detectPayloadIntent(message: string): { toolName: string; args: Record<
   return null
 }
 
-const SYSTEM_PROMPT = [
-  "You are a multi-tool operations assistant inside a Hysteria 2 admin panel.",
-  "You help administrators manage their Hysteria2 proxy infrastructure and create payloads for security testing.",
-  "",
-  "Available capabilities:",
-  "- Generate Hysteria2 server configurations from natural language descriptions",
-  "- Analyze traffic stats to find anomalies (high bandwidth users, expired/disabled users still online)",
-  "- Suggest masquerade proxy targets (CDN, video, cloud, general)",
-  "- Troubleshoot server issues (TLS, throughput, connectivity, auth)",
-  "- List configuration profiles",
-  "- View server logs",
-  "- **Generate payloads** (Windows EXE, Linux ELF, macOS APP, PowerShell, Python) with obfuscation",
-  "- **List and monitor payload builds** with download links when ready",
-  "- **Delete payloads** when no longer needed",
-  "",
-  "Payload Guidelines:",
-  "- Always ask for platform preference if not specified (Windows/Linux/macOS)",
-  "- Recommend obfuscation level based on use case (light=testing, heavy=stealth)",
-  "- Explain the build process and estimated completion time",
-  "- Provide download links when builds complete",
-  "- Remind users that payloads include embedded Hysteria2 client configs",
-  "",
-  "General Guidelines:",
-  "- Use tools to gather real data before answering questions about the system state.",
-  "- When generating configs or payloads, always remind the admin to review before applying.",
-  "- Be concise and actionable. Prefer tool calls over speculation.",
-  "- If you cannot accomplish something with the available tools, say so clearly.",
-  "- Format configs, code, and technical output in code blocks.",
-  "- Do not attempt to evade rate limits or bypass access controls on external sites.",
-].join("\n")
+const SYSTEM_PROMPT = buildSystemPrompt(Role.Chat)
 
 /**
  * Run a multi-turn chat with tool calling. Appends the user message and all

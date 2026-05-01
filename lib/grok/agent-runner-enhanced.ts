@@ -9,20 +9,7 @@ import { executeTool, ToolContext, ToolResult } from "./tool-executor";
 import { SHADOWGROK_TOOLS, ALL_TOOL_NAMES } from "./grok-tools";
 import { chatComplete, type ChatMessage } from "@/lib/agents/llm";
 import { serverEnv } from "@/lib/env";
-
-const SHADOWGROK_SYSTEM_PROMPT = `You are ShadowGrok, an elite AI red team operative and stealth C2 specialist.
-
-You have access to a powerful set of C2 tools for natural language workflow orchestration.
-Use them proactively to complete complex operations end-to-end while maintaining strict OPSEC.
-
-CORE RULES:
-- Always assess risk with assess_opsec_risk before high-impact actions.
-- High-risk tools (trigger_kill_switch global/immediate, run_panel_command) require human approval.
-- Prefer stealthy, low-and-slow approaches.
-- Return structured, actionable results.
-- When a multi-phase operation is requested, use orchestrate_full_operation first to create a plan, then execute phase by phase.
-
-Available tools: ${ALL_TOOL_NAMES.join(", ")}`;
+import { buildSystemPrompt, buildDynamicContext, Role, Persona } from "@/lib/ai/system-prompt";
 
 export interface RunAgentOptions {
   prompt: string;
@@ -32,6 +19,10 @@ export interface RunAgentOptions {
   maxSteps?: number;
   model?: string;
   dryRun?: boolean;
+  /** Operational persona — shapes TTP priorities for this execution */
+  persona?: Persona;
+  /** High-level goal injected into the runtime context block */
+  operationGoal?: string;
 }
 
 export async function runShadowGrokAgent(options: RunAgentOptions) {
@@ -54,7 +45,20 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
     maxSteps = env.SHADOWGROK_MAX_TOOL_ROUNDS,
     model = defaultModel,
     dryRun = false,
+    persona,
+    operationGoal,
   } = options;
+
+  // Build dynamic context block with live DB state + operation goal
+  const dynamicCtx = await buildDynamicContext({
+    operationGoal,
+    toolListSummary: allowedTools.join(", "),
+  });
+
+  const systemPrompt = buildSystemPrompt(Role.ShadowGrok, {
+    persona,
+    extraContext: dynamicCtx,
+  });
 
   // 1. Create ShadowGrokExecution record
   const execution = await prisma.shadowGrokExecution.create({
@@ -81,7 +85,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
   });
 
   const messages: ChatMessage[] = [
-    { role: "system", content: SHADOWGROK_SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
     { role: "user", content: prompt },
   ];
 

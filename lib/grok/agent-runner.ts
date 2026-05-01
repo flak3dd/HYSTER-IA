@@ -6,47 +6,17 @@ import { SHADOWGROK_TOOLS } from './grok-tools';
 import { executeTool, type ToolContext } from './tool-executor';
 import { prisma } from '@/lib/db';
 import { serverEnv } from '@/lib/env';
-
-const SHADOWGROK_SYSTEM_PROMPT = [
-  "You are ShadowGrok, an autonomous C2 operations assistant powered by xAI Grok.",
-  "You operate inside a Hysteria 2 admin panel with advanced offensive security capabilities.",
-  "",
-  "Your core purpose is to plan, coordinate, and execute complex red team operations with minimal human intervention.",
-  "",
-  "Available Capabilities:",
-  "- Generate and deploy stealth implants with advanced anti-analysis features",
-  "- Execute C2 tasks on live implants (command execution, file operations, reconnaissance)",
-  "- Query real-time implant status and traffic statistics",
-  "- Analyze traffic patterns and suggest evasion techniques",
-  "- Orchestrate multi-phase operations with automatic planning",
-  "- Update Hysteria 2 node configurations dynamically",
-  "- Execute panel commands (with approval safeguards)",
-  "- Trigger kill switches with proper confirmation",
-  "",
-  "Operational Guidelines:",
-  "- Always assess OPSEC risk before executing high-risk actions",
-  "- Use tools proactively to complete operations end-to-end",
-  "- Provide clear status updates and reasoning for your decisions",
-  "- Request approval for dangerous operations (global kill switches, panel commands)",
-  "- Be concise but thorough in your operational reporting",
-  "- Leverage traffic analysis and threat intelligence to optimize operations",
-  "- Prioritize stealth and operational security over speed",
-  "",
-  "Safety Protocols:",
-  "- High-risk tools require explicit approval before execution",
-  "- All actions are logged for audit purposes",
-  "- Kill switches require confirmation codes for global/immediate modes",
-  "- Panel commands require admin approval",
-  "- OPSEC assessment is performed before sensitive operations",
-  "",
-  "You have access to powerful C2 tools. Use them intelligently to complete sophisticated red team operations while maintaining operational security.",
-].join('\n');
+import { buildSystemPrompt, buildDynamicContext, Role, Persona } from '@/lib/ai/system-prompt';
 
 export interface ShadowGrokRunOptions {
   conversationId?: string;
   nodeContext?: Record<string, unknown>;
   requireApproval?: boolean;
   maxToolRounds?: number;
+  /** Operational persona — shapes TTP priorities for this execution */
+  persona?: Persona;
+  /** High-level goal injected into the runtime context block */
+  operationGoal?: string;
 }
 
 export interface ShadowGrokResult {
@@ -76,20 +46,26 @@ export async function runShadowGrokWithTools(
     nodeContext,
     requireApproval = env.SHADOWGROK_REQUIRE_APPROVAL,
     maxToolRounds = env.SHADOWGROK_MAX_TOOL_ROUNDS,
+    persona,
+    operationGoal,
   } = options;
 
   console.log(`[ShadowGrok] Starting autonomous execution for user: ${invokerUid}`);
 
+  // Build dynamic context: live DB state + optional nodeContext + operation goal
+  const nodeCtxStr = nodeContext
+    ? `Node Context:\n${JSON.stringify(nodeContext, null, 2)}`
+    : undefined;
+  const dynamicCtx = await buildDynamicContext({ operationGoal });
+  const extraContext = [dynamicCtx, nodeCtxStr].filter(Boolean).join("\n\n");
+
+  const systemPrompt = buildSystemPrompt(Role.ShadowGrok, { persona, extraContext });
+
   // Build message history
   const messages: ChatMessage[] = [
-    { role: 'system', content: SHADOWGROK_SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: userMessage },
   ];
-
-  // Add node context if provided
-  if (nodeContext) {
-    messages[0].content += `\n\nCurrent Context:\n${JSON.stringify(nodeContext, null, 2)}`;
-  }
 
   const toolExecutions: ShadowGrokResult['toolExecutions'] = [];
   let continueLoop = true;
@@ -221,16 +197,23 @@ export async function runShadowGrokStream(
     conversationId,
     nodeContext,
     requireApproval = env.SHADOWGROK_REQUIRE_APPROVAL,
+    persona,
+    operationGoal,
   } = options;
 
+  // Build dynamic context: live DB state + optional nodeContext + operation goal
+  const nodeCtxStr = nodeContext
+    ? `Node Context:\n${JSON.stringify(nodeContext, null, 2)}`
+    : undefined;
+  const dynamicCtx = await buildDynamicContext({ operationGoal });
+  const extraContext = [dynamicCtx, nodeCtxStr].filter(Boolean).join("\n\n");
+
+  const systemPrompt = buildSystemPrompt(Role.ShadowGrok, { persona, extraContext });
+
   const messages: ChatMessage[] = [
-    { role: 'system', content: SHADOWGROK_SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: userMessage },
   ];
-
-  if (nodeContext) {
-    messages[0].content += `\n\nCurrent Context:\n${JSON.stringify(nodeContext, null, 2)}`;
-  }
 
   const toolExecutions: ShadowGrokResult['toolExecutions'] = [];
   let finalResponse = '';

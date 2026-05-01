@@ -2,6 +2,7 @@ import { NextRequest } from "next/server"
 import { verifyAdmin } from "@/lib/auth/admin"
 import { runShadowGrokAgent } from "@/lib/grok/agent-runner-enhanced"
 import { prisma } from "@/lib/db"
+import type { Persona } from "@/lib/ai/system-prompt"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -13,6 +14,10 @@ interface ShadowGrokStreamRequest {
   maxSteps?: number
   model?: string
   dryRun?: boolean
+  /** Operational persona: "stealth" | "aggressive" | "exfil" | "destruction" */
+  persona?: Persona
+  /** High-level operation goal injected into the runtime context */
+  operationGoal?: string
 }
 
 export async function POST(req: NextRequest) {
@@ -44,6 +49,8 @@ export async function POST(req: NextRequest) {
           maxSteps: body.maxSteps,
           model: body.model,
           dryRun: body.dryRun,
+          persona: body.persona,
+          operationGoal: body.operationGoal,
         })
 
         sendEvent({

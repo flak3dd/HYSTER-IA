@@ -10,6 +10,7 @@ import {
   updateTaskRow,
 } from "@/lib/agents/db"
 import type { AgentStep, AgentTask, AgentTaskCreateInput } from "@/lib/agents/types"
+import { buildSystemPrompt, Role } from "@/lib/ai/system-prompt"
 
 export type AgentEvent =
   | { type: "step"; taskId: string; step: AgentStep }
@@ -54,14 +55,7 @@ function emit(ev: AgentEvent): void {
   runner().bus.emit("event", ev)
 }
 
-const SYSTEM_PROMPT = [
-  "You are an operations assistant inside a Hysteria 2 admin panel.",
-  "You complete tasks by calling the provided tools.",
-  "Be concise. Prefer tool calls over speculation.",
-  "Respect rate limits. If a host returns 429 or you see a Retry-After header, stop calling that host.",
-  "Do not attempt to evade anti-bot protections, rotate identities, or bypass access controls on sites you do not own.",
-  "If the task requires something you cannot do with the provided tools, say so and stop.",
-].join(" ")
+const SYSTEM_PROMPT = buildSystemPrompt(Role.AgentRunner)
 
 export function createAndStartTask(
   input: AgentTaskCreateInput,
