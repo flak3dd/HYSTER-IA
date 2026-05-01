@@ -19,9 +19,17 @@ function toNodeZod(row: HysteriaNode): Node {
   }
 }
 
-export async function listNodes(): Promise<Node[]> {
-  const rows = await prisma.hysteriaNode.findMany({ orderBy: { createdAt: "desc" } })
+export async function listNodes(opts?: { skip?: number; take?: number }): Promise<Node[]> {
+  const rows = await prisma.hysteriaNode.findMany({
+    orderBy: { createdAt: "desc" },
+    skip: opts?.skip,
+    take: opts?.take,
+  })
   return rows.map(toNodeZod)
+}
+
+export async function countNodes(): Promise<number> {
+  return prisma.hysteriaNode.count()
 }
 
 export async function getNodeById(id: string): Promise<Node | null> {

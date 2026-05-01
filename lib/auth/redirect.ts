@@ -1,4 +1,4 @@
-const DEFAULT_REDIRECT = "/admin"
+export const DEFAULT_REDIRECT = "/admin"
 
 /**
  * Validate a post-login redirect target.

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import {
   Card,
   CardContent,
@@ -46,192 +46,182 @@ import { toast } from "sonner"
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-type PayloadStatus = "Ready" | "Building" | "Error"
+type PayloadStatus = "pending" | "building" | "ready" | "failed"
 
 interface Payload {
   id: string
   name: string
   type: string
-  os: string
+  description?: string
   status: PayloadStatus
-  size: string
-  stealthLevel: string
-  createdAt: string
+  config: any
+  downloadUrl?: string
+  sizeBytes?: number
+  buildLogs: string[]
+  errorMessage?: string
+  createdAt: number
+  updatedAt: number
+  completedAt?: number
 }
-
-/* ------------------------------------------------------------------ */
-/*  Seed data                                                          */
-/* ------------------------------------------------------------------ */
-
-const INITIAL_PAYLOADS: Payload[] = [
-  {
-    id: "pl_1",
-    name: "Windows Executable",
-    type: "EXE",
-    os: "windows",
-    status: "Ready",
-    size: "2.4 MB",
-    stealthLevel: "high",
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
-  },
-  {
-    id: "pl_2",
-    name: "Linux ELF",
-    type: "ELF",
-    os: "linux",
-    status: "Ready",
-    size: "1.8 MB",
-    stealthLevel: "high",
-    createdAt: new Date(Date.now() - 172800000).toISOString(),
-  },
-  {
-    id: "pl_3",
-    name: "macOS Bundle",
-    type: "APP",
-    os: "darwin",
-    status: "Building",
-    size: "3.1 MB",
-    stealthLevel: "maximum",
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: "pl_4",
-    name: "PowerShell Script",
-    type: "PS1",
-    os: "windows",
-    status: "Ready",
-    size: "12 KB",
-    stealthLevel: "standard",
-    createdAt: new Date(Date.now() - 259200000).toISOString(),
-  },
-  {
-    id: "pl_5",
-    name: "Python Payload",
-    type: "PY",
-    os: "linux",
-    status: "Ready",
-    size: "8 KB",
-    stealthLevel: "standard",
-    createdAt: new Date(Date.now() - 432000000).toISOString(),
-  },
-]
-
-const OS_OPTIONS = [
-  { value: "windows", label: "Windows" },
-  { value: "linux", label: "Linux" },
-  { value: "darwin", label: "macOS" },
-]
-
-const TYPE_OPTIONS = [
-  { value: "EXE", label: "Windows Executable (.exe)" },
-  { value: "ELF", label: "Linux ELF Binary" },
-  { value: "APP", label: "macOS App Bundle (.app)" },
-  { value: "PS1", label: "PowerShell Script (.ps1)" },
-  { value: "PY", label: "Python Script (.py)" },
-  { value: "SH", label: "Shell Script (.sh)" },
-  { value: "DLL", label: "Dynamic Library (.dll)" },
-]
-
-const STEALTH_OPTIONS = [
-  { value: "standard", label: "Standard" },
-  { value: "high", label: "High" },
-  { value: "maximum", label: "Maximum" },
-]
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
 export function PayloadsView() {
-  const [payloads, setPayloads] = useState<Payload[]>(INITIAL_PAYLOADS)
+  const [payloads, setPayloads] = useState<Payload[]>([])
+  const [loading, setLoading] = useState(true)
   const [generateOpen, setGenerateOpen] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [form, setForm] = useState({
     name: "",
-    os: "windows",
-    type: "EXE",
-    stealthLevel: "high",
+    type: "windows_exe",
+    description: "",
     obfuscation: true,
     antiAnalysis: true,
-    customSni: "",
   })
 
-  const handleGenerate = useCallback(() => {
+  // Fetch payloads on mount
+  useEffect(() => {
+    fetchPayloads()
+  }, [])
+
+  const fetchPayloads = async () => {
+    try {
+      const response = await fetch("/api/admin/payloads")
+      if (!response.ok) throw new Error("Failed to fetch payloads")
+      const data = await response.json()
+      setPayloads(data.builds || [])
+    } catch (error) {
+      console.error("Failed to fetch payloads:", error)
+      toast.error("Failed to load payloads")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleGenerate = useCallback(async () => {
     if (!form.name.trim()) return
     setGenerating(true)
 
-    // Simulate build process
-    const newPayload: Payload = {
-      id: `pl_${Date.now()}`,
-      name: form.name.trim(),
-      type: form.type,
-      os: form.os,
-      status: "Building",
-      size: "—",
-      stealthLevel: form.stealthLevel,
-      createdAt: new Date().toISOString(),
+    try {
+      const config = {
+        type: form.type,
+        name: form.name,
+        description: form.description,
+        hysteriaConfig: {
+          server: "auto-detect",
+          auth: "auto-generate",
+        },
+        obfuscation: {
+          enabled: form.obfuscation,
+          level: "medium",
+          techniques: form.obfuscation ? ["string_encode", "variable_rename"] : [],
+        },
+        signing: {
+          enabled: false,
+        },
+        features: {
+          autoReconnect: true,
+          heartbeat: 30,
+          fallbackServers: [],
+        },
+      }
+
+      const response = await fetch("/api/admin/payloads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      })
+
+      if (!response.ok) throw new Error("Failed to create payload build")
+
+      const build = await response.json()
+      
+      // Start the build process
+      const buildResponse = await fetch(`/api/admin/payloads/${build.id}/build`, {
+        method: "POST",
+      })
+
+      if (!buildResponse.ok) throw new Error("Failed to start build")
+
+      toast.success("Payload generation started", {
+        description: `${form.name} is being compiled…`,
+      })
+
+      setGenerateOpen(false)
+      setForm({ name: "", type: "windows_exe", description: "", obfuscation: true, antiAnalysis: true })
+      
+      // Refresh the list
+      await fetchPayloads()
+    } catch (error) {
+      console.error("Failed to generate payload:", error)
+      toast.error("Failed to generate payload")
+    } finally {
+      setGenerating(false)
     }
-
-    setPayloads((prev) => [newPayload, ...prev])
-    toast.success("Payload generation started", {
-      description: `${form.name} (${form.type}) is being compiled…`,
-    })
-
-    // Simulate build completing after 3 seconds
-    setTimeout(() => {
-      setPayloads((prev) =>
-        prev.map((p) =>
-          p.id === newPayload.id
-            ? { ...p, status: "Ready" as PayloadStatus, size: `${(Math.random() * 4 + 0.5).toFixed(1)} MB` }
-            : p
-        )
-      )
-      toast.success("Payload ready", { description: `${form.name} compiled successfully.` })
-    }, 3000)
-
-    setGenerating(false)
-    setGenerateOpen(false)
-    setForm({ name: "", os: "windows", type: "EXE", stealthLevel: "high", obfuscation: true, antiAnalysis: true, customSni: "" })
   }, [form])
 
-  const handleDownload = useCallback((payload: Payload) => {
-    if (payload.status !== "Ready") {
+  const handleDownload = useCallback(async (payload: Payload) => {
+    if (payload.status !== "ready") {
       toast.error("Payload not ready", { description: "Wait for the build to complete." })
       return
     }
-    toast.success("Download started", {
-      description: `Downloading ${payload.name} (${payload.size})…`,
-    })
+    
+    if (payload.downloadUrl) {
+      window.open(payload.downloadUrl, "_blank")
+      toast.success("Download started", {
+        description: `Downloading ${payload.name}…`,
+      })
+    } else {
+      toast.error("No download URL available")
+    }
   }, [])
 
-  const handleDelete = useCallback((payloadId: string) => {
-    setPayloads((prev) => prev.filter((p) => p.id !== payloadId))
-    toast.success("Payload deleted")
+  const handleDelete = useCallback(async (payloadId: string) => {
+    try {
+      const response = await fetch(`/api/admin/payloads/${payloadId}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) throw new Error("Failed to delete payload")
+
+      toast.success("Payload deleted")
+      await fetchPayloads()
+    } catch (error) {
+      console.error("Failed to delete payload:", error)
+      toast.error("Failed to delete payload")
+    }
   }, [])
 
-  const handleRebuild = useCallback((payload: Payload) => {
-    setPayloads((prev) =>
-      prev.map((p) =>
-        p.id === payload.id ? { ...p, status: "Building" as PayloadStatus, size: "—" } : p
-      )
-    )
-    toast.info("Rebuilding payload…", { description: payload.name })
+  const handleRebuild = useCallback(async (payload: Payload) => {
+    try {
+      const response = await fetch(`/api/admin/payloads/${payload.id}/build`, {
+        method: "POST",
+      })
 
-    setTimeout(() => {
-      setPayloads((prev) =>
-        prev.map((p) =>
-          p.id === payload.id
-            ? { ...p, status: "Ready" as PayloadStatus, size: `${(Math.random() * 4 + 0.5).toFixed(1)} MB` }
-            : p
-        )
-      )
-      toast.success("Rebuild complete", { description: payload.name })
-    }, 3000)
+      if (!response.ok) throw new Error("Failed to start rebuild")
+
+      toast.info("Rebuilding payload…", { description: payload.name })
+      await fetchPayloads()
+    } catch (error) {
+      console.error("Failed to rebuild payload:", error)
+      toast.error("Failed to rebuild payload")
+    }
   }, [])
 
   // Stats
-  const readyCount = payloads.filter((p) => p.status === "Ready").length
-  const buildingCount = payloads.filter((p) => p.status === "Building").length
+  const readyCount = payloads.filter((p) => p.status === "ready").length
+  const buildingCount = payloads.filter((p) => p.status === "building").length
+  const failedCount = payloads.filter((p) => p.status === "failed").length
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -280,14 +270,12 @@ export function PayloadsView() {
         </Card>
         <Card>
           <CardContent className="flex items-center gap-3 p-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-info/10">
-              <Shield className="h-4 w-4 text-info" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-destructive/10">
+              <Shield className="h-4 w-4 text-destructive" />
             </div>
             <div>
-              <p className="text-heading-lg">
-                {payloads.filter((p) => p.stealthLevel === "maximum" || p.stealthLevel === "high").length}
-              </p>
-              <p className="text-caption text-muted-foreground">High Stealth</p>
+              <p className="text-heading-lg">{failedCount}</p>
+              <p className="text-caption text-muted-foreground">Failed</p>
             </div>
           </CardContent>
         </Card>
@@ -298,8 +286,8 @@ export function PayloadsView() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Payload Templates</CardTitle>
-              <CardDescription>Pre-configured payload templates for rapid deployment</CardDescription>
+              <CardTitle>Payload Builds</CardTitle>
+              <CardDescription>Generated implant payloads with build status</CardDescription>
             </div>
             <Dialog open={generateOpen} onOpenChange={setGenerateOpen}>
               <DialogTrigger render={<Button />}>
@@ -324,62 +312,29 @@ export function PayloadsView() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Target OS</Label>
-                      <Select value={form.os} onValueChange={(v) => setForm((f) => ({ ...f, os: v ?? f.os }))}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {OS_OPTIONS.map((o) => (
-                            <SelectItem key={o.value} value={o.value}>
-                              {o.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Output Format</Label>
-                      <Select value={form.type} onValueChange={(v) => setForm((f) => ({ ...f, type: v ?? f.type }))}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {TYPE_OPTIONS.map((o) => (
-                            <SelectItem key={o.value} value={o.value}>
-                              {o.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
                   <div className="space-y-2">
-                    <Label>Stealth Level</Label>
-                    <Select value={form.stealthLevel} onValueChange={(v) => setForm((f) => ({ ...f, stealthLevel: v ?? f.stealthLevel }))}>
+                    <Label>Payload Type</Label>
+                    <Select value={form.type} onValueChange={(v) => setForm((f) => ({ ...f, type: v ?? f.type }))}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {STEALTH_OPTIONS.map((o) => (
-                          <SelectItem key={o.value} value={o.value}>
-                            {o.label}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="windows_exe">Windows Executable (.exe)</SelectItem>
+                        <SelectItem value="linux_elf">Linux ELF Binary</SelectItem>
+                        <SelectItem value="macos_app">macOS App Bundle (.app)</SelectItem>
+                        <SelectItem value="powershell">PowerShell Script (.ps1)</SelectItem>
+                        <SelectItem value="python">Python Script (.py)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="pl-sni">Custom SNI (optional)</Label>
+                    <Label htmlFor="pl-desc">Description (optional)</Label>
                     <Input
-                      id="pl-sni"
-                      placeholder="e.g. www.microsoft.com"
-                      value={form.customSni}
-                      onChange={(e) => setForm((f) => ({ ...f, customSni: e.target.value }))}
+                      id="pl-desc"
+                      placeholder="e.g. Corporate stager for initial access"
+                      value={form.description}
+                      onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                     />
                   </div>
 
@@ -444,28 +399,35 @@ export function PayloadsView() {
                   <div>
                     <h3 className="text-heading-sm">{payload.name}</h3>
                     <p className="text-caption text-muted-foreground">
-                      {payload.type} · {payload.os} · {payload.size} · Stealth: {payload.stealthLevel}
+                      {payload.type} · {payload.sizeBytes ? `${(payload.sizeBytes / 1024 / 1024).toFixed(2)} MB` : "—"} · {new Date(payload.createdAt).toLocaleDateString()}
                     </p>
+                    {payload.errorMessage && (
+                      <p className="text-caption text-destructive mt-1">{payload.errorMessage}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge
                     variant={
-                      payload.status === "Ready"
+                      payload.status === "ready"
                         ? "default"
-                        : payload.status === "Building"
+                        : payload.status === "building"
                           ? "secondary"
-                          : "destructive"
+                          : payload.status === "failed"
+                            ? "destructive"
+                            : "outline"
                     }
                     className="gap-1.5"
                   >
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${
-                        payload.status === "Ready"
+                        payload.status === "ready"
                           ? "bg-success"
-                          : payload.status === "Building"
+                          : payload.status === "building"
                             ? "bg-warning animate-pulse"
-                            : "bg-destructive"
+                            : payload.status === "failed"
+                              ? "bg-destructive"
+                              : "bg-muted-foreground"
                       }`}
                     />
                     {payload.status}
@@ -474,7 +436,7 @@ export function PayloadsView() {
                     size="sm"
                     variant="outline"
                     onClick={() => handleDownload(payload)}
-                    disabled={payload.status !== "Ready"}
+                    disabled={payload.status !== "ready"}
                   >
                     <Download className="mr-1.5 h-3 w-3" />
                     Download
@@ -483,7 +445,7 @@ export function PayloadsView() {
                     size="sm"
                     variant="outline"
                     onClick={() => handleRebuild(payload)}
-                    disabled={payload.status === "Building"}
+                    disabled={payload.status === "building"}
                   >
                     <RefreshCw className="mr-1.5 h-3 w-3" />
                     Rebuild

@@ -2,6 +2,9 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 import { readSession } from "@/lib/auth/session"
 import { getOperatorFromAccessToken, extractTokenFromRequest } from "@/lib/auth/jwt"
+import logger from "@/lib/logger"
+
+const log = logger.child({ module: "auth" })
 
 export type AdminPrincipal = {
   id: string
@@ -45,10 +48,12 @@ export class HttpError extends Error {
 }
 
 export function unauthorized(msg = "unauthorized"): HttpError {
+  log.warn({ msg }, "unauthorized")
   return new HttpError(401, msg)
 }
 
 export function forbidden(msg = "forbidden"): HttpError {
+  log.warn({ msg }, "forbidden")
   return new HttpError(403, msg)
 }
 
@@ -57,5 +62,6 @@ export function toErrorResponse(err: unknown): NextResponse {
     return NextResponse.json({ error: err.message }, { status: err.status })
   }
   const message = err instanceof Error ? err.message : "internal error"
+  log.error({ err }, message)
   return NextResponse.json({ error: message }, { status: 500 })
 }

@@ -96,6 +96,7 @@ const WORKFLOW_STAGES: WorkflowStage[] = [
     dotClass: "bg-amber-400",
     modules: [
       { href: "/admin/payloads", label: "Payloads", shortDesc: "Payload generation", icon: Sword },
+      { href: "/admin/implants", label: "Implants", shortDesc: "Implant management", icon: Crosshair },
       { href: "/admin/lotl", label: "LotL Arsenal", shortDesc: "Living off the land", icon: Zap },
       { href: "/admin/profiles", label: "Profiles", shortDesc: "C2 profiles", icon: UserCircle },
     ],

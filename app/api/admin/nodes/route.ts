@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import { NodeCreate } from "@/lib/db/schema"
-import { createNode, listNodes } from "@/lib/db/nodes"
+import { createNode, listNodes, countNodes } from "@/lib/db/nodes"
+import { parsePagination, paginatedResponse } from "@/lib/pagination"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -9,8 +10,10 @@ export const dynamic = "force-dynamic"
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     await verifyAdmin(req)
-    const nodes = await listNodes()
-    return NextResponse.json({ nodes })
+    const { page, pageSize, skip, take } = parsePagination(new URL(req.url).searchParams)
+    const [nodes, total] = await Promise.all([listNodes({ skip, take }), countNodes()])
+    const { pagination } = paginatedResponse(nodes, total, page, pageSize)
+    return NextResponse.json({ nodes, pagination })
   } catch (err) {
     return toErrorResponse(err)
   }
