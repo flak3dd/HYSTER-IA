@@ -71,7 +71,7 @@ export async function chatComplete(opts: {
 }): Promise<ChatCompletionResult> {
   const env = serverEnv()
 
-  // Provider priority: Azure OpenAI > OpenRouter > legacy LLM_PROVIDER_*
+  // Provider priority: Azure OpenAI > xAI (Grok) > OpenRouter > legacy LLM_PROVIDER_*
   let completionUrl: string
   let headers: Record<string, string>
   let model: string
@@ -85,6 +85,14 @@ export async function chatComplete(opts: {
     headers = {
       "content-type": "application/json",
       "api-key": env.AZURE_OPENAI_API_KEY,
+    }
+  } else if (env.XAI_API_KEY) {
+    // xAI Grok — OpenAI-compatible endpoint
+    completionUrl = `${env.XAI_BASE_URL}/chat/completions`
+    model = opts.model ?? env.XAI_MODEL
+    headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${env.XAI_API_KEY}`,
     }
   } else if (env.OPENROUTER_API_KEY) {
     completionUrl = `${env.OPENROUTER_BASE_URL}/chat/completions`
@@ -105,7 +113,7 @@ export async function chatComplete(opts: {
   } else {
     throw new Error(
       "No LLM provider configured. Set AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY, " +
-      "OPENROUTER_API_KEY, or LLM_PROVIDER_API_KEY in your environment.",
+      "XAI_API_KEY, OPENROUTER_API_KEY, or LLM_PROVIDER_API_KEY in your environment.",
     )
   }
 
