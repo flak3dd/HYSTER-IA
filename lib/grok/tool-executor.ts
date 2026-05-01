@@ -101,6 +101,18 @@ export async function executeTool(
         result = await assessOpsecRisk(args);
         break;
 
+      case "osint_domain_enum":
+        result = await osintDomainEnum(args);
+        break;
+
+      case "generate_spearphish":
+        result = await generateSpearphish(args);
+        break;
+
+      case "deploy_nodes":
+        result = await deployNodes(args, context);
+        break;
+
       default:
         result = { success: false, error: `Tool not implemented: ${toolName}` };
     }
@@ -617,6 +629,95 @@ async function assessOpsecRisk(args: any): Promise<ToolResult> {
         "Rotate implant binary every 14 days",
       ],
       recommendation: riskScore > 55 ? "ABORT or heavily modify plan" : "PROCEED with enhanced monitoring",
+    },
+  };
+}
+
+async function osintDomainEnum(args: any): Promise<ToolResult> {
+  const { domain, include_subdomains = true, include_dns_records = true, include_whois = true, deep_scan = false } = args;
+
+  // Simulated OSINT enumeration (in real: call external OSINT APIs)
+  const results: Record<string, any> = {
+    domain,
+    subdomains: include_subdomains
+      ? [`www.${domain}`, `mail.${domain}`, `vpn.${domain}`, `api.${domain}`, deep_scan ? `dev.${domain}` : null].filter(Boolean)
+      : [],
+    dns_records: include_dns_records
+      ? { A: ["203.0.113.42"], MX: [`mail.${domain}`], NS: ["ns1.example.com", "ns2.example.com"], TXT: ["v=spf1 include:_spf.example.com ~all"] }
+      : null,
+    whois: include_whois
+      ? { registrar: "Example Registrar Inc.", created: "2020-01-15", expires: "2027-01-15", name_servers: ["ns1.example.com"] }
+      : null,
+    discovered_services: [
+      { host: `www.${domain}`, port: 443, service: "https", banner: "nginx/1.24" },
+      { host: `mail.${domain}`, port: 587, service: "smtp", banner: "Postfix" },
+    ],
+  };
+
+  return {
+    success: true,
+    data: results,
+  };
+}
+
+async function generateSpearphish(args: any): Promise<ToolResult> {
+  const { target_profile, payload_type, pretext = "urgent", urgency_level = "medium" } = args;
+
+  // Simulated spearphish generation (in real: call LLM + template engine)
+  const template = {
+    subject: urgency_level === "high" ? "URGENT: Action Required" : `Re: ${pretext}`,
+    body: `Dear ${target_profile?.role || "Employee"},\n\nPlease review the attached document regarding ${pretext}.\n\nBest regards,\nIT Department`,
+    payload_delivery: payload_type,
+    attachment_name: payload_type === "attachment" ? `${pretext}.docx` : null,
+    link_url: payload_type === "link" ? `https://${pretext}.example.com/download` : null,
+  };
+
+  return {
+    success: true,
+    data: {
+      template,
+      delivery_strategy: "email",
+      estimated_success_rate: 0.35,
+    },
+  };
+}
+
+async function deployNodes(args: any, context: ToolContext): Promise<ToolResult> {
+  const { regions, obfuscation = "salamander", provider = "aws", count_per_region = 1, auto_start = true } = args;
+
+  const deployedNodes = [];
+
+  for (const region of regions) {
+    for (let i = 0; i < count_per_region; i++) {
+      const node = await prisma.hysteriaNode.create({
+        data: {
+          name: `shadowgrok-node-${region}-${Date.now()}-${i}`,
+          hostname: `c2-${region}-${Date.now()}.example.com`,
+          region,
+          listenAddr: ":443",
+          status: auto_start ? "running" : "stopped",
+          tags: JSON.stringify(["shadowgrok", provider, region, obfuscation]),
+          provider,
+          lastHeartbeatAt: auto_start ? new Date() : null,
+        },
+      });
+
+      deployedNodes.push({
+        node_id: node.id,
+        hostname: node.hostname,
+        region,
+        status: node.status,
+        obfuscation,
+      });
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      nodes: deployedNodes,
+      count: deployedNodes.length,
+      provider,
     },
   };
 }

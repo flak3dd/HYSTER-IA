@@ -241,6 +241,62 @@ export const SHADOWGROK_TOOLS: ToolDefinition[] = [
         required: ["action_description"]
       }
     }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "osint_domain_enum",
+      description: "Perform OSINT domain enumeration on a target. Returns subdomains, DNS records, WHOIS data, and discovered services for reconnaissance.",
+      parameters: {
+        type: "object",
+        properties: {
+          domain: { type: "string", description: "Target domain to enumerate (e.g. 'target.com')" },
+          include_subdomains: { type: "boolean", default: true },
+          include_dns_records: { type: "boolean", default: true },
+          include_whois: { type: "boolean", default: true },
+          deep_scan: { type: "boolean", default: false }
+        },
+        required: ["domain"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "generate_spearphish",
+      description: "Generate a customized spearphishing email template with payload attachment or link. Returns email template, attachment metadata, and delivery strategy.",
+      parameters: {
+        type: "object",
+        properties: {
+          target_profile: { type: "object", description: "Target info (industry, role, language, known contacts)" },
+          payload_type: { type: "string", enum: ["attachment", "link", "macro_doc"], description: "Delivery mechanism" },
+          pretext: { type: "string", description: "Social engineering pretext (e.g. 'invoice', 'job offer')" },
+          urgency_level: { type: "string", enum: ["low", "medium", "high"], default: "medium" }
+        },
+        required: ["target_profile", "payload_type"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "deploy_nodes",
+      description: "Deploy one or more Hysteria 2 C2 nodes to specified regions with given configuration. Returns node IDs, connection info, and deployment status.",
+      parameters: {
+        type: "object",
+        properties: {
+          regions: { type: "array", items: { type: "string" }, description: "Target regions (e.g. ['us-east-1', 'eu-central-1'])" },
+          obfuscation: { type: "string", enum: ["salamander", "none"], default: "salamander" },
+          provider: { type: "string", enum: ["aws", "gcp", "azure", "digitalocean"], default: "aws" },
+          count_per_region: { type: "number", default: 1 },
+          auto_start: { type: "boolean", default: true }
+        },
+        required: ["regions"]
+      }
+    }
   }
 ];
 

@@ -145,3 +145,114 @@ export const UsageRecord = z.object({
   capturedAt: z.number().int(),
 })
 export type UsageRecord = z.infer<typeof UsageRecord>
+
+export const ImplantStatus = z.enum(["active", "inactive", "compromised", "exited"])
+export type ImplantStatus = z.infer<typeof ImplantStatus>
+
+export const Implant = z.object({
+  id: z.string().min(1),
+  implantId: z.string().min(1),
+  name: z.string().min(1).max(120),
+  type: z.string().min(1),
+  architecture: z.string().min(1),
+  targetId: z.string().nullable().optional(),
+  status: ImplantStatus.default("active"),
+  lastSeen: z.number().int().nullable().optional(),
+  firstSeen: z.number().int(),
+  config: z.record(z.string(), z.unknown()),
+  transportConfig: z.record(z.string(), z.unknown()),
+  nodeId: z.string().nullable().optional(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+})
+export type Implant = z.infer<typeof Implant>
+
+export const ImplantCreate = Implant.pick({
+  name: true,
+  type: true,
+  architecture: true,
+  targetId: true,
+  config: true,
+  transportConfig: true,
+  nodeId: true,
+}).partial({ targetId: true, nodeId: true })
+export type ImplantCreate = z.infer<typeof ImplantCreate>
+
+export const ImplantUpdate = ImplantCreate.partial().extend({
+  status: ImplantStatus.optional(),
+  lastSeen: z.number().int().nullable().optional(),
+})
+export type ImplantUpdate = z.infer<typeof ImplantUpdate>
+
+export const ImplantTaskStatus = z.enum(["pending", "running", "completed", "failed"])
+export type ImplantTaskStatus = z.infer<typeof ImplantTaskStatus>
+
+export const ImplantTask = z.object({
+  id: z.string().min(1),
+  implantId: z.string().min(1),
+  taskId: z.string().min(1),
+  type: z.string().min(1),
+  args: z.record(z.string(), z.unknown()),
+  status: ImplantTaskStatus.default("pending"),
+  result: z.record(z.string(), z.unknown()).nullable().optional(),
+  error: z.string().nullable().optional(),
+  createdById: z.string().nullable().optional(),
+  createdAt: z.number().int(),
+  completedAt: z.number().int().nullable().optional(),
+})
+export type ImplantTask = z.infer<typeof ImplantTask>
+
+export const ImplantTaskCreate = ImplantTask.pick({
+  implantId: true,
+  taskId: true,
+  type: true,
+  args: true,
+  createdById: true,
+}).partial({ createdById: true })
+export type ImplantTaskCreate = z.infer<typeof ImplantTaskCreate>
+
+export const PayloadBuildStatus = z.enum(["pending", "building", "ready", "failed"])
+export type PayloadBuildStatus = z.infer<typeof PayloadBuildStatus>
+
+export const PayloadBuild = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(120),
+  type: z.string().min(1),
+  description: z.string().max(500).nullable().optional(),
+  status: PayloadBuildStatus.default("pending"),
+  config: z.record(z.string(), z.unknown()),
+  downloadUrl: z.string().nullable().optional(),
+  sizeBytes: z.number().int().nullable().optional(),
+  buildLogs: z.array(z.string()),
+  errorMessage: z.string().nullable().optional(),
+  implantBinaryPath: z.string().nullable().optional(),
+  md5Hash: z.string().nullable().optional(),
+  sha256Hash: z.string().nullable().optional(),
+  createdBy: z.string().nullable().optional(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+  completedAt: z.number().int().nullable().optional(),
+})
+export type PayloadBuild = z.infer<typeof PayloadBuild>
+
+export const PayloadBuildCreate = PayloadBuild.pick({
+  name: true,
+  type: true,
+  description: true,
+  config: true,
+  createdBy: true,
+}).partial({ description: true, createdBy: true })
+export type PayloadBuildCreate = z.infer<typeof PayloadBuildCreate>
+
+export const PayloadBuildUpdate = PayloadBuildCreate.partial().extend({
+  status: PayloadBuildStatus.optional(),
+  downloadUrl: z.string().nullable().optional(),
+  sizeBytes: z.number().int().nullable().optional(),
+  buildLogs: z.array(z.string()).optional(),
+  errorMessage: z.string().nullable().optional(),
+  implantBinaryPath: z.string().nullable().optional(),
+  md5Hash: z.string().nullable().optional(),
+  sha256Hash: z.string().nullable().optional(),
+  completedAt: z.number().int().nullable().optional(),
+})
+export type PayloadBuildUpdate = z.infer<typeof PayloadBuildUpdate>

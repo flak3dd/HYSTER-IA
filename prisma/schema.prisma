@@ -256,6 +256,70 @@ model Payload {
   @@map("payloads")
 }
 
+model Implant {
+  id              String   @id @default(cuid())
+  implantId       String   @unique
+  name            String
+  type            String
+  architecture    String
+  targetId        String?
+  status          String   @default("active")
+  lastSeen        DateTime?
+  firstSeen       DateTime @default(now())
+  config          Json
+  transportConfig Json
+  nodeId          String?
+  node            HysteriaNode? @relation(fields: [nodeId], references: [id])
+  tasks           ImplantTask[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("implants")
+}
+
+model ImplantTask {
+  id          String   @id @default(cuid())
+  implantId   String
+  implant     Implant  @relation(fields: [implantId], references: [id], onDelete: Cascade)
+  taskId      String
+  type        String
+  args        Json
+  status      String   @default("pending")
+  result      Json?
+  error       String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([implantId, status])
+  @@index([implantId, createdAt(sort: Desc)])
+  @@map("implant_tasks")
+}
+
+model PayloadBuild {
+  id              String   @id @default(cuid())
+  name            String
+  type            String
+  description     String?
+  status          String   @default("pending")
+  config          Json
+  downloadUrl     String?
+  sizeBytes       BigInt?
+  buildLogs       Json     @default("[]")
+  errorMessage    String?
+  implantBinaryPath String?
+  md5Hash         String?
+  sha256Hash      String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  completedAt     DateTime?
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([createdBy])
+  @@map("payload_builds")
+}
+
 model OSINTData {
   id          String   @id @default(cuid())
   type        String
@@ -359,6 +423,7 @@ model HysteriaNode {
   lastHeartbeatAt DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  implants        Implant[]
 
   @@map("nodes")
 }

@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { randomUUID } from "crypto"
+import { createPayloadBuild as createDbPayloadBuild, updatePayloadBuildStatus, getPayloadBuildById } from "@/lib/db/payload-builds"
 
 /* ------------------------------------------------------------------ */
 /*  Types & Schemas                                                   */
@@ -54,12 +55,6 @@ export type PayloadBuild = {
 }
 
 /* ------------------------------------------------------------------ */
-/*  In-memory build tracking (use Redis/DB for production)            */
-/* ------------------------------------------------------------------ */
-
-const activeBuilds = new Map<string, PayloadBuild>()
-
-/* ------------------------------------------------------------------ */
 /*  Core Generator                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -67,50 +62,81 @@ export async function createPayloadBuild(
   config: PayloadConfig,
   createdBy: string
 ): Promise<PayloadBuild> {
-  void createdBy
-  const id = randomUUID()
-  const build: PayloadBuild = {
-    id,
-    type: config.type,
+  const dbBuild = await createDbPayloadBuild({
     name: config.name,
+    type: config.type,
     description: config.description,
-    status: "pending",
-    config,
-    buildLogs: [],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  }
-
-  // Store in memory for now
-  activeBuilds.set(id, build)
-
-  // TODO: Persist to database when payloadBuild table is created
-  // For now, stored in memory only
+    config: config as any,
+    createdBy,
+  })
 
   // Start async build
-  startBuildProcess(id, config)
+  startBuildProcess(dbBuild.id, config)
 
-  return build
+  return {
+    id: dbBuild.id,
+    type: dbBuild.type as PayloadType,
+    name: dbBuild.name,
+    description: dbBuild.description ?? undefined,
+    status: dbBuild.status as PayloadStatus,
+    config: dbBuild.config as PayloadConfig,
+    downloadUrl: dbBuild.downloadUrl ?? undefined,
+    sizeBytes: dbBuild.sizeBytes ? Number(dbBuild.sizeBytes) : undefined,
+    buildLogs: dbBuild.buildLogs as string[],
+    errorMessage: dbBuild.errorMessage ?? undefined,
+    createdAt: dbBuild.createdAt,
+    updatedAt: dbBuild.updatedAt,
+    completedAt: dbBuild.completedAt ?? undefined,
+  }
 }
 
 export async function getPayloadBuild(id: string): Promise<PayloadBuild | null> {
-  // Check memory only (DB persistence TODO)
-  return activeBuilds.get(id) ?? null
+  const dbBuild = await getPayloadBuildById(id)
+  if (!dbBuild) return null
+
+  return {
+    id: dbBuild.id,
+    type: dbBuild.type as PayloadType,
+    name: dbBuild.name,
+    description: dbBuild.description ?? undefined,
+    status: dbBuild.status as PayloadStatus,
+    config: dbBuild.config as PayloadConfig,
+    downloadUrl: dbBuild.downloadUrl ?? undefined,
+    sizeBytes: dbBuild.sizeBytes ? Number(dbBuild.sizeBytes) : undefined,
+    buildLogs: dbBuild.buildLogs as string[],
+    errorMessage: dbBuild.errorMessage ?? undefined,
+    createdAt: dbBuild.createdAt,
+    updatedAt: dbBuild.updatedAt,
+    completedAt: dbBuild.completedAt ?? undefined,
+  }
 }
 
 export async function listPayloadBuilds(createdBy?: string, limit = 50): Promise<PayloadBuild[]> {
-  // Filter from memory only (DB persistence TODO)
-  const builds = Array.from(activeBuilds.values())
-    .filter(() => !createdBy || true) // TODO: add createdBy tracking
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, limit)
+  // This is now handled by the database layer
+  // This function is kept for backward compatibility
+  const { listPayloadBuilds: dbList } = await import("@/lib/db/payload-builds")
+  const dbBuilds = await dbList(createdBy, limit)
   
-  return builds
+  return dbBuilds.map(dbBuild => ({
+    id: dbBuild.id,
+    type: dbBuild.type as PayloadType,
+    name: dbBuild.name,
+    description: dbBuild.description ?? undefined,
+    status: dbBuild.status as PayloadStatus,
+    config: dbBuild.config as PayloadConfig,
+    downloadUrl: dbBuild.downloadUrl ?? undefined,
+    sizeBytes: dbBuild.sizeBytes ? Number(dbBuild.sizeBytes) : undefined,
+    buildLogs: dbBuild.buildLogs,
+    errorMessage: dbBuild.errorMessage ?? undefined,
+    createdAt: dbBuild.createdAt,
+    updatedAt: dbBuild.updatedAt,
+    completedAt: dbBuild.completedAt ?? undefined,
+  }))
 }
 
 export async function deletePayloadBuild(id: string): Promise<boolean> {
-  // TODO: DB deletion when table exists
-  return activeBuilds.delete(id)
+  const { deletePayloadBuild: dbDelete } = await import("@/lib/db/payload-builds")
+  return dbDelete(id)
 }
 
 /* ------------------------------------------------------------------ */
@@ -118,10 +144,7 @@ export async function deletePayloadBuild(id: string): Promise<boolean> {
 /* ------------------------------------------------------------------ */
 
 async function startBuildProcess(id: string, config: PayloadConfig): Promise<void> {
-  const build = activeBuilds.get(id)
-  if (!build) return
-
-  updateBuildStatus(id, "building", "Starting build process...")
+  await updatePayloadBuildStatus(id, "building", "Starting build process...")
 
   try {
     switch (config.type) {
@@ -144,10 +167,10 @@ async function startBuildProcess(id: string, config: PayloadConfig): Promise<voi
         throw new Error(`Unsupported payload type: ${config.type}`)
     }
 
-    updateBuildStatus(id, "ready", "Build completed successfully")
+    await updatePayloadBuildStatus(id, "ready", "Build completed successfully")
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    updateBuildStatus(id, "failed", `Build failed: ${errorMsg}`)
+    await updatePayloadBuildStatus(id, "failed", `Build failed: ${errorMsg}`)
   }
 }
 
@@ -156,18 +179,9 @@ function updateBuildStatus(
   status: PayloadStatus,
   logMessage: string
 ): void {
-  const build = activeBuilds.get(id)
-  if (!build) return
-
-  build.status = status
-  build.buildLogs.push(`[${new Date().toISOString()}] ${logMessage}`)
-  build.updatedAt = Date.now()
-
-  if (status === "ready" || status === "failed") {
-    build.completedAt = Date.now()
-  }
-
-  // TODO: Update DB when table exists
+  // This is now handled by updatePayloadBuildStatus
+  // This function is kept for backward compatibility
+  void updatePayloadBuildStatus(id, status, logMessage)
 }
 
 /* ------------------------------------------------------------------ */
@@ -175,7 +189,7 @@ function updateBuildStatus(
 /* ------------------------------------------------------------------ */
 
 async function buildWindowsExe(id: string, config: PayloadConfig): Promise<void> {
-  updateBuildStatus(id, "building", "Building Windows EXE with Go...")
+  await updatePayloadBuildStatus(id, "building", "Building Windows EXE with Go...")
   
   // Simulate build steps
   await simulateBuildStep(id, 1000, "Generating Go source with embedded Hysteria2 client...")
@@ -193,15 +207,15 @@ async function buildWindowsExe(id: string, config: PayloadConfig): Promise<void>
   // Generate mock artifact
   const artifactSize = 2.4 * 1024 * 1024 + Math.floor(Math.random() * 1024 * 1024)
   
-  const build = activeBuilds.get(id)
-  if (build) {
-    build.sizeBytes = artifactSize
-    build.downloadUrl = `/api/admin/payloads/${id}/download`
-  }
+  const { updatePayloadBuild: dbUpdate } = await import("@/lib/db/payload-builds")
+  await dbUpdate(id, {
+    sizeBytes: artifactSize,
+    downloadUrl: `/api/admin/payloads/${id}/download`
+  })
 }
 
 async function buildLinuxElf(id: string, config: PayloadConfig): Promise<void> {
-  updateBuildStatus(id, "building", "Building Linux ELF binary...")
+  await updatePayloadBuildStatus(id, "building", "Building Linux ELF binary...")
   
   await simulateBuildStep(id, 800, "Generating static binary with musl libc...")
   await simulateBuildStep(id, 1200, "Embedding Hysteria2 client configuration...")
@@ -213,15 +227,15 @@ async function buildLinuxElf(id: string, config: PayloadConfig): Promise<void> {
 
   const artifactSize = 1.8 * 1024 * 1024 + Math.floor(Math.random() * 512 * 1024)
   
-  const build = activeBuilds.get(id)
-  if (build) {
-    build.sizeBytes = artifactSize
-    build.downloadUrl = `/api/admin/payloads/${id}/download`
-  }
+  const { updatePayloadBuild: dbUpdate } = await import("@/lib/db/payload-builds")
+  await dbUpdate(id, {
+    sizeBytes: artifactSize,
+    downloadUrl: `/api/admin/payloads/${id}/download`
+  })
 }
 
 async function buildMacosApp(id: string, config: PayloadConfig): Promise<void> {
-  updateBuildStatus(id, "building", "Building macOS Universal Binary...")
+  await updatePayloadBuildStatus(id, "building", "Building macOS Universal Binary...")
   
   await simulateBuildStep(id, 1000, "Compiling for amd64 architecture...")
   await simulateBuildStep(id, 1000, "Compiling for arm64 (Apple Silicon) architecture...")
@@ -235,15 +249,15 @@ async function buildMacosApp(id: string, config: PayloadConfig): Promise<void> {
 
   const artifactSize = 3.1 * 1024 * 1024 + Math.floor(Math.random() * 1024 * 1024)
   
-  const build = activeBuilds.get(id)
-  if (build) {
-    build.sizeBytes = artifactSize
-    build.downloadUrl = `/api/admin/payloads/${id}/download`
-  }
+  const { updatePayloadBuild: dbUpdate } = await import("@/lib/db/payload-builds")
+  await dbUpdate(id, {
+    sizeBytes: artifactSize,
+    downloadUrl: `/api/admin/payloads/${id}/download`
+  })
 }
 
 async function buildPowerShell(id: string, config: PayloadConfig): Promise<void> {
-  updateBuildStatus(id, "building", "Generating PowerShell payload...")
+  await updatePayloadBuildStatus(id, "building", "Generating PowerShell payload...")
   
   await simulateBuildStep(id, 500, "Creating Hysteria2 client loader...")
   await simulateBuildStep(id, 800, "Encoding configuration as base64...")
@@ -255,15 +269,15 @@ async function buildPowerShell(id: string, config: PayloadConfig): Promise<void>
 
   const artifactSize = 12 * 1024 + Math.floor(Math.random() * 4 * 1024)
   
-  const build = activeBuilds.get(id)
-  if (build) {
-    build.sizeBytes = artifactSize
-    build.downloadUrl = `/api/admin/payloads/${id}/download`
-  }
+  const { updatePayloadBuild: dbUpdate } = await import("@/lib/db/payload-builds")
+  await dbUpdate(id, {
+    sizeBytes: artifactSize,
+    downloadUrl: `/api/admin/payloads/${id}/download`
+  })
 }
 
 async function buildPython(id: string, config: PayloadConfig): Promise<void> {
-  updateBuildStatus(id, "building", "Generating Python payload...")
+  await updatePayloadBuildStatus(id, "building", "Generating Python payload...")
   
   await simulateBuildStep(id, 400, "Creating async Hysteria2 client wrapper...")
   await simulateBuildStep(id, 600, "Embedding configuration...")
@@ -275,15 +289,15 @@ async function buildPython(id: string, config: PayloadConfig): Promise<void> {
 
   const artifactSize = 8 * 1024 + Math.floor(Math.random() * 4 * 1024)
   
-  const build = activeBuilds.get(id)
-  if (build) {
-    build.sizeBytes = artifactSize
-    build.downloadUrl = `/api/admin/payloads/${id}/download`
-  }
+  const { updatePayloadBuild: dbUpdate } = await import("@/lib/db/payload-builds")
+  await dbUpdate(id, {
+    sizeBytes: artifactSize,
+    downloadUrl: `/api/admin/payloads/${id}/download`
+  })
 }
 
 async function simulateBuildStep(id: string, delayMs: number, message: string): Promise<void> {
-  updateBuildStatus(id, "building", message)
+  await updatePayloadBuildStatus(id, "building", message)
   await new Promise((resolve) => setTimeout(resolve, delayMs))
 }
 
