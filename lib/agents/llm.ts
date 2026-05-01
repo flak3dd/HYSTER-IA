@@ -70,30 +70,52 @@ export async function chatComplete(opts: {
   signal?: AbortSignal
 }): Promise<ChatCompletionResult> {
   const env = serverEnv()
-  
-  // Prefer OpenRouter configuration, fall back to legacy LLM configuration
-  const apiKey = env.OPENROUTER_API_KEY || env.LLM_PROVIDER_API_KEY
-  const baseUrl = env.OPENROUTER_API_KEY ? env.OPENROUTER_BASE_URL : env.LLM_PROVIDER_BASE_URL
-  const model = opts.model ?? (env.OPENROUTER_API_KEY ? env.OPENROUTER_MODEL : env.LLM_MODEL)
-  
-  if (!apiKey) {
-    throw new Error("Neither OPENROUTER_API_KEY nor LLM_PROVIDER_API_KEY is set")
+
+  // Provider priority: Azure OpenAI > OpenRouter > legacy LLM_PROVIDER_*
+  let completionUrl: string
+  let headers: Record<string, string>
+  let model: string
+
+  if (env.AZURE_OPENAI_ENDPOINT && env.AZURE_OPENAI_API_KEY) {
+    // Azure OpenAI: POST {endpoint}/openai/deployments/{deployment}/chat/completions?api-version={version}
+    const endpoint = env.AZURE_OPENAI_ENDPOINT.replace(/\/$/, "")
+    const deployment = opts.model ?? env.AZURE_OPENAI_DEPLOYMENT
+    completionUrl = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${env.AZURE_OPENAI_API_VERSION}`
+    model = deployment
+    headers = {
+      "content-type": "application/json",
+      "api-key": env.AZURE_OPENAI_API_KEY,
+    }
+  } else if (env.OPENROUTER_API_KEY) {
+    completionUrl = `${env.OPENROUTER_BASE_URL}/chat/completions`
+    model = opts.model ?? env.OPENROUTER_MODEL
+    headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+      "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+      "X-Title": "Hysteria2 C2 Panel",
+    }
+  } else if (env.LLM_PROVIDER_API_KEY) {
+    completionUrl = `${env.LLM_PROVIDER_BASE_URL}/chat/completions`
+    model = opts.model ?? env.LLM_MODEL
+    headers = {
+      "content-type": "application/json",
+      authorization: `Bearer ${env.LLM_PROVIDER_API_KEY}`,
+    }
+  } else {
+    throw new Error(
+      "No LLM provider configured. Set AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY, " +
+      "OPENROUTER_API_KEY, or LLM_PROVIDER_API_KEY in your environment.",
+    )
   }
 
-  const res = await proxyFetch(`${baseUrl}/chat/completions`, {
+  const res = await proxyFetch(completionUrl, {
     method: "POST",
     purpose: "llm",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${apiKey}`,
-      // Add OpenRouter-specific headers if using OpenRouter
-      ...(env.OPENROUTER_API_KEY ? {
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-        "X-Title": "Hysteria2 C2 Panel",
-      } : {}),
-    },
+    headers,
     body: JSON.stringify({
-      model: model,
+      // Azure ignores the `model` field (deployment is in the URL), but other providers need it
+      model,
       temperature: opts.temperature ?? env.LLM_TEMPERATURE,
       messages: opts.messages,
       tools: opts.tools,
