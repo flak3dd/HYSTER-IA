@@ -5,9 +5,7 @@ import { chatComplete, type ChatMessage } from '@/lib/agents/llm';
 import { SHADOWGROK_TOOLS } from './grok-tools';
 import { executeTool, type ToolContext } from './tool-executor';
 import { prisma } from '@/lib/db';
-
-const MAX_TOOL_ROUNDS = 15; // Higher limit for complex operations
-const MAX_CONCURRENT_TOOLS = 5; // Parallel tool execution
+import { serverEnv } from '@/lib/env';
 
 const SHADOWGROK_SYSTEM_PROMPT = [
   "You are ShadowGrok, an autonomous C2 operations assistant powered by xAI Grok.",
@@ -72,11 +70,12 @@ export async function runShadowGrokWithTools(
   invokerUid: string,
   options: ShadowGrokRunOptions = {}
 ): Promise<ShadowGrokResult> {
+  const env = serverEnv()
   const {
     conversationId,
     nodeContext,
-    requireApproval = true,
-    maxToolRounds = MAX_TOOL_ROUNDS,
+    requireApproval = env.SHADOWGROK_REQUIRE_APPROVAL,
+    maxToolRounds = env.SHADOWGROK_MAX_TOOL_ROUNDS,
   } = options;
 
   console.log(`[ShadowGrok] Starting autonomous execution for user: ${invokerUid}`);
@@ -97,7 +96,7 @@ export async function runShadowGrokWithTools(
   let finalResponse = '';
   let round = 0;
 
-  const signal = AbortSignal.timeout(300000); // 5 minute timeout
+  const signal = AbortSignal.timeout(env.SHADOWGROK_EXECUTION_TIMEOUT_MS);
 
   const executionContext: ToolContext = {
     userId: invokerUid,
@@ -109,11 +108,10 @@ export async function runShadowGrokWithTools(
       round++;
       console.log(`[ShadowGrok] Tool round ${round}/${maxToolRounds}`);
 
-      // Call Grok API with tools
+      // Call LLM with tools
       const response = await chatComplete({
         messages,
         tools: SHADOWGROK_TOOLS as any,
-        model: process.env.LLM_MODEL || 'grok-4.20-reasoning',
         temperature: 0.6,
         signal,
       });
@@ -218,10 +216,11 @@ export async function runShadowGrokStream(
   }) => void,
   options: ShadowGrokRunOptions = {}
 ): Promise<ShadowGrokResult> {
+  const env = serverEnv()
   const {
     conversationId,
     nodeContext,
-    requireApproval = true,
+    requireApproval = env.SHADOWGROK_REQUIRE_APPROVAL,
   } = options;
 
   const messages: ChatMessage[] = [
@@ -237,7 +236,7 @@ export async function runShadowGrokStream(
   let finalResponse = '';
   let round = 0;
 
-  const signal = AbortSignal.timeout(300000);
+  const signal = AbortSignal.timeout(env.SHADOWGROK_EXECUTION_TIMEOUT_MS);
 
   const executionContext: ToolContext = {
     userId: invokerUid,
@@ -245,13 +244,12 @@ export async function runShadowGrokStream(
   };
 
   try {
-    while (round < MAX_TOOL_ROUNDS) {
+    while (round < env.SHADOWGROK_MAX_TOOL_ROUNDS) {
       round++;
 
       const response = await chatComplete({
         messages,
         tools: SHADOWGROK_TOOLS as any,
-        model: process.env.LLM_MODEL || 'grok-4.20-reasoning',
         temperature: 0.6,
         signal,
       });
@@ -354,6 +352,8 @@ export async function validateToolExecution(
   args: Record<string, unknown>,
   invokerUid: string
 ): Promise<{ allowed: boolean; reason?: string; riskLevel?: string }> {
+  const env = serverEnv()
+
   // High-risk tools that require additional validation
   const highRiskTools = [
     'trigger_kill_switch',
@@ -381,10 +381,10 @@ export async function validateToolExecution(
 
   if (riskAssessment.success && riskAssessment.data) {
     const assessment = riskAssessment.data as { risk_assessment: { risk_level: string; risk_score: number } };
-    if (assessment.risk_assessment.risk_score > 70) {
+    if (assessment.risk_assessment.risk_score > env.SHADOWGROK_RISK_THRESHOLD) {
       return {
         allowed: false,
-        reason: 'Risk assessment score too high. Requires senior operator approval.',
+        reason: `Risk score exceeds threshold (${env.SHADOWGROK_RISK_THRESHOLD}). Requires senior operator approval.`,
         riskLevel: assessment.risk_assessment.risk_level,
       };
     }

@@ -39,6 +39,18 @@ const ServerEnvSchema = z.object({
     .regex(/^(https?|socks5h?):\/\/.+/, "must be http(s):// or socks5(h):// URL")
     .optional(),
 
+  // ShadowGrok / xAI Grok Configuration
+  SHADOWGROK_ENABLED: z.coerce.boolean().default(false),
+  XAI_API_KEY: z.string().min(1).optional(),
+  XAI_BASE_URL: z.string().url().default("https://api.x.ai/v1"),
+  XAI_MODEL: z.string().min(1).default("grok-3"),
+  SHADOWGROK_REQUIRE_APPROVAL: z.coerce.boolean().default(true),
+  SHADOWGROK_MAX_TOOL_ROUNDS: z.coerce.number().int().min(1).max(50).default(15),
+  SHADOWGROK_MAX_CONCURRENT_TOOLS: z.coerce.number().int().min(1).max(20).default(5),
+  SHADOWGROK_EXECUTION_TIMEOUT_MS: z.coerce.number().int().min(5000).max(600000).default(300000),
+  SHADOWGROK_RISK_THRESHOLD: z.coerce.number().int().min(0).max(100).default(70),
+  SHADOWGROK_AUTO_APPROVE_LOW_RISK: z.coerce.boolean().default(true),
+
   // Azure OpenAI Configuration (highest priority when set)
   AZURE_OPENAI_ENDPOINT: z.string().url().optional(),       // e.g. https://your-resource.openai.azure.com/
   AZURE_OPENAI_API_KEY: z.string().min(1).optional(),

@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db";
 import { executeTool, ToolContext, ToolResult } from "./tool-executor";
 import { SHADOWGROK_TOOLS, ALL_TOOL_NAMES } from "./grok-tools";
 import { chatComplete, type ChatMessage } from "@/lib/agents/llm";
+import { serverEnv } from "@/lib/env";
 
 const SHADOWGROK_SYSTEM_PROMPT = `You are ShadowGrok, an elite AI red team operative and stealth C2 specialist.
 
@@ -34,13 +35,24 @@ export interface RunAgentOptions {
 }
 
 export async function runShadowGrokAgent(options: RunAgentOptions) {
+  const env = serverEnv()
+  // Resolve default model from the active provider configuration
+  const defaultModel =
+    (env.AZURE_OPENAI_ENDPOINT && env.AZURE_OPENAI_API_KEY)
+      ? env.AZURE_OPENAI_DEPLOYMENT
+      : env.XAI_API_KEY
+      ? env.XAI_MODEL
+      : env.OPENROUTER_API_KEY
+      ? env.OPENROUTER_MODEL
+      : env.LLM_MODEL
+
   const {
     prompt,
     userId,
     conversationId,
     allowedTools = ALL_TOOL_NAMES,
-    maxSteps = 12,
-    model = process.env.LLM_MODEL || "grok-4.20-reasoning",
+    maxSteps = env.SHADOWGROK_MAX_TOOL_ROUNDS,
+    model = defaultModel,
     dryRun = false,
   } = options;
 
