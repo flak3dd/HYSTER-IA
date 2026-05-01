@@ -580,13 +580,13 @@ function ProviderKeysSection() {
         <Card key={group.group}>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">{group.group}</CardTitle>
-            <CardDescription className="text-xs">
+            <div className="text-muted-foreground text-xs">
               {group.fields.some((f) => masked[f.key]) ? (
                 <Badge variant="default" className="text-[10px]">Configured</Badge>
               ) : (
                 <Badge variant="secondary" className="text-[10px]">Not set</Badge>
               )}
-            </CardDescription>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
             {group.fields.map((field) => {

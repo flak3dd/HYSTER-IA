@@ -1,10 +1,25 @@
+"use client"
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { toast } from "sonner"
 
 export const dynamic = "force-dynamic"
 
 export default function ForensicsPage() {
+  const handleDeployModule = () => {
+    toast.info("Deploy Module", {
+      description: "Module deployment interface coming soon. Use ShadowGrok Agent for anti-forensic operations.",
+    })
+  }
+
+  const handleExecuteModule = (moduleName: string) => {
+    toast.info("Execute Module", {
+      description: `Executing "${moduleName}" - module execution interface coming soon. Use ShadowGrok Agent for now.`,
+    })
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -22,7 +37,7 @@ export default function ForensicsPage() {
                 <CardTitle>Anti-Forensics Modules</CardTitle>
                 <CardDescription>Manage anti-forensic tools and techniques</CardDescription>
               </div>
-              <Button>Deploy Module</Button>
+              <Button onClick={handleDeployModule}>Deploy Module</Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -45,7 +60,7 @@ export default function ForensicsPage() {
                     <Badge variant={module.status === "Active" ? "default" : "secondary"}>
                       {module.status}
                     </Badge>
-                    <Button size="sm" variant="outline">Execute</Button>
+                    <Button size="sm" variant="outline" onClick={() => handleExecuteModule(module.name)}>Execute</Button>
                   </div>
                 </div>
               ))}

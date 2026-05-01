@@ -1,10 +1,25 @@
+"use client"
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { toast } from "sonner"
 
 export const dynamic = "force-dynamic"
 
 export default function CoordinationPage() {
+  const handleNewOperation = () => {
+    toast.info("New Operation", {
+      description: "Operation creation workflow coming soon. Use the AI Workflow Assistant for complex operations.",
+    })
+  }
+
+  const handleViewDetails = (operationName: string) => {
+    toast.info("Operation Details", {
+      description: `Viewing details for "${operationName}" - detailed operation view coming soon.`,
+    })
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -22,7 +37,7 @@ export default function CoordinationPage() {
                 <CardTitle>Active Operations</CardTitle>
                 <CardDescription>Manage ongoing team operations and assignments</CardDescription>
               </div>
-              <Button>New Operation</Button>
+              <Button onClick={handleNewOperation}>New Operation</Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -45,7 +60,7 @@ export default function CoordinationPage() {
                     <Badge variant={operation.status === "Active" ? "default" : operation.status === "Completed" ? "default" : "secondary"}>
                       {operation.status}
                     </Badge>
-                    <Button size="sm" variant="outline">View Details</Button>
+                    <Button size="sm" variant="outline" onClick={() => handleViewDetails(operation.name)}>View Details</Button>
                   </div>
                 </div>
               ))}
