@@ -50,24 +50,30 @@ const ServerEnvSchema = z.object({
   SHADOWGROK_EXECUTION_TIMEOUT_MS: z.coerce.number().int().min(5000).max(600000).default(300000),
   SHADOWGROK_RISK_THRESHOLD: z.coerce.number().int().min(0).max(100).default(70),
   SHADOWGROK_AUTO_APPROVE_LOW_RISK: z.coerce.boolean().default(true),
+  // Enhanced tool calling configuration
+  SHADOWGROK_ENABLE_PARALLEL_EXECUTION: z.coerce.boolean().default(true),
+  SHADOWGROK_PARALLEL_BATCH_SIZE: z.coerce.number().int().min(1).max(10).default(3),
+  SHADOWGROK_AUTO_APPROVE_THRESHOLD: z.coerce.number().int().min(0).max(100).default(30),
+  SHADOWGROK_TOOL_CALLING_AGGRESSIVENESS: z.enum(["conservative", "balanced", "aggressive"]).default("balanced"),
+  SHADOWGROK_ENABLE_STREAMING_BY_DEFAULT: z.coerce.boolean().default(true),
 
   // Azure OpenAI Configuration (highest priority when set)
-  AZURE_OPENAI_ENDPOINT: z.string().url().optional(),       // e.g. https://your-resource.openai.azure.com/
-  AZURE_OPENAI_API_KEY: z.string().min(1).optional(),
-  AZURE_OPENAI_DEPLOYMENT: z.string().min(1).default("gpt-4o"), // deployment name in Azure AI Studio
-  AZURE_OPENAI_API_VERSION: z.string().min(1).default("2024-12-01-preview"),
+  AZURE_OPENAI_ENDPOINT: z.string().url().or(z.literal("")).optional(),       // e.g. https://your-resource.openai.azure.com/
+  AZURE_OPENAI_API_KEY: z.string().min(1).or(z.literal("")).optional(),
+  AZURE_OPENAI_DEPLOYMENT: z.string().min(1).or(z.literal("")).default("gpt-4o"), // deployment name in Azure AI Studio
+  AZURE_OPENAI_API_VERSION: z.string().min(1).or(z.literal("")).default("2024-12-01-preview"),
   // Azure AI Foundry project endpoint (for Foundry SDK / future features)
-  AZURE_AI_FOUNDRY_ENDPOINT: z.string().url().optional(),   // e.g. https://your-resource.services.ai.azure.com/api/projects/YOUR-PROJECT
+  AZURE_AI_FOUNDRY_ENDPOINT: z.string().url().or(z.literal("")).optional(),   // e.g. https://your-resource.services.ai.azure.com/api/projects/YOUR-PROJECT
 
   // OpenRouter Configuration (second priority)
-  OPENROUTER_API_KEY: z.string().min(1).optional(),
+  OPENROUTER_API_KEY: z.string().min(1).or(z.literal("")).optional(),
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   OPENROUTER_MODEL: z.string().min(1).default("anthropic/claude-3.5-sonnet"),
 
   // Legacy LLM Configuration (fallback)
-  LLM_PROVIDER_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
-  LLM_PROVIDER_API_KEY: z.string().min(1).optional(),
-  LLM_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  LLM_PROVIDER_BASE_URL: z.string().url().or(z.literal("")).default("https://api.openai.com/v1"),
+  LLM_PROVIDER_API_KEY: z.string().min(1).or(z.literal("")).optional(),
+  LLM_MODEL: z.string().min(1).or(z.literal("")).default("gpt-4o-mini"),
   LLM_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.2),
 
   // SSH Public Key for Server Access

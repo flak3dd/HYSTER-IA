@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -67,7 +68,7 @@ export function InfrastructureOverview() {
     if (!addNodeForm.name.trim() || !addNodeForm.hostname.trim()) return
     setAddNodeLoading(true)
     try {
-      const res = await fetch("/api/admin/nodes", {
+      const res = await apiFetch("/api/admin/nodes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -96,7 +97,7 @@ export function InfrastructureOverview() {
   const loadNodes = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch("/api/admin/nodes", { cache: "no-store" })
+      const res = await apiFetch("/api/admin/nodes", { cache: "no-store" })
       if (res.ok) {
         const data = await res.json()
         const items: NodeStatus[] = (data.nodes ?? data ?? []).map((n: Record<string, unknown>) => ({
@@ -152,7 +153,7 @@ export function InfrastructureOverview() {
 
     try {
       const origin = typeof window !== "undefined" ? window.location.origin : ""
-      const res = await fetch("/api/admin/deploy/provision-script", {
+      const res = await apiFetch("/api/admin/deploy/provision-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -490,7 +491,7 @@ function InstallHysteriaModal({
     try {
       if (usePanelAuth) {
         // Use the provision-script API for panel-integrated auth
-        const res = await fetch("/api/admin/deploy/provision-script", {
+        const res = await apiFetch("/api/admin/deploy/provision-script", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -821,7 +822,7 @@ function ConfigureNodeModal({
   const handleSave = async () => {
     setSaving(true)
     try {
-      const res = await fetch(`/api/admin/nodes/${node.id}`, {
+      const res = await apiFetch(`/api/admin/nodes/${node.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,10 +1,12 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { supabaseClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
-import { Monitor, Shield, Signal } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Monitor, Shield, Signal, Server, Activity, Circle } from "lucide-react"
 import {
   type Overview,
   type LiveNode,
@@ -17,6 +19,7 @@ import {
   NodesHealthTable,
   ActivityFeed,
 } from "@/components/admin/dashboard/dashboard-widgets"
+import { AIDashboardWidget } from "@/components/admin/ai/ai-dashboard-widget"
 
 const POLL_MS = 5000
 
@@ -149,7 +152,7 @@ export function DashboardOverview() {
     let cancelled = false
     async function tick() {
       try {
-        const res = await fetch("/api/admin/overview", { cache: "no-store" })
+        const res = await apiFetch("/api/admin/overview", { cache: "no-store" })
         if (!res.ok) {
           if (!cancelled) setError(`overview failed (${res.status})`)
           return
@@ -181,7 +184,7 @@ export function DashboardOverview() {
 
   const fetchNodesNow = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/overview", { cache: "no-store" })
+      const res = await apiFetch("/api/admin/overview", { cache: "no-store" })
       if (!res.ok) return
       const next = (await res.json()) as Overview
       const prev = prevRef.current
@@ -291,7 +294,8 @@ export function DashboardOverview() {
       {/* Quick Start */}
       <QuickStartGuide totalNodes={totalNodes} onlineNodes={onlineNodes} />
 
-
+      {/* AI Widget */}
+      <AIDashboardWidget />
 
       {/* Bottom row */}
       <div className="grid gap-4 lg:grid-cols-2">

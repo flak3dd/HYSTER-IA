@@ -345,60 +345,16 @@ export class FunctionRegistry {
    * Determine if a function should be executed via the agent system
    */
   private shouldUseAgent(functionName: string, parameters: Record<string, unknown>): boolean {
-    // Use agent for complex, multi-step operations
-    const agentFunctions = [
-      'complex_network_scan',
-      'advanced_threat_analysis',
-      'automated_response',
-      'multi_step_operation',
-    ]
-    
-    return agentFunctions.includes(functionName) || 
-           (parameters as Record<string, unknown>)?.useAgent === true
+    // Agent system has been removed - always return false
+    return false
   }
 
   /**
    * Execute a function via the agent system
    */
   private async executeViaAgent(functionName: string, parameters: Record<string, unknown>): Promise<unknown> {
-    const { createAndStartTask, subscribe } = await import('../agents/runner')
-    
-    // Create a task for the agent
-    const prompt = `Execute ${functionName} with parameters: ${JSON.stringify(parameters)}. 
-    Use the available tools to complete this task. Report back the results.`
-
-    const task = createAndStartTask(
-      {
-        prompt,
-        allowedTools: ['*'], // Allow all tools for complex operations
-        maxSteps: 20,
-      },
-      'system' // Created by system
-    )
-
-    // Wait for the task to complete
-    return new Promise((resolve, reject) => {
-      const unsubscribe = subscribe(task.id, (event) => {
-        if (event.type === 'status') {
-          if (event.status === 'succeeded') {
-            unsubscribe()
-            resolve({ success: true, taskId: task.id, result: task.result })
-          } else if (event.status === 'failed') {
-            unsubscribe()
-            reject(new Error(task.error || 'Agent task failed'))
-          } else if (event.status === 'cancelled') {
-            unsubscribe()
-            reject(new Error('Agent task was cancelled'))
-          }
-        }
-      })
-
-      // Timeout after 5 minutes
-      setTimeout(() => {
-        unsubscribe()
-        reject(new Error('Agent task timeout'))
-      }, 5 * 60 * 1000)
-    })
+    // Agent system has been removed
+    throw new Error('Agent execution is no longer available. Please use the AI Assistant page at /admin/ai for AI-driven tasks.')
   }
 
   /* ------------------------------------------------------------------ */

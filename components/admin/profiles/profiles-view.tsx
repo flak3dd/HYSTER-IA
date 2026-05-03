@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -75,8 +76,8 @@ export function ProfilesView() {
   const load = useCallback(async () => {
     try {
       const [pRes, nRes] = await Promise.all([
-        fetch("/api/admin/profiles", { cache: "no-store" }),
-        fetch("/api/admin/nodes", { cache: "no-store" }),
+        apiFetch("/api/admin/profiles", { cache: "no-store" }),
+        apiFetch("/api/admin/nodes", { cache: "no-store" }),
       ])
       if (pRes.ok) {
         const d = await pRes.json()
@@ -235,7 +236,7 @@ function NewProfileModal({ onClose, onCreated }: { onClose: () => void; onCreate
     if (!name.trim()) { toast.error("Name is required"); return }
     setSaving(true)
     try {
-      const res = await fetch("/api/admin/profiles", {
+      const res = await apiFetch("/api/admin/profiles", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -300,7 +301,7 @@ function EditProfileModal({ profile, onClose, onSaved }: { profile: ProfileItem;
   const save = async () => {
     setSaving(true)
     try {
-      const res = await fetch(`/api/admin/profiles/${profile.id}`, {
+      const res = await apiFetch(`/api/admin/profiles/${profile.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -351,7 +352,7 @@ function DeleteProfileModal({ profile, onClose, onDeleted }: { profile: ProfileI
   const doDelete = async () => {
     setDeleting(true)
     try {
-      const res = await fetch(`/api/admin/profiles/${profile.id}`, { method: "DELETE" })
+      const res = await apiFetch(`/api/admin/profiles/${profile.id}`, { method: "DELETE" })
       if (!res.ok) throw new Error(`${res.status}`)
       toast.success("Profile deleted")
       onDeleted()
@@ -409,7 +410,7 @@ function ApplyProfileModal({
     if (selected.size === 0) { toast.error("Select at least one node"); return }
     setApplying(true)
     try {
-      const res = await fetch(`/api/admin/profiles/${profile.id}/apply`, {
+      const res = await apiFetch(`/api/admin/profiles/${profile.id}/apply`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ nodeIds: [...selected] }),

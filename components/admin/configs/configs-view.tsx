@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
@@ -80,7 +81,7 @@ function ClientConfigsViewInner() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch("/api/admin/overview", { cache: "no-store" })
+        const res = await apiFetch("/api/admin/overview", { cache: "no-store" })
         if (!res.ok) throw new Error(`${res.status}`)
         const data = await res.json()
         const nodeItems: NodeItem[] = (data.nodes?.items ?? []).map(
@@ -96,7 +97,7 @@ function ClientConfigsViewInner() {
         setNodes(nodeItems)
 
         // fetch users separately
-        const usersRes = await fetch("/api/admin/users", { cache: "no-store" })
+        const usersRes = await apiFetch("/api/admin/users", { cache: "no-store" })
         if (usersRes.ok) {
           const usersData = await usersRes.json()
           const items: UserItem[] = (Array.isArray(usersData) ? usersData : usersData.users ?? []).map(

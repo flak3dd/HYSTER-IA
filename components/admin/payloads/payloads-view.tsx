@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 import { useState, useCallback, useEffect } from "react"
 import {
@@ -88,7 +89,7 @@ export function PayloadsView() {
 
   const fetchPayloads = async () => {
     try {
-      const response = await fetch("/api/admin/payloads")
+      const response = await apiFetch("/api/admin/payloads")
       if (!response.ok) throw new Error("Failed to fetch payloads")
       const data = await response.json()
       setPayloads(data.builds || [])
@@ -128,7 +129,7 @@ export function PayloadsView() {
         },
       }
 
-      const response = await fetch("/api/admin/payloads", {
+      const response = await apiFetch("/api/admin/payloads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
@@ -139,7 +140,7 @@ export function PayloadsView() {
       const build = await response.json()
       
       // Start the build process
-      const buildResponse = await fetch(`/api/admin/payloads/${build.id}/build`, {
+      const buildResponse = await apiFetch(`/api/admin/payloads/${build.id}/build`, {
         method: "POST",
       })
 
@@ -180,7 +181,7 @@ export function PayloadsView() {
 
   const handleDelete = useCallback(async (payloadId: string) => {
     try {
-      const response = await fetch(`/api/admin/payloads/${payloadId}`, {
+      const response = await apiFetch(`/api/admin/payloads/${payloadId}`, {
         method: "DELETE",
       })
 
@@ -196,7 +197,7 @@ export function PayloadsView() {
 
   const handleRebuild = useCallback(async (payload: Payload) => {
     try {
-      const response = await fetch(`/api/admin/payloads/${payload.id}/build`, {
+      const response = await apiFetch(`/api/admin/payloads/${payload.id}/build`, {
         method: "POST",
       })
 

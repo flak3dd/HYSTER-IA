@@ -19,7 +19,6 @@ import {
   UserCircle,
   Mail,
   ArrowRightLeft,
-  Bot,
   Users,
   Fingerprint,
   Cpu,
@@ -110,7 +109,6 @@ const WORKFLOW_STAGES: WorkflowStage[] = [
     modules: [
       { href: "/admin/mail", label: "Mail Ops", shortDesc: "Phishing & mail", icon: Mail },
       { href: "/admin/mail/migrator", label: "Migrator", shortDesc: "IMAP XOAUTH2", icon: ArrowRightLeft },
-      { href: "/admin/agents", label: "Agents", shortDesc: "LLM-driven tasks", icon: Bot },
     ],
   },
   {

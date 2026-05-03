@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -44,6 +45,8 @@ import {
   FileCode,
   Globe,
   BarChart3,
+  Layers,
+  ChevronUp,
 } from "lucide-react"
 
 /* ------------------------------------------------------------------ */
@@ -120,16 +123,52 @@ const RISK_CONFIG: Record<string, { color: string; bg: string }> = {
 /*  Quick actions                                                      */
 /* ------------------------------------------------------------------ */
 
-const QUICK_ACTIONS = [
-  { icon: FileCode, label: "Gen Implant", prompt: "Generate a stealth implant config for Linux with maximum stealth level and Spotify traffic blending", color: "text-blue-400" },
-  { icon: Activity, label: "Node Status", prompt: "Query the status of all active implants and check their health metrics", color: "text-emerald-400" },
-  { icon: BarChart3, label: "Traffic Intel", prompt: "Analyze traffic patterns on my primary node and suggest evasion improvements for corporate EDR threat model", color: "text-cyan-400" },
-  { icon: Shield, label: "OPSEC Audit", prompt: "Assess OPSEC risk for current deployment configuration and provide mitigation recommendations", color: "text-amber-400" },
-  { icon: Target, label: "Plan Operation", prompt: "Orchestrate a full operation plan for establishing persistent access with low risk tolerance", color: "text-violet-400" },
-  { icon: Radio, label: "Hysteria Stats", prompt: "Query global Hysteria traffic stats for the last hour including bandwidth and connection metrics", color: "text-blue-400" },
-  { icon: Server, label: "Update Config", prompt: "Update node configuration to use salamander obfuscation with hot reload", color: "text-emerald-400" },
-  { icon: Skull, label: "Kill Switch", prompt: "Prepare a graceful kill switch plan for all implants with 24h dead-man trigger", color: "text-red-400" },
-]
+const QUICK_ACTION_CATEGORIES = {
+  reconnaissance: {
+    label: "Reconnaissance",
+    icon: Activity,
+    color: "text-emerald-400",
+    actions: [
+      { icon: Activity, label: "Implant Status", prompt: "Query the status of all active implants and check their health metrics", color: "text-emerald-400" },
+      { icon: Radio, label: "Traffic Stats", prompt: "Query global Hysteria traffic stats for the last hour including bandwidth and connection metrics", color: "text-blue-400" },
+      { icon: BarChart3, label: "Traffic Analysis", prompt: "Analyze traffic patterns on my primary node and suggest evasion improvements for corporate EDR threat model", color: "text-cyan-400" },
+      { icon: Shield, label: "OPSEC Audit", prompt: "Assess OPSEC risk for current deployment configuration and provide mitigation recommendations", color: "text-amber-400" },
+    ]
+  },
+  deployment: {
+    label: "Deployment",
+    icon: Crosshair,
+    color: "text-orange-400",
+    actions: [
+      { icon: FileCode, label: "Gen Implant Config", prompt: "Generate a stealth implant config for Linux with maximum stealth level and Spotify traffic blending", color: "text-blue-400" },
+      { icon: Crosshair, label: "Compile & Deploy", prompt: "Compile and deploy a Linux AMD64 implant to the primary node with auto-start enabled", color: "text-orange-400" },
+      { icon: Server, label: "Update Node Config", prompt: "Update node configuration to use salamander obfuscation with hot reload", color: "text-emerald-400" },
+      { icon: Globe, label: "Create Subscription", prompt: "Create a new subscription with default tags and hysteria2 format", color: "text-violet-400" },
+    ]
+  },
+  operations: {
+    label: "Operations",
+    icon: Target,
+    color: "text-violet-400",
+    actions: [
+      { icon: Send, label: "Send Recon Task", prompt: "Send recon task to all active implants to gather system information", color: "text-orange-400" },
+      { icon: Target, label: "Plan Operation", prompt: "Orchestrate a full operation plan for establishing persistent access with low risk tolerance", color: "text-violet-400" },
+      { icon: Terminal, label: "Execute Command", prompt: "Run a panel command to check system status (dry run)", color: "text-red-400" },
+    ]
+  },
+  safety: {
+    label: "Safety & Response",
+    icon: Skull,
+    color: "text-red-400",
+    actions: [
+      { icon: Skull, label: "Kill Switch Plan", prompt: "Prepare a graceful kill switch plan for all implants with 24h dead-man trigger", color: "text-red-400" },
+      { icon: AlertTriangle, label: "Emergency Stop", prompt: "Trigger immediate kill switch on all implants (requires confirmation)", color: "text-red-500" },
+      { icon: ShieldAlert, label: "Security Check", prompt: "Run comprehensive security check on all active nodes and implants", color: "text-amber-400" },
+    ]
+  }
+}
+
+const QUICK_ACTIONS = Object.values(QUICK_ACTION_CATEGORIES).flatMap(cat => cat.actions)
 
 /* ------------------------------------------------------------------ */
 /*  Main component                                                     */
@@ -147,6 +186,8 @@ export function ShadowGrokView() {
   const [showHistory, setShowHistory] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [finalResponse, setFinalResponse] = useState("")
+  const [expandedCategory, setExpandedCategory] = useState<string | null>("reconnaissance")
+  const [showQuickActions, setShowQuickActions] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -165,7 +206,7 @@ export function ShadowGrokView() {
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
-      const res = await fetch("/api/admin/ai/shadowgrok")
+      const res = await apiFetch("/api/admin/ai/shadowgrok")
       if (res.ok) {
         const data = await res.json()
         setExecutions(data.executions ?? [])
@@ -184,7 +225,7 @@ export function ShadowGrokView() {
   /* ---- Load specific execution ---- */
   const loadExecution = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/ai/shadowgrok?executionId=${id}`)
+      const res = await apiFetch(`/api/admin/ai/shadowgrok?executionId=${id}`)
       if (res.ok) {
         const data = await res.json()
         const exec = data.execution as Execution
@@ -225,7 +266,7 @@ export function ShadowGrokView() {
       if (textareaRef.current) textareaRef.current.style.height = "auto"
 
       try {
-        const res = await fetch("/api/admin/ai/shadowgrok/stream", {
+        const res = await apiFetch("/api/admin/ai/shadowgrok/stream", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -333,13 +374,18 @@ export function ShadowGrokView() {
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_300px]" style={{ minHeight: "calc(100vh - 220px)" }}>
       {/* ---- Main panel ---- */}
-      <Card className="flex flex-col overflow-hidden">
+      <Card className="flex flex-col overflow-hidden shadow-lg shadow-primary/5 border-primary/20">
         {/* Header */}
-        <CardHeader className="flex-shrink-0 pb-3">
+        <CardHeader className="flex-shrink-0 pb-3 bg-gradient-to-b from-destructive/5 to-transparent">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/10 ring-1 ring-red-500/20">
-                <ShieldAlert className="h-4 w-4 text-red-400" />
+              <div className="relative">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10 ring-1 ring-destructive/30">
+                  <ShieldAlert className="h-5 w-5 text-destructive" />
+                </div>
+                <div className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-success ring-2 ring-background">
+                  <Activity className="h-2.5 w-2.5 text-success-foreground" />
+                </div>
               </div>
               <div>
                 <CardTitle className="text-heading-sm">ShadowGrok Agent</CardTitle>
@@ -350,27 +396,35 @@ export function ShadowGrokView() {
             </div>
             <div className="flex items-center gap-2">
               {/* Dry Run Toggle */}
-              <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-1.5">
+              <div className={cn(
+                "flex items-center gap-2 rounded-lg border px-3 py-1.5 transition-all",
+                dryRun 
+                  ? "border-warning/30 bg-warning/10" 
+                  : "border-border/50 bg-muted/30"
+              )}>
                 <Switch
                   id="dry-run"
                   checked={dryRun}
                   onCheckedChange={setDryRun}
                 />
-                <Label htmlFor="dry-run" className="text-micro cursor-pointer">
+                <Label htmlFor="dry-run" className={cn(
+                  "text-micro cursor-pointer transition-colors",
+                  dryRun ? "text-warning" : "text-muted-foreground"
+                )}>
                   Dry Run
                 </Label>
               </div>
 
               {/* Status */}
               {streaming ? (
-                <Badge variant="outline" className="gap-1.5 text-micro border-info/30 bg-info/10 text-info">
+                <Badge variant="outline" className="gap-1.5 text-micro border-info/30 bg-info/10 text-info animate-pulse">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  Streaming
+                  Executing
                 </Badge>
               ) : activeExecution ? (
                 <ExecutionStatusBadge status={activeExecution.status} />
               ) : (
-                <Badge variant="outline" className="gap-1.5 text-micro border-border bg-muted text-muted-foreground">
+                <Badge variant="outline" className="gap-1.5 text-micro border-success/30 bg-success/10 text-success">
                   <Zap className="h-3 w-3" />
                   Ready
                 </Badge>
@@ -378,10 +432,10 @@ export function ShadowGrokView() {
 
               <Separator orientation="vertical" className="mx-1 h-5" />
 
-              <Button variant="ghost" size="icon-xs" onClick={() => setShowHistory(!showHistory)} title="Execution History">
+              <Button variant="ghost" size="icon-xs" onClick={() => setShowHistory(!showHistory)} title="Execution History" className="hover:bg-muted/50">
                 <History className="h-3.5 w-3.5" />
               </Button>
-              <Button variant="outline" size="sm" onClick={newExecution} className="gap-1.5 text-micro">
+              <Button variant="outline" size="sm" onClick={newExecution} className="gap-1.5 text-micro border-primary/30 hover:bg-primary/10">
                 <Sparkles className="h-3 w-3" />
                 New
               </Button>
@@ -397,34 +451,103 @@ export function ShadowGrokView() {
               {!hasContent ? (
                 /* ---- Empty state ---- */
                 <div className="flex flex-col items-center justify-center text-center min-h-[450px]">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-red-500/10 ring-1 ring-red-500/20 mb-4">
-                    <ShieldAlert className="h-8 w-8 text-red-400" />
+                  <div className="relative mb-6">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-destructive/20 to-destructive/5 ring-1 ring-destructive/30">
+                      <ShieldAlert className="h-10 w-10 text-destructive" />
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-success ring-2 ring-background">
+                      <Activity className="h-3.5 w-3.5 text-success-foreground" />
+                    </div>
                   </div>
-                  <h3 className="text-heading-lg mb-1">Ready for Orders</h3>
-                  <p className="text-body-sm text-muted-foreground mb-8 max-w-md">
+                  <h3 className="text-heading-lg mb-2">Ready for Orders</h3>
+                  <p className="text-body-sm text-muted-foreground mb-6 max-w-md">
                     ShadowGrok has access to 12 C2 tools including implant generation, traffic
                     analysis, kill switches, and autonomous operation planning.
                   </p>
 
-                  {/* Quick actions grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-2xl mb-6">
-                    {QUICK_ACTIONS.map((action) => (
-                      <button
-                        key={action.label}
-                        onClick={() => executePrompt(action.prompt)}
-                        disabled={loading}
-                        className="flex flex-col items-center gap-2 rounded-xl border border-border/50 bg-card px-4 py-3.5 transition-all hover:border-border hover:bg-muted/50 disabled:opacity-50"
-                      >
-                        <action.icon className={cn("h-4 w-4", action.color)} />
-                        <span className="text-micro font-medium">{action.label}</span>
-                      </button>
-                    ))}
+                  {/* Quick Actions Toggle */}
+                  <div className="mb-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowQuickActions(!showQuickActions)}
+                      className="gap-2 border-primary/30 hover:bg-primary/10"
+                    >
+                      <Layers className="h-4 w-4" />
+                      {showQuickActions ? "Hide" : "Show"} Quick Actions
+                    </Button>
                   </div>
 
+                  {/* Categorized Quick Actions */}
+                  {showQuickActions && (
+                    <div className="w-full max-w-3xl space-y-4 mb-6">
+                      {Object.entries(QUICK_ACTION_CATEGORIES).map(([key, category]) => {
+                        const CategoryIcon = category.icon
+                        const isExpanded = expandedCategory === key
+                        
+                        return (
+                          <Collapsible
+                            key={key}
+                            open={isExpanded}
+                            onOpenChange={() => setExpandedCategory(isExpanded ? null : key)}
+                          >
+                            <div className="flex items-center justify-between">
+                              <Button
+                                variant="outline"
+                                onClick={() => setExpandedCategory(isExpanded ? null : key)}
+                                className={cn(
+                                  "flex-1 justify-between gap-2 border-primary/30 hover:bg-primary/10",
+                                  isExpanded && "bg-primary/10 border-primary/50"
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <CategoryIcon className={cn("h-4 w-4", category.color)} />
+                                  <span className="text-sm font-medium">{category.label}</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    {category.actions.length}
+                                  </Badge>
+                                </div>
+                                {isExpanded ? (
+                                  <ChevronUp className="h-4 w-4" />
+                                ) : (
+                                  <ChevronDown className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+                            <CollapsibleContent className="mt-2">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-3 rounded-lg border border-border/50 bg-muted/30">
+                                {category.actions.map((action) => (
+                                  <button
+                                    key={action.label}
+                                    onClick={() => executePrompt(action.prompt)}
+                                    disabled={loading}
+                                    className={cn(
+                                      "flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all",
+                                      "hover:shadow-md hover:shadow-primary/5 disabled:opacity-50",
+                                      "bg-background/50 border-border/50 hover:border-primary/30 hover:bg-muted/50"
+                                    )}
+                                  >
+                                    <div className={cn(
+                                      "flex h-7 w-7 items-center justify-center rounded-md bg-background/70 shrink-0",
+                                      action.color.replace("text-", "bg-").replace("-400", "/10")
+                                    )}>
+                                      <action.icon className={cn("h-3.5 w-3.5", action.color)} />
+                                    </div>
+                                    <span className="text-xs font-medium">{action.label}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </CollapsibleContent>
+                          </Collapsible>
+                        )
+                      })}
+                    </div>
+                  )}
+
                   {dryRun && (
-                    <div className="flex items-center gap-2 rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-micro text-warning">
-                      <Eye className="h-3.5 w-3.5" />
-                      Dry run mode — operations will be simulated, not executed
+                    <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-micro text-warning">
+                      <Eye className="h-4 w-4" />
+                      <span>Dry run mode — operations will be simulated, not executed</span>
                     </div>
                   )}
                 </div>
@@ -540,6 +663,43 @@ export function ShadowGrokView() {
 
           {/* Input */}
           <div className="flex-shrink-0 border-t border-border bg-card/50 p-4">
+            {/* Quick Action Bar */}
+            <div className="mb-3">
+              <Collapsible open={showQuickActions} onOpenChange={setShowQuickActions}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowQuickActions(!showQuickActions)}
+                  className="gap-1.5 text-muted-foreground hover:text-foreground h-7 px-2"
+                >
+                  <Zap className="h-3 w-3" />
+                  <span className="text-xs">Quick Actions</span>
+                  {showQuickActions ? (
+                    <ChevronUp className="h-3 w-3" />
+                  ) : (
+                    <ChevronDown className="h-3 w-3" />
+                  )}
+                </Button>
+                <CollapsibleContent className="mt-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {QUICK_ACTIONS.slice(0, 8).map((action) => (
+                      <Button
+                        key={action.label}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => executePrompt(action.prompt)}
+                        disabled={loading}
+                        className="gap-1.5 h-7 px-2 text-xs border-border/50 hover:border-primary/30 hover:bg-primary/5"
+                      >
+                        <action.icon className={cn("h-3 w-3", action.color)} />
+                        {action.label}
+                      </Button>
+                    ))}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+
             <div className="flex items-end gap-2">
               <textarea
                 ref={textareaRef}
