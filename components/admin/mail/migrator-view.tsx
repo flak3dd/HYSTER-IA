@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -94,7 +95,7 @@ export function MigratorView() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch("/api/admin/mail/migrator/config", {
+        const res = await apiFetch("/api/admin/mail/migrator/config", {
           cache: "no-store",
         })
         if (res.ok) {
@@ -122,7 +123,7 @@ export function MigratorView() {
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      const res = await fetch("/api/admin/mail/migrator/config", {
+      const res = await apiFetch("/api/admin/mail/migrator/config", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ config, accounts }),
@@ -143,7 +144,7 @@ export function MigratorView() {
     // Save first, then run
     setSaving(true)
     try {
-      const saveRes = await fetch("/api/admin/mail/migrator/config", {
+      const saveRes = await apiFetch("/api/admin/mail/migrator/config", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ config, accounts }),
@@ -162,7 +163,7 @@ export function MigratorView() {
     setLogs([])
     setExitCode(null)
     try {
-      const res = await fetch("/api/admin/mail/migrator/run", {
+      const res = await apiFetch("/api/admin/mail/migrator/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ folders }),

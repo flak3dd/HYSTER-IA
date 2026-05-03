@@ -233,9 +233,9 @@ function ServerSection({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">TLS</CardTitle>
-          <CardDescription className="text-xs">
-            Mode: <Badge variant="outline" className="text-[10px] ml-1">{config.tls.mode}</Badge>
-          </CardDescription>
+          <div className="text-xs text-muted-foreground flex items-center gap-1">
+            Mode: <Badge variant="outline" className="text-[10px]">{config.tls.mode}</Badge>
+          </div>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           {config.tls.mode === "manual" && (

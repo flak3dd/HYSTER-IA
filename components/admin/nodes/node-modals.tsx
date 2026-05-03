@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 /**
  * Node CRUD modals extracted from nodes-view.tsx.
@@ -137,7 +138,7 @@ export function NewNodeModal({
       const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean)
       if (tagList.length > 0) body.tags = tagList
 
-      const res = await fetch("/api/admin/nodes", {
+      const res = await apiFetch("/api/admin/nodes", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -224,7 +225,7 @@ export function EditNodeModal({
       const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean)
       body.tags = tagList
 
-      const res = await fetch(`/api/admin/nodes/${node.id}`, {
+      const res = await apiFetch(`/api/admin/nodes/${node.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -284,7 +285,7 @@ export function RotateAuthModal({
     setRotating(true)
     try {
       const newToken = crypto.randomUUID().replace(/-/g, "")
-      const res = await fetch(`/api/admin/nodes/${node.id}`, {
+      const res = await apiFetch(`/api/admin/nodes/${node.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ listenAddr: node.listenAddr }),
@@ -343,7 +344,7 @@ export function DeleteNodeModal({
   const doDelete = async () => {
     setDeleting(true)
     try {
-      const res = await fetch(`/api/admin/nodes/${node.id}`, { method: "DELETE" })
+      const res = await apiFetch(`/api/admin/nodes/${node.id}`, { method: "DELETE" })
       if (!res.ok) throw new Error(`${res.status}`)
       toast.success(`Node ${node.name} deleted`)
       onDeleted()
@@ -395,7 +396,7 @@ export function ApplyProfileToNodesModal({
     if (!profileId) { toast.error("Select a profile"); return }
     setApplying(true)
     try {
-      const res = await fetch(`/api/admin/profiles/${profileId}/apply`, {
+      const res = await apiFetch(`/api/admin/profiles/${profileId}/apply`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ nodeIds: selectedNodeIds }),

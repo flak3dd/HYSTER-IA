@@ -1,7 +1,7 @@
 // ShadowGrok Agent Runner
 // Enhanced agent runner with ShadowGrok tool calling and autonomous C2 operations
 
-import { chatComplete, type ChatMessage } from '@/lib/agents/llm';
+import { chatComplete, type ChatMessage } from '@/lib/ai/llm';
 import { SHADOWGROK_TOOLS } from './grok-tools';
 import { executeTool, type ToolContext } from './tool-executor';
 import { prisma } from '@/lib/db';
@@ -84,12 +84,17 @@ export async function runShadowGrokWithTools(
       round++;
       console.log(`[ShadowGrok] Tool round ${round}/${maxToolRounds}`);
 
+      // Adjust temperature based on aggressiveness
+      const temperature = env.SHADOWGROK_TOOL_CALLING_AGGRESSIVENESS === 'aggressive' ? 0.8 :
+                         env.SHADOWGROK_TOOL_CALLING_AGGRESSIVENESS === 'conservative' ? 0.3 : 0.6;
+
       // Call LLM with tools
       const response = await chatComplete({
         messages,
         tools: SHADOWGROK_TOOLS as any,
-        temperature: 0.6,
+        temperature,
         signal,
+        useShadowGrok: true,
       });
 
       const assistantMessage: ChatMessage = {
@@ -103,33 +108,75 @@ export async function runShadowGrokWithTools(
       if (response.toolCalls && response.toolCalls.length > 0) {
         console.log(`[ShadowGrok] Executing ${response.toolCalls.length} tool(s)`);
 
-        // Execute tools (with parallel execution support)
-        const toolResults = await Promise.all(
-          response.toolCalls.map(async (toolCall) => {
-            const parsedArgs = toolCall.function.arguments
-              ? JSON.parse(toolCall.function.arguments)
-              : {};
+        // Execute tools with parallel execution support
+        let toolResults;
+        if (env.SHADOWGROK_ENABLE_PARALLEL_EXECUTION && response.toolCalls.length > 1) {
+          // Execute tools in parallel batches
+          const batchSize = env.SHADOWGROK_PARALLEL_BATCH_SIZE;
+          const batches: typeof response.toolCalls[] = [];
+          for (let i = 0; i < response.toolCalls.length; i += batchSize) {
+            batches.push(response.toolCalls.slice(i, i + batchSize));
+          }
 
-            const result = await executeTool(
-              toolCall.function.name,
-              parsedArgs,
-              executionContext
+          toolResults = [];
+          for (const batch of batches) {
+            const batchResults = await Promise.all(
+              batch.map(async (toolCall) => {
+                const parsedArgs = toolCall.function.arguments
+                  ? JSON.parse(toolCall.function.arguments)
+                  : {};
+
+                const result = await executeTool(
+                  toolCall.function.name,
+                  parsedArgs,
+                  executionContext
+                );
+
+                toolExecutions.push({
+                  toolName: toolCall.function.name,
+                  arguments: parsedArgs,
+                  result: result.data,
+                  success: result.success,
+                  requiresApproval: result.requiresApproval,
+                });
+
+                return {
+                  tool_call_id: toolCall.id,
+                  content: JSON.stringify(result),
+                };
+              })
             );
+            toolResults.push(...batchResults);
+          }
+        } else {
+          // Sequential execution
+          toolResults = await Promise.all(
+            response.toolCalls.map(async (toolCall) => {
+              const parsedArgs = toolCall.function.arguments
+                ? JSON.parse(toolCall.function.arguments)
+                : {};
 
-            toolExecutions.push({
-              toolName: toolCall.function.name,
-              arguments: parsedArgs,
-              result: result.data,
-              success: result.success,
-              requiresApproval: result.requiresApproval,
-            });
+              const result = await executeTool(
+                toolCall.function.name,
+                parsedArgs,
+                executionContext
+              );
 
-            return {
-              tool_call_id: toolCall.id,
-              content: JSON.stringify(result),
-            };
-          })
-        );
+              toolExecutions.push({
+                toolName: toolCall.function.name,
+                arguments: parsedArgs,
+                result: result.data,
+                success: result.success,
+                requiresApproval: result.requiresApproval,
+              });
+
+              return {
+                tool_call_id: toolCall.id,
+                content: JSON.stringify(result),
+              };
+            })
+          );
+        }
 
         // Add tool results to conversation
         for (const toolResult of toolResults) {
@@ -140,12 +187,24 @@ export async function runShadowGrokWithTools(
           });
         }
 
-        // Check if any tools require approval
+        // Check if any tools require approval (with auto-approve threshold)
         const approvalRequired = toolExecutions.some(te => te.requiresApproval);
-        if (approvalRequired) {
-          finalResponse = 'Execution paused: One or more tools require admin approval. Please review the pending actions in the approval panel.';
-          continueLoop = false;
-          break;
+        if (approvalRequired && requireApproval) {
+          // Check if risk score is below auto-approve threshold
+          const lowRiskTools = toolExecutions.filter(te =>
+            !te.requiresApproval ||
+            (te.result && typeof te.result === 'object' && 'risk_score' in te.result &&
+             (te.result as any).risk_score < env.SHADOWGROK_AUTO_APPROVE_THRESHOLD)
+          );
+
+          if (lowRiskTools.length === toolExecutions.length && env.SHADOWGROK_AUTO_APPROVE_LOW_RISK) {
+            console.log(`[ShadowGrok] Auto-approving low-risk tools`);
+            // Continue execution without pausing
+          } else {
+            finalResponse = 'Execution paused: One or more tools require admin approval. Please review the pending actions in the approval panel.';
+            continueLoop = false;
+            break;
+          }
         }
 
         // Continue loop for more tool calls
@@ -187,7 +246,7 @@ export async function runShadowGrokStream(
   userMessage: string,
   invokerUid: string,
   onProgress: (update: {
-    type: 'tool_call' | 'tool_result' | 'content' | 'error';
+    type: 'tool_call' | 'tool_result' | 'content' | 'error' | 'batch_start' | 'batch_complete';
     data: unknown;
   }) => void,
   options: ShadowGrokRunOptions = {}
@@ -230,11 +289,16 @@ export async function runShadowGrokStream(
     while (round < env.SHADOWGROK_MAX_TOOL_ROUNDS) {
       round++;
 
+      // Adjust temperature based on aggressiveness
+      const temperature = env.SHADOWGROK_TOOL_CALLING_AGGRESSIVENESS === 'aggressive' ? 0.8 :
+                         env.SHADOWGROK_TOOL_CALLING_AGGRESSIVENESS === 'conservative' ? 0.3 : 0.6;
+
       const response = await chatComplete({
         messages,
         tools: SHADOWGROK_TOOLS as any,
-        temperature: 0.6,
+        temperature,
         signal,
+        useShadowGrok: true,
       });
 
       const assistantMessage: ChatMessage = {
@@ -245,55 +309,145 @@ export async function runShadowGrokStream(
       messages.push(assistantMessage);
 
       if (response.toolCalls && response.toolCalls.length > 0) {
-        for (const toolCall of response.toolCalls) {
-          const parsedArgs = toolCall.function.arguments
-            ? JSON.parse(toolCall.function.arguments)
-            : {};
+        // Execute tools with parallel execution support
+        if (env.SHADOWGROK_ENABLE_PARALLEL_EXECUTION && response.toolCalls.length > 1) {
+          const batchSize = env.SHADOWGROK_PARALLEL_BATCH_SIZE;
+          const batches: typeof response.toolCalls[] = [];
+          for (let i = 0; i < response.toolCalls.length; i += batchSize) {
+            batches.push(response.toolCalls.slice(i, i + batchSize));
+          }
 
-          onProgress({
-            type: 'tool_call',
-            data: {
+          for (const batch of batches) {
+            onProgress({
+              type: 'batch_start',
+              data: { toolCount: batch.length, batchSize },
+            });
+
+            const batchResults = await Promise.all(
+              batch.map(async (toolCall) => {
+                const parsedArgs = toolCall.function.arguments
+                  ? JSON.parse(toolCall.function.arguments)
+                  : {};
+
+                onProgress({
+                  type: 'tool_call',
+                  data: {
+                    toolName: toolCall.function.name,
+                    arguments: parsedArgs,
+                  },
+                });
+
+                const result = await executeTool(
+                  toolCall.function.name,
+                  parsedArgs,
+                  executionContext
+                );
+
+                toolExecutions.push({
+                  toolName: toolCall.function.name,
+                  arguments: parsedArgs,
+                  result: result.data,
+                  success: result.success,
+                  requiresApproval: result.requiresApproval,
+                });
+
+                onProgress({
+                  type: 'tool_result',
+                  data: {
+                    toolName: toolCall.function.name,
+                    result: result.data,
+                    success: result.success,
+                    requiresApproval: result.requiresApproval,
+                  },
+                });
+
+                messages.push({
+                  role: 'tool',
+                  tool_call_id: toolCall.id,
+                  content: JSON.stringify(result),
+                });
+
+                return result;
+              })
+            );
+
+            onProgress({
+              type: 'batch_complete',
+              data: { completed: batchResults.length },
+            });
+
+            // Check for approval requirement after each batch
+            const approvalRequired = batchResults.some(r => r.requiresApproval);
+            if (approvalRequired && requireApproval) {
+              const lowRiskTools = batchResults.filter(r =>
+                !r.requiresApproval ||
+                (r.data && typeof r.data === 'object' && 'risk_score' in r.data &&
+                 (r.data as any).risk_score < env.SHADOWGROK_AUTO_APPROVE_THRESHOLD)
+              );
+
+              if (lowRiskTools.length === batchResults.length && env.SHADOWGROK_AUTO_APPROVE_LOW_RISK) {
+                console.log(`[ShadowGrok Stream] Auto-approving low-risk tools in batch`);
+              } else {
+                finalResponse = 'Execution paused: Approval required for one or more actions.';
+                return {
+                  finalResponse,
+                  toolExecutions,
+                };
+              }
+            }
+          }
+        } else {
+          // Sequential execution
+          for (const toolCall of response.toolCalls) {
+            const parsedArgs = toolCall.function.arguments
+              ? JSON.parse(toolCall.function.arguments)
+              : {};
+
+            onProgress({
+              type: 'tool_call',
+              data: {
+                toolName: toolCall.function.name,
+                arguments: parsedArgs,
+              },
+            });
+
+            const result = await executeTool(
+              toolCall.function.name,
+              parsedArgs,
+              executionContext
+            );
+
+            toolExecutions.push({
               toolName: toolCall.function.name,
               arguments: parsedArgs,
-            },
-          });
-
-          const result = await executeTool(
-            toolCall.function.name,
-            parsedArgs,
-            executionContext
-          );
-
-          toolExecutions.push({
-            toolName: toolCall.function.name,
-            arguments: parsedArgs,
-            result: result.data,
-            success: result.success,
-            requiresApproval: result.requiresApproval,
-          });
-
-          onProgress({
-            type: 'tool_result',
-            data: {
-              toolName: toolCall.function.name,
               result: result.data,
               success: result.success,
               requiresApproval: result.requiresApproval,
-            },
-          });
+            });
 
-          messages.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(result),
-          });
+            onProgress({
+              type: 'tool_result',
+              data: {
+                toolName: toolCall.function.name,
+                result: result.data,
+                success: result.success,
+                requiresApproval: result.requiresApproval,
+              },
+            });
 
-          if (result.requiresApproval) {
-            finalResponse = 'Execution paused: Approval required for one or more actions.';
-            return {
-              finalResponse,
-              toolExecutions,
-            };
+            messages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(result),
+            });
+
+            if (result.requiresApproval && requireApproval) {
+              finalResponse = 'Execution paused: Approval required for one or more actions.';
+              return {
+                finalResponse,
+                toolExecutions,
+              };
+            }
           }
         }
         continue;

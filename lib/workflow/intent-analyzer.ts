@@ -1,8 +1,8 @@
 import type { IntentAnalysis } from './types'
-import type { ChatRole, ChatMessage } from '../agents/llm'
+import type { ChatMessage } from '../ai/llm'
 
 export class IntentAnalyzer {
-  private conversationHistory: Array<{ role: ChatRole; content: string }> = []
+  private conversationHistory: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
   private systemState: Record<string, unknown> = {}
   private workflowContext: {
     currentStep?: string
@@ -19,7 +19,7 @@ export class IntentAnalyzer {
    */
   async analyze(userText: string, context: Record<string, unknown> = {}): Promise<IntentAnalysis> {
     // Import the LLM client
-    const { chatComplete } = await import('../agents/llm')
+    const { chatComplete } = await import('../ai/llm')
 
     // Get available backend functions
     const { FunctionRegistry } = await import('./function-registry')
@@ -30,7 +30,7 @@ export class IntentAnalyzer {
     this.updateSystemState(context)
 
     // Add user message to conversation history
-    this.conversationHistory.push({ role: 'user' as ChatRole, content: userText })
+    this.conversationHistory.push({ role: 'user' as any, content: userText })
 
     // Create enhanced system prompt with context awareness and multi-step reasoning
     const systemPrompt = this.createMultiStepSystemPrompt(availableFunctions)
@@ -63,7 +63,7 @@ export class IntentAnalyzer {
 
       // Add AI response to conversation history
       this.conversationHistory.push({ 
-        role: 'assistant' as ChatRole,
+        role: 'assistant' as any,
         content: `I understand you want to: ${analysis.intent}. ${analysis.suggestedFunction ? `I'll use the ${analysis.suggestedFunction} function.` : 'I need more information.'} ${analysis.suggestedChaining && analysis.suggestedChaining.length > 1 ? `This will be followed by ${analysis.suggestedChaining.slice(1).join(', ')}.` : ''}` 
       })
 
@@ -379,7 +379,7 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
   /**
    * Get conversation history
    */
-  getHistory(): Array<{ role: ChatRole; content: string }> {
+  getHistory(): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
     return [...this.conversationHistory]
   }
 

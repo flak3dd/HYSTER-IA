@@ -1,10 +1,10 @@
-import { chatComplete, type ChatMessage } from "@/lib/agents/llm"
+import { chatComplete, type ChatMessage } from "@/lib/ai/llm"
 import { aiToolDefinitions, runAiTool } from "@/lib/ai/tools"
 import { appendMessages, getConversation } from "@/lib/ai/conversations"
 import type { AiMessage } from "@/lib/ai/types"
 import { buildSystemPrompt, Role } from "@/lib/ai/system-prompt"
 
-const MAX_TOOL_ROUNDS = 10
+const MAX_TOOL_ROUNDS = 15
 
 // Format tool results for human-readable summary
 function formatToolResultSummary(toolName: string, result: unknown): string {
@@ -131,6 +131,7 @@ export async function runChat(
           messages: llmMessages,
           tools,
           temperature: 0.3,
+          useShadowGrok: true, // Use xAI Grok by default for chat
         })
       } catch (llmErr) {
         // LLM unavailable - try rule-based fallback for payload intents
@@ -203,8 +204,8 @@ export async function runChat(
           tool_calls: result.toolCalls,
         })
 
-        // Execute each tool call
-        for (const call of result.toolCalls) {
+        // Execute each tool call (parallel for independent tools)
+        const toolExecutionPromises = result.toolCalls.map(async (call) => {
           let parsedArgs: unknown = {}
           try {
             parsedArgs = call.function.arguments
@@ -219,7 +220,7 @@ export async function runChat(
             const toolResult = await runAiTool(
               call.function.name,
               parsedArgs,
-              { signal: AbortSignal.timeout(60_000), invokerUid },
+              { signal: AbortSignal.timeout(90_000), invokerUid }, // Increased timeout
             )
             resultContent = JSON.stringify(toolResult)
           } catch (err) {
@@ -228,22 +229,30 @@ export async function runChat(
             })
           }
 
-          const toolMsg: AiMessage = {
-            role: "tool",
-            content: null,
-            toolResult: {
-              toolCallId: call.id,
-              name: call.function.name,
-              content: resultContent,
+          return {
+            toolMsg: {
+              role: "tool" as const,
+              content: null,
+              toolResult: {
+                toolCallId: call.id,
+                name: call.function.name,
+                content: resultContent,
+              },
+              timestamp: Date.now(),
             },
-            timestamp: Date.now(),
+            llmMsg: {
+              role: "tool" as const,
+              content: resultContent,
+              tool_call_id: call.id,
+            },
           }
+        })
+
+        const toolResults = await Promise.all(toolExecutionPromises)
+        
+        for (const { toolMsg, llmMsg } of toolResults) {
           newMessages.push(toolMsg)
-          llmMessages.push({
-            role: "tool",
-            content: resultContent,
-            tool_call_id: call.id,
-          })
+          llmMessages.push(llmMsg)
         }
 
         // Continue loop — LLM may want to call more tools or produce final answer

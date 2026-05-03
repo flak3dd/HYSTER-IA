@@ -7,7 +7,7 @@
 import { prisma } from "@/lib/db";
 import { executeTool, ToolContext, ToolResult } from "./tool-executor";
 import { SHADOWGROK_TOOLS, ALL_TOOL_NAMES } from "./grok-tools";
-import { chatComplete, type ChatMessage } from "@/lib/agents/llm";
+import { chatComplete, type ChatMessage } from "@/lib/ai/llm";
 import { serverEnv } from "@/lib/env";
 import { buildSystemPrompt, buildDynamicContext, Role, Persona } from "@/lib/ai/system-prompt";
 
@@ -102,6 +102,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
         tools: SHADOWGROK_TOOLS.filter(t => allowedTools.includes(t.function.name)),
         model,
         temperature: 0.6,
+        useShadowGrok: true,
       });
 
       const assistantMsg: ChatMessage = {

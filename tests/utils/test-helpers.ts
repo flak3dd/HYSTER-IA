@@ -143,7 +143,7 @@ export function assertHasProperties<T extends object>(
   properties: (keyof T)[]
 ): void {
   properties.forEach(prop => {
-    expect(obj).toHaveProperty(prop)
+    expect(obj).toHaveProperty(String(prop))
   })
 }
 
@@ -184,7 +184,7 @@ export function mockConsole() {
  * Setup and teardown for Prisma tests
  */
 export function setupPrismaTest() {
-  let prisma: PrismaClient
+  let prisma: PrismaClient | undefined
 
   beforeEach(async () => {
     prisma = new PrismaClient({
@@ -197,10 +197,10 @@ export function setupPrismaTest() {
   })
 
   afterEach(async () => {
-    await prisma.$disconnect()
+    await prisma?.$disconnect()
   })
 
-  return { prisma }
+  return { prisma: prisma! }
 }
 
 /**

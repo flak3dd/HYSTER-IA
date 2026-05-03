@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
-import { chatComplete } from "@/lib/agents/llm"
+import { chatComplete } from "@/lib/ai/llm"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"

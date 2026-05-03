@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -33,6 +34,7 @@ import {
   Terminal,
   Info,
   MessageSquare,
+  Activity,
 } from "lucide-react"
 
 /* ------------------------------------------------------------------ */
@@ -43,6 +45,7 @@ type ToolCall = {
   id: string
   name: string
   arguments: string
+  status?: "executing" | "completed" | "failed"
 }
 
 type ToolResult = {
@@ -131,8 +134,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   useEffect(() => {
     const init = async () => {
       const [convRes, tmplRes] = await Promise.allSettled([
-        fetch("/api/admin/ai/conversations"),
-        fetch("/api/admin/ai/templates"),
+        apiFetch("/api/admin/ai/conversations"),
+        apiFetch("/api/admin/ai/templates"),
       ])
       if (convRes.status === "fulfilled" && convRes.value.ok) {
         const data = await convRes.value.json()
@@ -158,7 +161,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         return
       }
       try {
-        const res = await fetch(`/api/admin/ai/conversations/${id}`)
+        const res = await apiFetch(`/api/admin/ai/conversations/${id}`)
         if (res.ok) {
           const data = await res.json()
           setMessages(data.conversation.messages ?? [])
@@ -174,7 +177,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   /* ---- Create new conversation ---- */
   const createConversation = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/ai/conversations", {
+      const res = await apiFetch("/api/admin/ai/conversations", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: "New conversation" }),
@@ -197,7 +200,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const deleteConversation = useCallback(
     async (id: string) => {
       try {
-        await fetch(`/api/admin/ai/conversations/${id}`, { method: "DELETE" })
+        await apiFetch(`/api/admin/ai/conversations/${id}`, { method: "DELETE" })
         setConversations((prev) => prev.filter((c) => c.id !== id))
         if (activeId === id) {
           setActiveId(null)
@@ -236,7 +239,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
       setTimeout(scrollToBottom, 100)
 
       try {
-        const res = await fetch("/api/admin/ai/chat", {
+        const res = await apiFetch("/api/admin/ai/chat", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -268,12 +271,17 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
 
         setTimeout(scrollToBottom, 100)
       } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Request failed"
         toast.error("AI request failed", {
-          description: err instanceof Error ? err.message : "unknown",
+          description: errorMessage,
+          action: {
+            label: "Retry",
+            onClick: () => sendMessage(prompt),
+          },
         })
         const errorMsg: ChatMessage = {
           role: "assistant",
-          content: `Error: ${err instanceof Error ? err.message : "Request failed"}`,
+          content: `Error: ${errorMessage}. Please try again or use a different approach.`,
           timestamp: Date.now(),
         }
         setMessages((prev) => [...prev, errorMsg])
@@ -308,83 +316,114 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
       <div className="grid gap-4 lg:grid-cols-[280px_1fr_300px]" style={{ minHeight: hideHeader ? "calc(100vh - 280px)" : "calc(100vh - 220px)" }}>
         {/* ---- Left: Conversations ---- */}
         <div className="flex flex-col gap-3">
-          <Button onClick={createConversation} className="w-full gap-2" size="sm">
+          <Button 
+            onClick={createConversation} 
+            className="w-full gap-2 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20" 
+            size="sm"
+          >
             <MessageSquarePlus className="h-3.5 w-3.5" />
             New Conversation
           </Button>
 
-          <ScrollArea className="flex-1 -mx-1">
-            <div className="space-y-0.5 px-1">
-              {sidebarLoading ? (
-                <div className="space-y-2 py-2">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Skeleton key={i} className="h-10 w-full rounded-lg" />
-                  ))}
-                </div>
-              ) : conversations.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-8 text-center">
-                  <MessageSquare className="h-8 w-8 text-muted-foreground/30" />
-                  <p className="text-caption text-muted-foreground">
-                    No conversations yet
-                  </p>
-                </div>
-              ) : (
-                conversations.map((conv) => (
-                  <div
-                    key={conv.id}
-                    className={cn(
-                      "group flex items-center gap-2 rounded-lg px-3 py-2.5 cursor-pointer transition-all",
-                      activeId === conv.id
-                        ? "bg-primary/10 text-primary ring-1 ring-primary/20"
-                        : "hover:bg-muted/50 text-foreground",
-                    )}
-                    onClick={() => selectConversation(conv.id)}
-                  >
-                    <Bot className="h-3.5 w-3.5 shrink-0 opacity-50" />
-                    <span className="flex-1 truncate text-body-sm">{conv.title}</span>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            onClick={(e: React.MouseEvent) => {
-                              e.stopPropagation()
-                              deleteConversation(conv.id)
-                            }}
-                            className={cn(
-                              "opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5",
-                              "text-muted-foreground hover:text-destructive",
-                            )}
-                          />
-                        }
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </TooltipTrigger>
-                      <TooltipContent side="right">Delete</TooltipContent>
-                    </Tooltip>
+          <div className="relative flex-1 rounded-xl border border-border/50 bg-card/50 overflow-hidden">
+            <ScrollArea className="flex-1 h-full">
+              <div className="space-y-0.5 p-2">
+                {sidebarLoading ? (
+                  <div className="space-y-2 py-2">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Skeleton key={i} className="h-10 w-full rounded-lg" />
+                    ))}
                   </div>
-                ))
-              )}
-            </div>
-          </ScrollArea>
+                ) : conversations.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-12 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted/50">
+                      <MessageSquare className="h-6 w-6 text-muted-foreground/40" />
+                    </div>
+                    <p className="text-caption text-muted-foreground">
+                      No conversations yet
+                    </p>
+                    <p className="text-micro text-muted-foreground/60">
+                      Start a new conversation to begin
+                    </p>
+                  </div>
+                ) : (
+                  conversations.map((conv) => (
+                    <div
+                      key={conv.id}
+                      className={cn(
+                        "group flex items-center gap-2 rounded-lg px-3 py-2.5 cursor-pointer transition-all",
+                        activeId === conv.id
+                          ? "bg-primary/10 text-primary ring-1 ring-primary/20 shadow-sm"
+                          : "hover:bg-muted/50 text-foreground border border-transparent hover:border-border/30",
+                      )}
+                      onClick={() => selectConversation(conv.id)}
+                    >
+                      <Bot className={cn("h-3.5 w-3.5 shrink-0", activeId === conv.id ? "text-primary" : "opacity-50")} />
+                      <span className="flex-1 truncate text-body-sm">{conv.title}</span>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              onClick={(e: React.MouseEvent) => {
+                                e.stopPropagation()
+                                deleteConversation(conv.id)
+                              }}
+                              className={cn(
+                                "opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5",
+                                "text-muted-foreground hover:text-destructive hover:bg-destructive/10",
+                              )}
+                            />
+                          }
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </TooltipTrigger>
+                        <TooltipContent side="right">Delete</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </div>
         </div>
 
         {/* ---- Center: Chat panel ---- */}
-        <Card className="flex flex-col overflow-hidden">
+        <Card className="flex flex-col overflow-hidden shadow-lg shadow-primary/5 border-primary/20">
           {/* Messages area */}
           <ScrollArea className="flex-1">
             <div className="p-5 space-y-4">
               {!activeId ? (
-                <EmptyState
-                  icon={<Sparkles className="h-8 w-8 text-primary" />}
-                  title="AI Operations Assistant"
-                  description="Select a conversation or start a new one. Use templates on the right for common tasks."
-                />
+                <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
+                  <div className="relative mb-6">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/30">
+                      <Sparkles className="h-10 w-10 text-primary glow-primary" />
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-success ring-2 ring-background">
+                      <Activity className="h-3.5 w-3.5 text-success-foreground" />
+                    </div>
+                  </div>
+                  <h3 className="text-heading-lg mb-2">AI Operations Assistant</h3>
+                  <p className="text-body-sm text-muted-foreground max-w-md">
+                    Select a conversation or start a new one. Use templates on the right for common tasks.
+                  </p>
+                  <Button 
+                    onClick={createConversation}
+                    className="mt-6 gap-2 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20"
+                  >
+                    <MessageSquarePlus className="h-4 w-4" />
+                    Start New Conversation
+                  </Button>
+                </div>
               ) : messages.length === 0 ? (
-                <EmptyState
-                  icon={<Bot className="h-8 w-8 text-primary" />}
-                  title="Ready for instructions"
-                  description="Type a prompt below or select a template to begin."
-                />
+                <div className="flex flex-col items-center justify-center min-h-[300px] text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted/50 mb-4">
+                    <Bot className="h-8 w-8 text-muted-foreground/40" />
+                  </div>
+                  <h3 className="text-heading-md mb-2">Ready for instructions</h3>
+                  <p className="text-body-sm text-muted-foreground">
+                    Type a prompt below or select a template to begin.
+                  </p>
+                </div>
               ) : (
                 messages.map((msg, i) => (
                   <MessageBubble
@@ -396,15 +435,19 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
               )}
               {loading && (
                 <div className="flex items-start gap-3">
-                  <Avatar className="h-7 w-7 shrink-0">
+                  <Avatar className="h-7 w-7 shrink-0 ring-2 ring-primary/20">
                     <AvatarFallback className="bg-primary/10 text-primary text-micro">
                       <Bot className="h-3.5 w-3.5" />
                     </AvatarFallback>
                   </Avatar>
-                  <div className="rounded-xl bg-muted/60 border border-border/50 px-4 py-3">
-                    <div className="flex items-center gap-2 text-body-sm text-muted-foreground">
+                  <div className="rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 shadow-sm">
+                    <div className="flex items-center gap-2 text-body-sm text-primary">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      <span>Thinking… may call tools</span>
+                      <span>Processing…</span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-1.5 text-micro text-muted-foreground">
+                      <div className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-pulse" />
+                      <span>Analyzing request and executing tools</span>
                     </div>
                   </div>
                 </div>
@@ -414,40 +457,49 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           </ScrollArea>
 
           {/* Input area */}
-          <div className="border-t border-border bg-card/50 p-4">
+          <div className="border-t border-border/50 bg-gradient-to-b from-card/50 to-card p-4">
             <div className="flex items-end gap-2">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => {
-                  setInput(e.target.value)
-                  adjustTextarea()
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault()
-                    sendMessage(input)
+              <div className="flex-1 relative">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value)
+                    adjustTextarea()
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault()
+                      sendMessage(input)
+                    }
+                  }}
+                  placeholder={
+                    activeId
+                      ? "Ask about your Hysteria2 infrastructure…"
+                      : "Start a new conversation first…"
                   }
-                }}
-                placeholder={
-                  activeId
-                    ? "Ask about your Hysteria2 infrastructure…"
-                    : "Start a new conversation first…"
-                }
-                rows={1}
-                disabled={!activeId && !loading}
-                className="flex-1 resize-none rounded-xl border border-border bg-background px-4 py-3 text-body-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 disabled:opacity-50 transition-all"
-              />
+                  rows={1}
+                  disabled={!activeId && !loading}
+                  className="flex-1 resize-none rounded-xl border border-border/50 bg-background/50 px-4 py-3 text-body-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 disabled:opacity-50 transition-all shadow-inner"
+                />
+                {activeId && (
+                  <div className="absolute right-2 top-2 flex items-center gap-1">
+                    <Badge variant="outline" className="h-5 px-1.5 text-micro border-primary/30 bg-primary/10 text-primary">
+                      10 tools
+                    </Badge>
+                  </div>
+                )}
+              </div>
               <Button
                 onClick={() => sendMessage(input)}
                 disabled={loading || !input.trim()}
                 size="icon"
-                className="h-10 w-10 shrink-0 rounded-xl"
+                className="h-10 w-10 shrink-0 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20"
               >
                 <Send className="h-4 w-4" />
               </Button>
             </div>
-            <p className="mt-2 text-micro text-muted-foreground/60">
+            <p className="mt-2 text-micro text-muted-foreground/60 text-center">
               Press Enter to send · Shift+Enter for new line
             </p>
           </div>
@@ -456,22 +508,24 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         {/* ---- Right panel: Templates + Tools ---- */}
         <div className="flex flex-col gap-4">
           {/* Templates */}
-          <Card className="flex flex-col">
-            <CardHeader className="pb-2">
+          <Card className="flex flex-col shadow-lg shadow-primary/5 border-primary/20">
+            <CardHeader className="pb-3 bg-gradient-to-b from-primary/5 to-transparent">
               <CardTitle className="text-heading-sm flex items-center gap-2">
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                </div>
                 Templates
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <Tabs defaultValue={categories[0] ?? "config"} className="w-full">
-                <div className="px-4 pb-2">
+                <div className="px-4 pb-2 border-b border-border/50">
                   <TabsList className="w-full h-auto flex-wrap gap-1 bg-transparent p-0">
                     {categories.map((cat) => (
                       <TabsTrigger
                         key={cat}
                         value={cat}
-                        className="text-micro px-2.5 py-1 rounded-md capitalize data-[state=active]:bg-primary/10 data-[state=active]:text-primary"
+                        className="text-micro px-2.5 py-1 rounded-md capitalize data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm"
                       >
                         {CATEGORY_CONFIG[cat]?.label ?? cat}
                       </TabsTrigger>
@@ -489,11 +543,18 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                               key={t.id}
                               onClick={() => sendMessage(t.prompt)}
                               disabled={loading}
-                              className="w-full rounded-lg border border-border/50 bg-background/50 px-3 py-2.5 text-left transition-all hover:bg-muted/50 hover:border-border disabled:opacity-50 group"
+                              className="w-full rounded-lg border border-border/50 bg-background/50 px-3 py-2.5 text-left transition-all hover:bg-muted/50 hover:border-primary/30 hover:shadow-sm disabled:opacity-50 group"
                             >
-                              <span className="text-body-sm font-medium group-hover:text-primary transition-colors">
-                                {t.label}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-body-sm font-medium group-hover:text-primary transition-colors">
+                                  {t.label}
+                                </span>
+                                {cat === "payload" && (
+                                  <Badge variant="outline" className="h-4 px-1 text-micro border-destructive/30 bg-destructive/10 text-destructive">
+                                    Risk
+                                  </Badge>
+                                )}
+                              </div>
                               <p className="mt-0.5 text-micro text-muted-foreground line-clamp-2">
                                 {t.description}
                               </p>
@@ -508,10 +569,12 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           </Card>
 
           {/* Available Tools */}
-          <Card>
-            <CardHeader className="pb-2">
+          <Card className="shadow-lg shadow-primary/5 border-primary/20">
+            <CardHeader className="pb-3 bg-gradient-to-b from-primary/5 to-transparent">
               <CardTitle className="text-heading-sm flex items-center gap-2">
-                <Wrench className="h-3.5 w-3.5 text-primary" />
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+                  <Wrench className="h-3.5 w-3.5 text-primary" />
+                </div>
                 Available Tools
               </CardTitle>
             </CardHeader>
@@ -523,11 +586,13 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                     return (
                       <div
                         key={tool.name}
-                        className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted/50 transition-colors"
+                        className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted/50 transition-colors group"
                       >
-                        <Icon className="h-3 w-3 shrink-0 text-primary/60" />
+                        <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                          <Icon className="h-3 w-3 shrink-0 text-primary" />
+                        </div>
                         <div className="min-w-0 flex-1">
-                          <code className="text-micro font-mono text-foreground/80">{tool.name}</code>
+                          <code className="text-micro font-mono text-foreground/80 group-hover:text-primary transition-colors">{tool.name}</code>
                           <p className="text-micro text-muted-foreground truncate">{tool.desc}</p>
                         </div>
                       </div>

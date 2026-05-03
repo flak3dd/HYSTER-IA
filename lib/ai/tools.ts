@@ -1,6 +1,6 @@
 import { z } from "zod"
-import type { AgentTool, AgentToolContext } from "@/lib/agents/tools"
-import { chatComplete } from "@/lib/agents/llm"
+import type { AgentTool, AgentToolContext } from "@/lib/ai/tool-types"
+import { chatComplete } from "@/lib/ai/llm"
 import { listNodes } from "@/lib/db/nodes"
 import { listUsers } from "@/lib/db/users"
 import { listProfiles } from "@/lib/db/profiles"
@@ -552,9 +552,9 @@ export const generatePayloadTool: AgentTool<
   async run(input, ctx) {
     const { config, explanation } = await generatePayloadFromDescription(
       input.description,
-      ctx.invokerUid
+      ctx.invokerUid || 'system'
     )
-    const build = await createPayloadBuild(config, ctx.invokerUid)
+    const build = await createPayloadBuild(config, ctx.invokerUid || 'system')
     return { buildId: build.id, preview: build, explanation }
   },
 }
@@ -737,7 +737,14 @@ export async function runAiTool(
   if (!parsed.success) {
     throw new Error(`invalid args for ${name}: ${parsed.error.message}`)
   }
-  return tool.run(parsed.data, ctx)
+  // Use run if available, otherwise fall back to execute
+  if (tool.run) {
+    return tool.run(parsed.data, ctx)
+  } else if (tool.execute) {
+    return tool.execute(parsed.data, ctx)
+  } else {
+    throw new Error(`tool ${name} has no run or execute method`)
+  }
 }
 
 /* ------------------------------------------------------------------ */

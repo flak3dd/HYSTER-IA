@@ -43,13 +43,13 @@ export class MockServer {
         }
       })
 
-      this.server.listen(this.port, (err: Error) => {
-        if (err) {
-          reject(err)
-        } else {
-          const address = this.server?.address() as AddressInfo
-          resolve(address.port)
-        }
+      this.server!.listen(this.port)
+      this.server!.on('error', (err: Error) => {
+        reject(err)
+      })
+      this.server!.on('listening', () => {
+        const address = this.server?.address() as AddressInfo
+        resolve(address.port)
       })
     })
   }
@@ -57,12 +57,12 @@ export class MockServer {
   async stop(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (this.server) {
-        this.server.close((err: Error) => {
-          if (err) {
-            reject(err)
-          } else {
-            resolve()
-          }
+        this.server.close()
+        this.server.on('error', (err: Error) => {
+          reject(err)
+        })
+        this.server.on('close', () => {
+          resolve()
         })
       } else {
         resolve()
@@ -110,7 +110,7 @@ export class MockSMTPServer {
     })
 
     await new Promise((resolve, reject) => {
-      this.server.listen(this.port, (err: Error) => {
+      this.server!.listen(this.port, (err: Error) => {
         if (err) reject(err)
         else resolve(undefined)
       })

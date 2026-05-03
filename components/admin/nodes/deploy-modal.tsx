@@ -1,4 +1,5 @@
 "use client"
+import { apiFetch } from "@/lib/api/fetch"
 
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
@@ -53,7 +54,7 @@ export function DeployModal({ onClose, onDeployed }: { onClose: () => void; onDe
 
   const loadPresets = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/deploy/presets", { cache: "no-store" })
+      const res = await apiFetch("/api/admin/deploy/presets", { cache: "no-store" })
       if (res.ok) {
         const data = await res.json()
         setPresets(data.presets ?? [])
@@ -97,7 +98,7 @@ export function DeployModal({ onClose, onDeployed }: { onClose: () => void; onDe
 
     try {
       const panelUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"
-      const res = await fetch("/api/admin/deploy", {
+      const res = await apiFetch("/api/admin/deploy", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -160,7 +161,7 @@ export function DeployModal({ onClose, onDeployed }: { onClose: () => void; onDe
   const destroy = async () => {
     if (!deployId) return
     try {
-      await fetch(`/api/admin/deploy/${deployId}/destroy`, { method: "POST" })
+      await apiFetch(`/api/admin/deploy/${deployId}/destroy`, { method: "POST" })
       toast.success("VPS destroyed")
       onClose()
     } catch (err) {

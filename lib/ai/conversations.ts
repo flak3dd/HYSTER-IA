@@ -6,6 +6,29 @@ import {
   type AiConversationCreate,
 } from "@/lib/ai/types"
 
+// Simple in-memory cache for conversations (5-minute TTL)
+const conversationCache = new Map<string, { data: AiConversation; timestamp: number }>()
+const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
+function getCached(id: string): AiConversation | null {
+  const cached = conversationCache.get(id)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data
+  }
+  if (cached) {
+    conversationCache.delete(id)
+  }
+  return null
+}
+
+function setCached(id: string, data: AiConversation): void {
+  conversationCache.set(id, { data, timestamp: Date.now() })
+}
+
+function clearCached(id: string): void {
+  conversationCache.delete(id)
+}
+
 type ConvWithMessages = PrismaConv & { messages: PrismaMsg[] }
 
 function toMsgZod(row: PrismaMsg): AiMessage {
@@ -45,11 +68,18 @@ export async function listConversations(
 export async function getConversation(
   id: string,
 ): Promise<AiConversation | null> {
+  // Check cache first
+  const cached = getCached(id)
+  if (cached) return cached
+
   const row = await prisma.aiConversation.findUnique({
     where: { id },
     include: { messages: { orderBy: { sortOrder: "asc" } } },
   })
-  return row ? toConvZod(row) : null
+  
+  const result = row ? toConvZod(row) : null
+  if (result) setCached(id, result)
+  return result
 }
 
 export async function createConversation(
@@ -95,6 +125,9 @@ export async function appendMessages(
     prisma.aiConversation.update({ where: { id }, data: { updatedAt: new Date() } }),
   ])
 
+  // Invalidate cache
+  clearCached(id)
+  
   return getConversation(id)
 }
 
@@ -111,6 +144,7 @@ export async function updateConversationTitle(
 export async function deleteConversation(id: string): Promise<boolean> {
   try {
     await prisma.aiConversation.delete({ where: { id } })
+    clearCached(id)
     return true
   } catch {
     return false
