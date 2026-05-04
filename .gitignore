@@ -15,7 +15,6 @@ dist
 
 # Production
 *.log
-logs
 
 # Misc
 .DS_Store
@@ -37,7 +36,7 @@ yarn-error.log*
 # SSH
 .ssh/
 cookies.txt
-ec2-user@*
+deployments/artifacts/ec2-user@*
 
 # Vercel
 .vercel
@@ -73,8 +72,7 @@ temp/
 *.tmp
 
 # Build artifacts
-*.tar.gz
-dpanel-deploy-*.tar.gz
+deployments/artifacts/*.tar.gz
 
 # SSH keys (should never be committed)
 *.pem
@@ -83,18 +81,17 @@ id_rsa*
 id_ed25519*
 
 # Firebase
-firebase-adminsdk-*.json
-*firebase-adminsdk*.json
+config/firebase-adminsdk-*.json
+config/*firebase-adminsdk*.json
 service-account.json
 
 # SSL certificates
-ssl/
+config/ssl/
 
 # Provider keys / secrets
 config/provider-keys.json
 
 # Logs
-logs/
 *.log
 
 # Email attachments
@@ -102,5 +99,4 @@ attachments/
 email-attachments/
 
 # Backups
-backups/
 *.backup

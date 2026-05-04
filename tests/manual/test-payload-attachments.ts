@@ -14,7 +14,7 @@ import {
   createBinaryPayload,
   PayloadTemplates,
   type PayloadAttachment,
-} from "./mailer/index"
+} from "../../mailer-service/index"
 
 interface TestResult {
   passed: boolean

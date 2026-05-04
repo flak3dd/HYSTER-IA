@@ -14,7 +14,7 @@ import {
   createBinaryPayload,
   PayloadTemplates,
   type PayloadAttachment,
-} from '../mailer/index';
+} from '../mailer-service/index';
 
 // Example 1: Basic tunnel with documentation
 async function example1_BasicWithDocs() {
