@@ -1,5 +1,8 @@
 import type { IntentAnalysis } from './types'
 import type { ChatMessage } from '../ai/llm'
+import { cotEngine } from '../ai/reasoning/chain-of-thought'
+import { metaCognitionEngine } from '../ai/reasoning/meta-cognition'
+import { reasoningTraceSystem } from '../ai/reasoning/reasoning-trace'
 
 export class IntentAnalyzer {
   private conversationHistory: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
@@ -13,11 +16,20 @@ export class IntentAnalyzer {
     completedSteps: [],
     pendingSteps: [],
   }
+  private enableChainOfThought: boolean = true
+  private enableMetaCognition: boolean = true
+  private enableReasoningTraces: boolean = true
 
   /**
    * Analyze user intent from natural language input with enhanced context and multi-step reasoning
    */
   async analyze(userText: string, context: Record<string, unknown> = {}): Promise<IntentAnalysis> {
+    // Start reasoning trace if enabled
+    let traceSessionId: string | null = null
+    if (this.enableReasoningTraces) {
+      traceSessionId = reasoningTraceSystem.startSession()
+    }
+
     // Import the LLM client
     const { chatComplete } = await import('../ai/llm')
 
@@ -32,27 +44,87 @@ export class IntentAnalyzer {
     // Add user message to conversation history
     this.conversationHistory.push({ role: 'user' as any, content: userText })
 
-    // Create enhanced system prompt with context awareness and multi-step reasoning
-    const systemPrompt = this.createMultiStepSystemPrompt(availableFunctions)
+    // Assess uncertainty if meta-cognition is enabled
+    let uncertaintyAssessment = null
+    if (this.enableMetaCognition) {
+      uncertaintyAssessment = await metaCognitionEngine.assessUncertainty(userText, context)
+      if (this.enableReasoningTraces) {
+        reasoningTraceSystem.addUncertaintyAssessment(uncertaintyAssessment)
+      }
 
-    // Create user prompt with rich context
-    const userPrompt = this.createEnhancedUserPrompt(userText, context)
+      // Detect knowledge gaps
+      const knowledgeGaps = await metaCognitionEngine.detectKnowledgeGaps(userText, context)
+      for (const gap of knowledgeGaps) {
+        if (this.enableReasoningTraces) {
+          reasoningTraceSystem.addKnowledgeGap(gap)
+        }
+      }
+    }
+
+    // Use chain-of-thought for complex requests
+    const isComplexRequest = this.isComplexRequest(userText, context)
+    let analysis: IntentAnalysis
 
     try {
-      // Call LLM to analyze intent with conversation history and multi-step reasoning
-      const messages: ChatMessage[] = [
-        { role: 'system', content: systemPrompt },
-        ...this.conversationHistory.slice(-15) as ChatMessage[], // Keep last 15 messages for better context
-        { role: 'user', content: userPrompt },
-      ]
+      if (this.enableChainOfThought && isComplexRequest) {
+        // Use chain-of-thought reasoning for complex requests
+        if (this.enableReasoningTraces) {
+          reasoningTraceSystem.logEvent('reasoning_start', {
+            method: 'chain_of_thought',
+            complexity: 'high',
+          })
+        }
 
-      const response = await chatComplete({
-        messages,
-        temperature: 0.2, // Lower temperature for more focused reasoning
-      })
+        const cotResult = await cotEngine.reason(userText, context, availableFunctions)
 
-      // Parse the LLM response with multi-step support
-      const analysis = this.parseEnhancedLlmResponse(response.content || '')
+        if (this.enableReasoningTraces) {
+          // Add CoT reasoning steps to trace
+          for (const step of cotResult.reasoningSteps) {
+            reasoningTraceSystem.addReasoningStep(step)
+          }
+
+          // End trace with final decision
+          reasoningTraceSystem.endSession({
+            action: cotResult.finalAnswer,
+            confidence: cotResult.confidence,
+            reasoning: `Chain-of-thought reasoning with ${cotResult.reasoningSteps.length} steps`,
+          })
+        }
+
+        // Convert CoT result to IntentAnalysis
+        analysis = this.cotResultToIntentAnalysis(cotResult, availableFunctions)
+      } else {
+        // Standard intent analysis for simple requests
+        const systemPrompt = this.createMultiStepSystemPrompt(availableFunctions)
+        const userPrompt = this.createEnhancedUserPrompt(userText, context)
+
+        const messages: ChatMessage[] = [
+          { role: 'system', content: systemPrompt },
+          ...this.conversationHistory.slice(-15) as ChatMessage[],
+          { role: 'user', content: userPrompt },
+        ]
+
+        const response = await chatComplete({
+          messages,
+          temperature: 0.2,
+        })
+
+        analysis = this.parseEnhancedLlmResponse(response.content || '')
+
+        if (this.enableReasoningTraces) {
+          reasoningTraceSystem.endSession({
+            action: analysis.suggestedFunction || 'no_action',
+            confidence: analysis.confidence,
+            reasoning: analysis.intent,
+          })
+        }
+      }
+
+      // Calibrate confidence if meta-cognition is enabled
+      if (this.enableMetaCognition && uncertaintyAssessment) {
+        const calibratedConfidence = metaCognitionEngine.calibrateConfidence(analysis.confidence)
+        analysis.confidence = calibratedConfidence
+      }
 
       // Update workflow context if multi-step detected
       if (analysis.suggestedChaining && analysis.suggestedChaining.length > 0) {
@@ -70,6 +142,10 @@ export class IntentAnalyzer {
       return analysis
     } catch (error) {
       console.error('Error analyzing intent:', error)
+
+      if (this.enableReasoningTraces) {
+        reasoningTraceSystem.addError(error as Error, { userText, context })
+      }
 
       // Enhanced fallback with pattern matching and multi-step detection
       return this.enhancedFallbackAnalysis(userText, availableFunctions, context)
@@ -405,5 +481,106 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
     }
 
     return suggestions
+  }
+
+  /**
+   * Determine if a request is complex enough to warrant chain-of-thought reasoning
+   */
+  private isComplexRequest(userText: string, context: Record<string, unknown>): boolean {
+    const lowerText = userText.toLowerCase()
+    
+    // Complexity indicators
+    const complexityIndicators = [
+      // Multi-step indicators
+      'then', 'after', 'followed by', 'next', 'and then', 'finally',
+      // Complex operations
+      'orchestrate', 'coordinate', 'multiple', 'several', 'various',
+      // Conditional logic
+      'if', 'when', 'unless', 'depending on',
+      // Complex queries
+      'analyze', 'evaluate', 'assess', 'compare', 'correlate',
+      // Long requests
+      userText.length > 200,
+    ]
+
+    const hasComplexityIndicator = complexityIndicators.some(indicator => 
+      typeof indicator === 'string' ? lowerText.includes(indicator) : indicator
+    )
+
+    // Check context complexity
+    const hasComplexContext = Object.keys(context).length > 5
+
+    return hasComplexityIndicator || hasComplexContext
+  }
+
+  /**
+   * Convert Chain-of-Thought result to IntentAnalysis
+   */
+  private cotResultToIntentAnalysis(
+    cotResult: any,
+    availableFunctions: any[]
+  ): IntentAnalysis {
+    // Extract intent from final answer
+    const intent = cotResult.finalAnswer || cotResult.reasoningSteps[cotResult.reasoningSteps.length - 1]?.intermediateConclusion || 'Unknown intent'
+    
+    // Try to map to a function based on the reasoning
+    let suggestedFunction: string | undefined
+    const functionNames = availableFunctions.map(f => f.name)
+    
+    for (const funcName of functionNames) {
+      if (intent.toLowerCase().includes(funcName.toLowerCase()) || 
+          cotResult.finalAnswer.toLowerCase().includes(funcName.toLowerCase())) {
+        suggestedFunction = funcName
+        break
+      }
+    }
+
+    // Extract parameters from reasoning steps
+    const extractedParameters: Record<string, unknown> = {}
+    for (const step of cotResult.reasoningSteps) {
+      if (step.thought.result && typeof step.thought.result === 'object') {
+        Object.assign(extractedParameters, step.thought.result)
+      }
+    }
+
+    // Determine if multi-step
+    const suggestedChaining = cotResult.reasoningSteps.length > 3 
+      ? cotResult.reasoningSteps.slice(0, 3).map(s => s.thought.type)
+      : undefined
+
+    return {
+      intent,
+      confidence: cotResult.confidence,
+      extractedParameters,
+      suggestedFunction,
+      requiresClarification: cotResult.confidence < 0.7,
+      clarificationQuestions: cotResult.confidence < 0.7 
+        ? ['Could you provide more details about your request?']
+        : [],
+      suggestedChaining,
+      estimatedSteps: cotResult.reasoningSteps.length,
+      riskLevel: cotResult.confidence < 0.5 ? 'high' : cotResult.confidence < 0.7 ? 'medium' : 'low',
+    }
+  }
+
+  /**
+   * Enable or disable chain-of-thought reasoning
+   */
+  setChainOfThoughtEnabled(enabled: boolean): void {
+    this.enableChainOfThought = enabled
+  }
+
+  /**
+   * Enable or disable meta-cognition
+   */
+  setMetaCognitionEnabled(enabled: boolean): void {
+    this.enableMetaCognition = enabled
+  }
+
+  /**
+   * Enable or disable reasoning traces
+   */
+  setReasoningTracesEnabled(enabled: boolean): void {
+    this.enableReasoningTraces = enabled
   }
 }

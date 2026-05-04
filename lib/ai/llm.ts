@@ -391,19 +391,18 @@ export async function chatComplete(options: {
       // Log each tool call with normalization info
       finalToolCalls.forEach(tc => {
         const originalNormalized = normalizedCalls.find(nc => nc.id === tc.id);
-        // debugLoggerlogToolCall(effectiveSessionId, {
-          toolName: tc.function.name,
-          originalToolName: tc._metadata?.originalToolName || originalNormalized?.originalFormat?.function?.name,
-          mappingSource: tc._metadata?.mappingSource || originalNormalized?.normalizationSteps.join(', '),
-          arguments: JSON.parse(tc.function.arguments),
-          success: true,
-          executionTimeMs: 0,
-          validationWarnings: tc._metadata?.validationWarnings,
-          
-        });
+        // debugLogger.logToolCall(effectiveSessionId, {
+        //   toolName: tc.function.name,
+        //   originalToolName: tc._metadata?.originalToolName || originalNormalized?.originalFormat?.function?.name,
+        //   mappingSource: tc._metadata?.mappingSource || originalNormalized?.normalizationSteps.join(', '),
+        //   arguments: JSON.parse(tc.function.arguments),
+        //   success: true,
+        //   executionTimeMs: 0,
+        //   validationWarnings: tc._metadata?.validationWarnings,
+        // });
       });
 
-      // debugLoggerendSession(effectiveSessionId);
+      // debugLogger.endSession(effectiveSessionId);
 
       const response = {
         content: result.text,
@@ -440,7 +439,7 @@ export async function chatComplete(options: {
       },
     }));
 
-    // debugLoggerendSession(effectiveSessionId);
+    // debugLogger.endSession(effectiveSessionId);
 
     const response = {
       content: result.text,
@@ -572,19 +571,18 @@ export async function chatComplete(options: {
       // Log each tool call with normalization info
       finalToolCalls.forEach(tc => {
         const originalNormalized = normalizedCalls.find(nc => nc.id === tc.id);
-        // debugLoggerlogToolCall(effectiveSessionId, {
-          toolName: tc.function.name,
-          originalToolName: tc._metadata?.originalToolName || originalNormalized?.originalFormat?.function?.name,
-          mappingSource: tc._metadata?.mappingSource || originalNormalized?.normalizationSteps.join(', '),
-          arguments: JSON.parse(tc.function.arguments),
-          success: true,
-          executionTimeMs: 0,
-          validationWarnings: tc._metadata?.validationWarnings,
-          
-        });
+        // debugLogger.logToolCall(effectiveSessionId, {
+        //   toolName: tc.function.name,
+        //   originalToolName: tc._metadata?.originalToolName || originalNormalized?.originalFormat?.function?.name,
+        //   mappingSource: tc._metadata?.mappingSource || originalNormalized?.normalizationSteps.join(', '),
+        //   arguments: JSON.parse(tc.function.arguments),
+        //   success: true,
+        //   executionTimeMs: 0,
+        //   validationWarnings: tc._metadata?.validationWarnings,
+        // });
       });
 
-      // debugLoggerendSession(effectiveSessionId);
+      // debugLogger.endSession(effectiveSessionId);
 
       const response = {
         content: result.text,
@@ -621,7 +619,7 @@ export async function chatComplete(options: {
       },
     }));
 
-    // debugLoggerendSession(effectiveSessionId);
+    // debugLogger.endSession(effectiveSessionId);
 
     const response = {
       content: result.text,

@@ -9,9 +9,12 @@ import {
   SwarmIntelligenceConfig, 
   KnowledgeBaseEntry, 
   ExperienceRecord,
-  AgentPerformance 
+  AgentPerformance,
+  SharedReasoningTrace
 } from '../types';
 import { logger } from '../../logger';
+import { cotEngine } from '../../ai/reasoning/chain-of-thought';
+import { metaCognitionEngine } from '../../ai/reasoning/meta-cognition';
 
 export class SwarmIntelligence extends EventEmitter {
   private config: SwarmIntelligenceConfig;
@@ -19,6 +22,8 @@ export class SwarmIntelligence extends EventEmitter {
   private experienceRecords: Map<string, ExperienceRecord[]>;
   private performanceHistory: Map<string, AgentPerformance[]>;
   private patterns: Map<string, any>;
+  private sharedReasoningTraces: Map<string, SharedReasoningTrace>;
+  private reasoningPatterns: Map<string, any>;
   private isRunning: boolean;
 
   constructor(config: SwarmIntelligenceConfig) {
@@ -28,6 +33,8 @@ export class SwarmIntelligence extends EventEmitter {
     this.experienceRecords = new Map();
     this.performanceHistory = new Map();
     this.patterns = new Map();
+    this.sharedReasoningTraces = new Map();
+    this.reasoningPatterns = new Map();
     this.isRunning = false;
   }
 
@@ -185,6 +192,174 @@ export class SwarmIntelligence extends EventEmitter {
 
     // Return most recent record
     return records[records.length - 1];
+  }
+
+  /**
+   * Add shared reasoning trace
+   */
+  async addSharedReasoningTrace(trace: SharedReasoningTrace): Promise<void> {
+    this.sharedReasoningTraces.set(trace.id, trace);
+    
+    // If reasoning integration is enabled, analyze for patterns
+    if (this.config.reasoningIntegrationEnabled) {
+      await this.analyzeReasoningForPatterns(trace);
+    }
+
+    logger.info(`Shared reasoning trace ${trace.id} added from agent ${trace.sourceAgent}`);
+  }
+
+  /**
+   * Get shared reasoning traces
+   */
+  async getSharedReasoningTraces(filters?: {
+    operationId?: string;
+    reasoningType?: string;
+    minEffectiveness?: number;
+    agentId?: string;
+  }): Promise<SharedReasoningTrace[]> {
+    let traces = Array.from(this.sharedReasoningTraces.values());
+
+    if (filters) {
+      if (filters.operationId) {
+        traces = traces.filter(t => t.operationId === filters.operationId);
+      }
+      if (filters.reasoningType) {
+        traces = traces.filter(t => t.reasoningType === filters.reasoningType);
+      }
+      if (filters.minEffectiveness) {
+        traces = traces.filter(t => t.effectiveness >= filters.minEffectiveness);
+      }
+      if (filters.agentId) {
+        traces = traces.filter(t => t.sourceAgent === filters.agentId);
+      }
+    }
+
+    // Sort by effectiveness and usage
+    traces.sort((a, b) => {
+      if (b.effectiveness !== a.effectiveness) {
+        return b.effectiveness - a.effectiveness;
+      }
+      return b.usageCount - a.usageCount;
+    });
+
+    return traces;
+  }
+
+  /**
+   * Analyze reasoning for patterns
+   */
+  private async analyzeReasoningForPatterns(trace: SharedReasoningTrace): Promise<void> {
+    if (!this.config.patternRecognitionEnabled) {
+      return;
+    }
+
+    try {
+      // Use meta-cognition to identify patterns in reasoning
+      const assessment = await metaCognitionEngine.assessUncertainty(
+        JSON.stringify({
+          reasoningType: trace.reasoningType,
+          confidence: trace.confidence,
+          outcome: trace.outcome,
+          content: trace.content,
+        }),
+        { context: 'reasoning_pattern_analysis', traceId: trace.id }
+      );
+
+      // If high confidence and successful outcome, store as pattern
+      if (assessment.confidence > 0.8 && trace.outcome === 'success') {
+        const patternId = `${trace.reasoningType}_${trace.taskId}`;
+        
+        if (!this.reasoningPatterns.has(patternId)) {
+          this.reasoningPatterns.set(patternId, {
+            type: trace.reasoningType,
+            pattern: trace.content,
+            effectiveness: trace.effectiveness,
+            usageCount: 1,
+            lastSeen: new Date(),
+          });
+        } else {
+          const pattern = this.reasoningPatterns.get(patternId);
+          pattern.usageCount++;
+          pattern.effectiveness = (pattern.effectiveness + trace.effectiveness) / 2;
+          pattern.lastSeen = new Date();
+        }
+
+        this.emit('reasoning_pattern_discovered', { patternId, trace });
+      }
+    } catch (error) {
+      logger.error('Error analyzing reasoning for patterns', error);
+    }
+  }
+
+  /**
+   * Get reasoning patterns
+   */
+  async getReasoningPatterns(reasoningType?: string): Promise<any[]> {
+    let patterns = Array.from(this.reasoningPatterns.values());
+
+    if (reasoningType) {
+      patterns = patterns.filter(p => p.type === reasoningType);
+    }
+
+    // Sort by effectiveness and usage
+    patterns.sort((a, b) => {
+      if (b.effectiveness !== a.effectiveness) {
+        return b.effectiveness - a.effectiveness;
+      }
+      return b.usageCount - a.usageCount;
+    });
+
+    return patterns;
+  }
+
+  /**
+   * Derive knowledge from experience with reasoning
+   */
+  private async deriveKnowledgeFromExperience(record: ExperienceRecord): Promise<void> {
+    // If experience has reasoning trace ID, incorporate reasoning into knowledge
+    if (record.reasoningTraceId && this.config.reasoningIntegrationEnabled) {
+      const trace = this.sharedReasoningTraces.get(record.reasoningTraceId);
+      if (trace && trace.outcome === 'success') {
+        const knowledgeEntry: Omit<KnowledgeBaseEntry, 'id' | 'createdAt'> = {
+          type: 'pattern',
+          title: `Successful reasoning pattern for ${record.taskType}`,
+          content: {
+            taskType: record.taskType,
+            approach: record.approach,
+            reasoning: trace.content,
+            confidence: trace.confidence,
+          },
+          tags: ['reasoning', record.taskType, trace.reasoningType],
+          sourceAgent: record.agentId,
+          operationId: record.operationId,
+          successRate: 1.0,
+          usageCount: 0,
+          lastUsed: new Date(),
+          confidence: trace.effectiveness,
+        };
+
+        await this.addKnowledge(knowledgeEntry);
+      }
+    }
+
+    // Standard knowledge derivation (existing logic)
+    const lessons = record.lessons;
+    if (lessons.length > 0) {
+      const knowledgeEntry: Omit<KnowledgeBaseEntry, 'id' | 'createdAt'> = {
+        type: 'lesson',
+        title: `Lesson learned from ${record.taskType}`,
+        content: lessons,
+        tags: [record.taskType, record.outcome],
+        sourceAgent: record.agentId,
+        operationId: record.operationId,
+        successRate: record.outcome === 'success' ? 1.0 : record.outcome === 'partial' ? 0.5 : 0.0,
+        usageCount: 0,
+        lastUsed: new Date(),
+        confidence: record.confidence,
+      };
+
+      await this.addKnowledge(knowledgeEntry);
+    }
   }
 
   /**

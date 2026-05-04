@@ -5,10 +5,13 @@
 
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { AgentConfig, AgentState, AgentStatus, AgentMessage, AgentCapability } from '../types';
+import { AgentConfig, AgentState, AgentStatus, AgentMessage, AgentCapability, SharedReasoningTrace, CollaborativeReasoningSession } from '../types';
 import { MessageBus } from '../communication/message-bus';
 import { MessageBuilder, MessageFactory } from '../communication/message-builder';
 import { logger } from '../../logger';
+import { cotEngine } from '../../ai/reasoning/chain-of-thought';
+import { metaCognitionEngine } from '../../ai/reasoning/meta-cognition';
+import { reasoningTraceSystem } from '../../ai/reasoning/reasoning-trace';
 
 export abstract class BaseAgent extends EventEmitter {
   protected config: AgentConfig;
@@ -17,6 +20,18 @@ export abstract class BaseAgent extends EventEmitter {
   protected isRunning: boolean;
   protected messageHandlers: Map<string, (message: AgentMessage) => Promise<void>>;
   protected taskQueue: Map<string, any>;
+  
+  // Advanced reasoning integration
+  protected enableChainOfThought: boolean = true;
+  protected enableMetaCognition: boolean = true;
+  protected enableReasoningTraces: boolean = true;
+  protected enableCollaborativeReasoning: boolean = false;
+  protected enableReasoningSharing: boolean = false;
+  protected currentReasoningSessionId: string | null = null;
+  
+  // Collaborative reasoning
+  protected collaborativeSessions: Map<string, CollaborativeReasoningSession>;
+  protected sharedReasoningTraces: Map<string, SharedReasoningTrace>;
 
   constructor(config: AgentConfig, messageBus: MessageBus) {
     super();
@@ -37,6 +52,17 @@ export abstract class BaseAgent extends EventEmitter {
     this.isRunning = false;
     this.messageHandlers = new Map();
     this.taskQueue = new Map();
+    this.collaborativeSessions = new Map();
+    this.sharedReasoningTraces = new Map();
+    
+    // Apply reasoning configuration if provided
+    if (config.reasoningConfig) {
+      this.enableChainOfThought = config.reasoningConfig.enableChainOfThought;
+      this.enableMetaCognition = config.reasoningConfig.enableMetaCognition;
+      this.enableReasoningTraces = config.reasoningConfig.enableReasoningTraces;
+      this.enableCollaborativeReasoning = config.reasoningConfig.enableCollaborativeReasoning;
+      this.enableReasoningSharing = config.reasoningConfig.enableReasoningSharing;
+    }
   }
 
   /**
@@ -107,6 +133,9 @@ export abstract class BaseAgent extends EventEmitter {
     this.messageHandlers.set('capability_request', this.handleCapabilityRequest.bind(this));
     this.messageHandlers.set('heartbeat', this.handleHeartbeat.bind(this));
     this.messageHandlers.set('negotiation', this.handleNegotiation.bind(this));
+    this.messageHandlers.set('reasoning_share', this.handleReasoningShare.bind(this));
+    this.messageHandlers.set('collaborative_reasoning_invite', this.handleCollaborativeReasoningInvite.bind(this));
+    this.messageHandlers.set('collaborative_reasoning_response', this.handleCollaborativeReasoningResponse.bind(this));
   }
 
   /**
@@ -144,15 +173,119 @@ export abstract class BaseAgent extends EventEmitter {
       this.state.status = 'busy';
       this.state.load = Math.min(1, this.state.load + 0.2);
 
-      // Execute task
+      // Start reasoning trace if enabled
+      if (this.enableReasoningTraces) {
+        this.currentReasoningSessionId = reasoningTraceSystem.startSession(`agent-${this.config.id}-${taskId}`);
+        reasoningTraceSystem.logEvent('reasoning_start', {
+          agentId: this.config.id,
+          taskId,
+          taskType: task.type,
+          taskDescription: task.description,
+        });
+      }
+
+      // Assess uncertainty if meta-cognition is enabled
+      let uncertaintyAssessment = null;
+      if (this.enableMetaCognition) {
+        uncertaintyAssessment = await metaCognitionEngine.assessUncertainty(
+          JSON.stringify(task),
+          { agentId: this.config.id, taskId }
+        );
+        
+        if (this.enableReasoningTraces) {
+          reasoningTraceSystem.addUncertaintyAssessment(uncertaintyAssessment);
+        }
+
+        // Detect knowledge gaps
+        const knowledgeGaps = await metaCognitionEngine.detectKnowledgeGaps(
+          JSON.stringify(task),
+          { agentId: this.config.id, taskId }
+        );
+        
+        for (const gap of knowledgeGaps) {
+          if (this.enableReasoningTraces) {
+            reasoningTraceSystem.addKnowledgeGap(gap);
+          }
+        }
+      }
+
+      // Execute task with or without chain-of-thought
       const startTime = Date.now();
-      const result = await this.executeTask(task);
+      let result: any;
+      
+      if (this.enableChainOfThought && this.isComplexTask(task)) {
+        // Use chain-of-thought for complex tasks
+        if (this.enableReasoningTraces) {
+          reasoningTraceSystem.logEvent('decision_made', {
+            decision: 'use_chain_of_thought',
+            taskId,
+          });
+        }
+
+        const cotResult = await cotEngine.reason(
+          JSON.stringify(task),
+          { agentId: this.config.id, taskId, agentType: this.config.type },
+          this.getAgentTools()
+        );
+
+        if (this.enableReasoningTraces) {
+          for (const step of cotResult.reasoningSteps) {
+            reasoningTraceSystem.addReasoningStep(step);
+          }
+        }
+
+        // Execute task based on CoT reasoning
+        result = await this.executeTaskWithReasoning(task, cotResult);
+      } else {
+        // Standard task execution
+        result = await this.executeTask(task);
+      }
+
       const duration = Date.now() - startTime;
+
+      // Calibrate confidence based on actual success
+      if (this.enableMetaCognition && uncertaintyAssessment) {
+        metaCognitionEngine.recordOutcome(uncertaintyAssessment.confidence, 1.0);
+      }
+
+      // End reasoning trace
+      if (this.enableReasoningTraces && this.currentReasoningSessionId) {
+        reasoningTraceSystem.endSession({
+          action: `execute_task_${task.type}`,
+          confidence: uncertaintyAssessment?.confidence || 0.8,
+          reasoning: `Agent ${this.config.id} executed task ${taskId}`,
+        });
+        this.currentReasoningSessionId = null;
+      }
+
+      // Share reasoning trace if enabled and task was successful
+      if (this.enableReasoningSharing && this.enableChainOfThought && this.isComplexTask(task)) {
+        // Determine target agents (could be agents with similar capabilities)
+        const targetAgents = await this.findSimilarAgents();
+        if (targetAgents.length > 0) {
+          await this.shareReasoningTrace(
+            task.operationId || 'unknown',
+            taskId,
+            'combined',
+            { 
+              task: task.type,
+              reasoning: result,
+              uncertainty: uncertaintyAssessment,
+            },
+            uncertaintyAssessment?.confidence || 0.8,
+            'success',
+            targetAgents
+          );
+        }
+      }
 
       // Update state
       this.state.currentTasks = this.state.currentTasks.filter(t => t !== taskId);
       this.state.completedTasks++;
       this.state.load = Math.max(0, this.state.load - 0.2);
+      this.state.averageResponseTime = 
+        (this.state.averageResponseTime * (this.state.completedTasks - 1) + duration) / this.state.completedTasks;
+      
       if (this.state.currentTasks.length === 0) {
         this.state.status = 'idle';
       }
@@ -162,6 +295,23 @@ export abstract class BaseAgent extends EventEmitter {
 
       logger.info(`Agent ${this.config.id} completed task ${taskId}`);
     } catch (error) {
+      // Log error to reasoning trace
+      if (this.enableReasoningTraces && this.currentReasoningSessionId) {
+        reasoningTraceSystem.addError(error as Error, { taskId, agentId: this.config.id });
+        
+        reasoningTraceSystem.endSession({
+          action: `execute_task_${task.type}`,
+          confidence: 0.1,
+          reasoning: `Agent ${this.config.id} failed task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        this.currentReasoningSessionId = null;
+      }
+
+      // Record failure for calibration
+      if (this.enableMetaCognition) {
+        metaCognitionEngine.recordOutcome(0.8, 0.0);
+      }
+
       // Update state on failure
       this.state.currentTasks = this.state.currentTasks.filter(t => t !== taskId);
       this.state.failedTasks++;
@@ -237,6 +387,62 @@ export abstract class BaseAgent extends EventEmitter {
     );
 
     await this.messageBus.sendMessage(responseMessage);
+  }
+
+  /**
+   * Handle reasoning share
+   */
+  protected async handleReasoningShare(message: AgentMessage): Promise<void> {
+    if (!this.enableReasoningSharing) {
+      return;
+    }
+
+    const sharedTrace: SharedReasoningTrace = message.payload.data;
+    this.sharedReasoningTraces.set(sharedTrace.id, sharedTrace);
+    
+    logger.info(`Agent ${this.config.id} received shared reasoning trace ${sharedTrace.id} from ${message.fromAgent}`);
+    
+    // Optionally learn from shared reasoning
+    if (this.enableMetaCognition) {
+      await this.learnFromSharedReasoning(sharedTrace);
+    }
+  }
+
+  /**
+   * Handle collaborative reasoning invite
+   */
+  protected async handleCollaborativeReasoningInvite(message: AgentMessage): Promise<void> {
+    if (!this.enableCollaborativeReasoning) {
+      await this.sendCollaborativeReasoningResponse(message, 'decline', 'Collaborative reasoning not enabled');
+      return;
+    }
+
+    const session: CollaborativeReasoningSession = message.payload.data;
+    this.collaborativeSessions.set(session.id, session);
+    
+    logger.info(`Agent ${this.config.id} invited to collaborative reasoning session ${session.id}`);
+    
+    // Evaluate and respond
+    const shouldParticipate = await this.evaluateCollaborativeReasoningInvite(session);
+    const response = shouldParticipate ? 'accept' : 'decline';
+    const reasoning = shouldParticipate ? 'Willing to collaborate on reasoning task' : 'Unable to participate at this time';
+    
+    await this.sendCollaborativeReasoningResponse(message, response, reasoning);
+  }
+
+  /**
+   * Handle collaborative reasoning response
+   */
+  protected async handleCollaborativeReasoningResponse(message: AgentMessage): Promise<void> {
+    const response = message.payload.data;
+    logger.info(`Agent ${this.config.id} received collaborative reasoning response from ${message.fromAgent}`);
+    
+    // Update session with response
+    const session = this.collaborativeSessions.get(response.sessionId);
+    if (session) {
+      // Add response to session
+      // Implementation depends on session structure
+    }
   }
 
   /**
@@ -361,6 +567,165 @@ export abstract class BaseAgent extends EventEmitter {
     );
 
     await this.messageBus.sendMessage(message);
+  }
+
+  /**
+   * Share reasoning trace with other agents
+   */
+  protected async shareReasoningTrace(
+    operationId: string,
+    taskId: string,
+    reasoningType: 'chain_of_thought' | 'meta_cognition' | 'combined',
+    content: any,
+    confidence: number,
+    outcome: 'success' | 'failure' | 'partial',
+    targetAgents: string[]
+  ): Promise<void> {
+    if (!this.enableReasoningSharing) {
+      return;
+    }
+
+    const sharedTrace: SharedReasoningTrace = {
+      id: uuidv4(),
+      sourceAgent: this.config.id,
+      operationId,
+      taskId,
+      reasoningType,
+      content,
+      confidence,
+      outcome,
+      timestamp: new Date(),
+      sharedWith: targetAgents,
+      usageCount: 0,
+      effectiveness: outcome === 'success' ? 1.0 : outcome === 'partial' ? 0.5 : 0.0,
+    };
+
+    this.sharedReasoningTraces.set(sharedTrace.id, sharedTrace);
+
+    // Share with target agents
+    for (const agentId of targetAgents) {
+      const message = MessageFactory.request(
+        this.config.id,
+        agentId,
+        'reasoning_share',
+        sharedTrace,
+        'normal'
+      );
+      await this.messageBus.sendMessage(message);
+    }
+
+    logger.info(`Agent ${this.config.id} shared reasoning trace ${sharedTrace.id} with ${targetAgents.length} agents`);
+  }
+
+  /**
+   * Initiate collaborative reasoning session
+   */
+  protected async initiateCollaborativeReasoning(
+    operationId: string,
+    objective: string,
+    targetAgents: string[]
+  ): Promise<string> {
+    if (!this.enableCollaborativeReasoning) {
+      throw new Error('Collaborative reasoning not enabled');
+    }
+
+    const sessionId = uuidv4();
+    const session: CollaborativeReasoningSession = {
+      id: sessionId,
+      operationId,
+      initiatingAgent: this.config.id,
+      participatingAgents: [this.config.id, ...targetAgents],
+      objective,
+      status: 'active',
+      reasoningSteps: [],
+      consensus: null,
+      timestamp: new Date(),
+    };
+
+    this.collaborativeSessions.set(sessionId, session);
+
+    // Invite other agents
+    for (const agentId of targetAgents) {
+      const message = MessageFactory.request(
+        this.config.id,
+        agentId,
+        'collaborative_reasoning_invite',
+        session,
+        'high'
+      );
+      await this.messageBus.sendMessage(message);
+    }
+
+    logger.info(`Agent ${this.config.id} initiated collaborative reasoning session ${sessionId}`);
+    return sessionId;
+  }
+
+  /**
+   * Send collaborative reasoning response
+   */
+  private async sendCollaborativeReasoningResponse(
+    originalMessage: AgentMessage,
+    response: 'accept' | 'decline',
+    reasoning: string
+  ): Promise<void> {
+    const responseMessage = MessageFactory.response(
+      this.config.id,
+      originalMessage.fromAgent,
+      'collaborative_reasoning_response',
+      {
+        sessionId: originalMessage.payload.data.id,
+        response,
+        reasoning,
+        agentId: this.config.id,
+      },
+      originalMessage.id
+    );
+
+    await this.messageBus.sendMessage(responseMessage);
+  }
+
+  /**
+   * Learn from shared reasoning trace
+   */
+  private async learnFromSharedReasoning(sharedTrace: SharedReasoningTrace): Promise<void> {
+    // Update meta-cognition with shared knowledge
+    if (sharedTrace.outcome === 'success' && sharedTrace.effectiveness > 0.7) {
+      // Could add to knowledge base or update reasoning patterns
+      logger.info(`Agent ${this.config.id} learned from successful shared reasoning trace ${sharedTrace.id}`);
+    }
+  }
+
+  /**
+   * Evaluate collaborative reasoning invite
+   */
+  private async evaluateCollaborativeReasoningInvite(session: CollaborativeReasoningSession): Promise<boolean> {
+    // Simple heuristic: accept if agent has capacity and objective is relevant
+    if (this.state.load > 0.8) {
+      return false;
+    }
+
+    // Check if objective is relevant to agent's capabilities
+    const isRelevant = this.isObjectiveRelevant(session.objective);
+    return isRelevant;
+  }
+
+  /**
+   * Check if objective is relevant to agent
+   */
+  private isObjectiveRelevant(objective: string): boolean {
+    // Simple implementation - could be enhanced with semantic matching
+    const keywords = this.config.capabilities.map(cap => cap.name.toLowerCase());
+    const objectiveLower = objective.toLowerCase();
+    return keywords.some(keyword => objectiveLower.includes(keyword));
+  }
+
+  /**
+   * Find similar agents based on capabilities
+   */
+  private async findSimilarAgents(): Promise<string[]> {
+    // This would typically query the agent registry
+    // For now, return empty array - to be implemented with registry integration
+    return [];
   }
 
   /**
