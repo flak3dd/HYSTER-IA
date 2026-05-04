@@ -17,6 +17,12 @@ export interface ShadowGrokRunOptions {
   persona?: Persona;
   /** High-level goal injected into the runtime context block */
   operationGoal?: string;
+  /** Enable early termination when task appears complete */
+  enableEarlyTermination?: boolean;
+  /** Enable context window optimization */
+  optimizeContextWindow?: boolean;
+  /** Enable caching for tool execution */
+  enableToolCache?: boolean;
 }
 
 export interface ShadowGrokResult {
@@ -48,9 +54,13 @@ export async function runShadowGrokWithTools(
     maxToolRounds = env.SHADOWGROK_MAX_TOOL_ROUNDS,
     persona,
     operationGoal,
+    enableEarlyTermination = true,
+    optimizeContextWindow = true,
+    enableToolCache = true,
   } = options;
 
   console.log(`[ShadowGrok] Starting autonomous execution for user: ${invokerUid}`);
+  console.log(`[ShadowGrok] Performance options: earlyTermination=${enableEarlyTermination}, contextOpt=${optimizeContextWindow}, toolCache=${enableToolCache}`);
 
   // Build dynamic context: live DB state + optional nodeContext + operation goal
   const nodeCtxStr = nodeContext
@@ -77,12 +87,22 @@ export async function runShadowGrokWithTools(
   const executionContext: ToolContext = {
     userId: invokerUid,
     conversationId,
+    enableCache: enableToolCache,
   };
 
   try {
     while (continueLoop && round < maxToolRounds) {
       round++;
       console.log(`[ShadowGrok] Tool round ${round}/${maxToolRounds}`);
+
+      // Context window optimization: trim message history if too long
+      if (optimizeContextWindow && messages.length > 10) {
+        // Keep system prompt, last 5 user/assistant exchanges
+        const systemMsg = messages[0];
+        const recentMessages = messages.slice(-10);
+        messages = [systemMsg, ...recentMessages];
+        console.log(`[ShadowGrok] Context window optimized: trimmed from ${messages.length + 10} to ${messages.length} messages`);
+      }
 
       // Adjust temperature based on aggressiveness
       const temperature = env.SHADOWGROK_TOOL_CALLING_AGGRESSIVENESS === 'aggressive' ? 0.8 :
@@ -202,6 +222,29 @@ export async function runShadowGrokWithTools(
             // Continue execution without pausing
           } else {
             finalResponse = 'Execution paused: One or more tools require admin approval. Please review the pending actions in the approval panel.';
+            continueLoop = false;
+            break;
+          }
+        }
+
+        // Early termination: check if task appears complete
+        if (enableEarlyTermination) {
+          const completionIndicators = [
+            'done', 'complete', 'completed', 'finished', 'success',
+            'deployed', 'created', 'generated', 'executed', 'accomplished'
+          ];
+          
+          const lastAssistantContent = assistantMessage.content?.toLowerCase() || '';
+          const taskComplete = completionIndicators.some(indicator => 
+            lastAssistantContent.includes(indicator)
+          );
+          
+          // Also check if all tools succeeded
+          const allToolsSucceeded = toolExecutions.every(te => te.success);
+          
+          if (taskComplete && allToolsSucceeded && toolExecutions.length > 0) {
+            console.log(`[ShadowGrok] Early termination: task appears complete based on response analysis`);
+            finalResponse = assistantMessage.content || '';
             continueLoop = false;
             break;
           }

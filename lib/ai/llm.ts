@@ -5,6 +5,128 @@ import { validateToolCalls } from './tool-validator'
 import { executeWithFallback } from './provider-fallback'
 import { debugLogger } from './debug-logger'
 import { normalizeToolCalls } from './tool-normalizer'
+import { createHash } from 'crypto'
+
+// ============================================================
+// RESPONSE CACHING LAYER
+// ============================================================
+
+interface CacheEntry {
+  response: any
+  timestamp: number
+  hits: number
+}
+
+class ResponseCache {
+  private cache: Map<string, CacheEntry> = new Map()
+  private maxEntries: number = 1000
+  private ttl: number = 5 * 60 * 1000 // 5 minutes TTL
+  private hits: number = 0
+  private misses: number = 0
+
+  constructor(maxEntries: number = 1000, ttl: number = 5 * 60 * 1000) {
+    this.maxEntries = maxEntries
+    this.ttl = ttl
+  }
+
+  private generateKey(messages: any[], temperature: number, model?: string): string {
+    const keyData = {
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      temperature,
+      model,
+    }
+    return createHash('sha256').update(JSON.stringify(keyData)).digest('hex')
+  }
+
+  get(messages: any[], temperature: number, model?: string): any | null {
+    const key = this.generateKey(messages, temperature, model)
+    const entry = this.cache.get(key)
+
+    if (!entry) {
+      this.misses++
+      return null
+    }
+
+    // Check TTL
+    if (Date.now() - entry.timestamp > this.ttl) {
+      this.cache.delete(key)
+      this.misses++
+      return null
+    }
+
+    entry.hits++
+    this.hits++
+    return entry.response
+  }
+
+  set(messages: any[], temperature: number, response: any, model?: string): void {
+    const key = this.generateKey(messages, temperature, model)
+
+    // Evict oldest entries if cache is full
+    if (this.cache.size >= this.maxEntries) {
+      let oldestKey: string | null = null
+      let oldestTime = Infinity
+
+      for (const [k, entry] of this.cache.entries()) {
+        if (entry.timestamp < oldestTime) {
+          oldestTime = entry.timestamp
+          oldestKey = k
+        }
+      }
+
+      if (oldestKey) {
+        this.cache.delete(oldestKey)
+      }
+    }
+
+    this.cache.set(key, {
+      response,
+      timestamp: Date.now(),
+      hits: 0,
+    })
+  }
+
+  clear(): void {
+    this.cache.clear()
+    this.hits = 0
+    this.misses = 0
+  }
+
+  getStats() {
+    return {
+      size: this.cache.size,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate: this.hits + this.misses > 0 ? this.hits / (this.hits + this.misses) : 0,
+    }
+  }
+}
+
+// Global cache instance
+const responseCache = new ResponseCache(1000, 5 * 60 * 1000)
+
+export function getCacheStats() {
+  return responseCache.getStats()
+}
+
+export function clearResponseCache() {
+  responseCache.clear()
+}
+
+export function getAllCacheStats() {
+  return {
+    llm: getCacheStats(),
+    systemPrompt: getPromptCacheStats ? getPromptCacheStats() : null,
+    dynamicContext: getDynamicContextCacheStats ? getDynamicContextCacheStats() : null,
+    toolResults: getToolCacheStats ? getToolCacheStats() : null,
+  }
+}
+
+export function clearAllCaches() {
+  clearResponseCache()
+  if (typeof clearPromptCache === 'function') clearPromptCache()
+  if (typeof clearToolCache === 'function') clearToolCache()
+}
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -29,6 +151,7 @@ export async function chatComplete(options: {
   useShadowGrok?: boolean
   enableFallback?: boolean
   sessionId?: string
+  enableCache?: boolean
 }): Promise<{ 
   content: string | null
   finishReason: string | null
@@ -47,9 +170,25 @@ export async function chatComplete(options: {
     totalErrors: number
   }
   _sessionId?: string
+  _cached?: boolean
+  _cacheStats?: any
 }> {
-  const { messages, temperature = 0.7, model, tools, signal, useShadowGrok = false, enableFallback = false, sessionId } = options
+  const { messages, temperature = 0.7, model, tools, signal, useShadowGrok = false, enableFallback = false, sessionId, enableCache = true } = options
   const env = serverEnv()
+
+  // Check cache for non-tool calls (tool calls shouldn't be cached as they may have side effects)
+  if (enableCache && !tools) {
+    const cachedResponse = responseCache.get(messages, temperature, model)
+    if (cachedResponse) {
+      console.log('[LLM] Cache hit - returning cached response')
+      debugLogger.logCacheHit(sessionId || 'unknown', true)
+      return {
+        ...cachedResponse,
+        _cached: true,
+        _cacheStats: responseCache.getStats(),
+      }
+    }
+  }
 
   // Start debug session if not provided
   const effectiveSessionId = sessionId || debugLogger.startSession('unknown');
@@ -231,7 +370,7 @@ export async function chatComplete(options: {
 
       debugLogger.endSession(effectiveSessionId);
 
-      return {
+      const response = {
         content: result.text,
         finishReason: result.finishReason,
         toolCalls: finalToolCalls,
@@ -243,6 +382,13 @@ export async function chatComplete(options: {
         },
         _sessionId: effectiveSessionId,
       }
+
+      // Cache the response if no tools were involved
+      if (enableCache && !tools) {
+        responseCache.set(messages, temperature, response, model)
+      }
+
+      return response
     }
 
     // Return normalized calls even if no validation was needed
@@ -261,13 +407,20 @@ export async function chatComplete(options: {
 
     debugLogger.endSession(effectiveSessionId);
 
-    return {
+    const response = {
       content: result.text,
       finishReason: result.finishReason,
       toolCalls: finalNormalizedCalls,
       _provider: providerUsed,
       _sessionId: effectiveSessionId,
     }
+
+    // Cache the response if no tools were involved
+    if (enableCache && !tools) {
+      responseCache.set(messages, temperature, response, model)
+    }
+
+    return response
   }
 
   // Original logic without fallback
@@ -466,7 +619,7 @@ export async function chatComplete(options: {
 
       debugLogger.endSession(effectiveSessionId);
 
-      return {
+      const response = {
         content: result.text,
         finishReason: result.finishReason,
         toolCalls: finalToolCalls,
@@ -478,6 +631,13 @@ export async function chatComplete(options: {
         },
         _sessionId: effectiveSessionId,
       }
+
+      // Cache the response if no tools were involved
+      if (enableCache && !tools) {
+        responseCache.set(messages, temperature, response, model)
+      }
+
+      return response
     }
 
     // Return normalized calls even if no validation was needed
@@ -496,13 +656,20 @@ export async function chatComplete(options: {
 
     debugLogger.endSession(effectiveSessionId);
 
-    return {
+    const response = {
       content: result.text,
       finishReason: result.finishReason,
       toolCalls: finalNormalizedCalls,
       _provider: providerUsed,
       _sessionId: effectiveSessionId,
     }
+
+    // Cache the response if no tools were involved
+    if (enableCache && !tools) {
+      responseCache.set(messages, temperature, response, model)
+    }
+
+    return response
   } catch (error) {
     console.error('LLM API error:', error)
     throw new Error('Failed to complete chat request')

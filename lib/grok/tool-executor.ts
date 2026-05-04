@@ -37,6 +37,102 @@ import type { DeploymentConfig } from "@/lib/deploy/types";
 const execAsync = promisify(exec);
 
 // ============================================================
+// TOOL RESULT CACHING
+// ============================================================
+
+interface ToolCacheEntry {
+  result: ToolResult;
+  timestamp: number;
+  hits: number;
+}
+
+class ToolResultCache {
+  private cache: Map<string, ToolCacheEntry> = new Map()
+  private maxEntries: number = 500
+  private ttl: number = 2 * 60 * 1000 // 2 minutes TTL for tool results
+  private hits: number = 0
+  private misses: number = 0
+
+  private generateKey(toolName: string, args: Record<string, any>): string {
+    const keyData = { toolName, args }
+    return JSON.stringify(keyData)
+  }
+
+  get(toolName: string, args: Record<string, any>): ToolResult | null {
+    const key = this.generateKey(toolName, args)
+    const entry = this.cache.get(key)
+
+    if (!entry) {
+      this.misses++
+      return null
+    }
+
+    // Check TTL
+    if (Date.now() - entry.timestamp > this.ttl) {
+      this.cache.delete(key)
+      this.misses++
+      return null
+    }
+
+    entry.hits++
+    this.hits++
+    return entry.result
+  }
+
+  set(toolName: string, args: Record<string, any>, result: ToolResult): void {
+    const key = this.generateKey(toolName, args)
+
+    // Evict oldest entries if cache is full
+    if (this.cache.size >= this.maxEntries) {
+      let oldestKey: string | null = null
+      let oldestTime = Infinity
+
+      for (const [k, entry] of this.cache.entries()) {
+        if (entry.timestamp < oldestTime) {
+          oldestTime = entry.timestamp
+          oldestKey = k
+        }
+      }
+
+      if (oldestKey) {
+        this.cache.delete(oldestKey)
+      }
+    }
+
+    this.cache.set(key, {
+      result,
+      timestamp: Date.now(),
+      hits: 0,
+    })
+  }
+
+  clear(): void {
+    this.cache.clear()
+    this.hits = 0
+    this.misses = 0
+  }
+
+  getStats() {
+    return {
+      size: this.cache.size,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate: this.hits + this.misses > 0 ? this.hits / (this.hits + this.misses) : 0,
+    }
+  }
+}
+
+const toolResultCache = new ToolResultCache(500, 2 * 60 * 1000)
+
+export function getToolCacheStats() {
+  return toolResultCache.getStats()
+}
+
+export function clearToolCache() {
+  toolResultCache.clear()
+}
+
+// ============================================================
 // DANGER MODE SETTINGS
 // ============================================================
 
@@ -71,6 +167,7 @@ export interface ToolContext {
   conversationId?: string;
   executionId?: string; // ShadowGrokExecution id
   dryRun?: boolean;
+  enableCache?: boolean;
 }
 
 // ============================================================
@@ -84,9 +181,37 @@ export async function executeTool(
 ): Promise<ToolResult> {
   const startTime = Date.now();
   const tool = getToolByName(toolName);
+  const enableCache = context.enableCache !== false;
 
   if (!tool) {
     return { success: false, error: `Unknown tool: ${toolName}` };
+  }
+
+  // Check cache for read-only tools
+  const readOnlyTools = [
+    "list_implants",
+    "get_implant",
+    "list_subscriptions",
+    "get_subscription",
+    "list_profiles",
+    "get_server_logs",
+    "list_provider_presets",
+    "list_deployments",
+    "get_deployment_status",
+    "analyze_traffic",
+    "troubleshoot",
+    "suggest_masquerade",
+  ];
+
+  if (enableCache && readOnlyTools.includes(toolName)) {
+    const cachedResult = toolResultCache.get(toolName, args);
+    if (cachedResult) {
+      console.log(`[ShadowGrok] Cache hit for tool: ${toolName}`);
+      return {
+        ...cachedResult,
+        _cached: true,
+      };
+    }
   }
 
   console.log(`[ShadowGrok] Executing tool: ${toolName}`, { args, context });
@@ -209,9 +334,14 @@ export async function executeTool(
 
     result.executionTimeMs = Date.now() - startTime;
 
-    // Log to ShadowGrokToolCall if executionId exists
+    // Cache successful read-only tool results
+    if (enableCache && result.success && readOnlyTools.includes(toolName)) {
+      toolResultCache.set(toolName, args, result);
+    }
+
+    // Log to ShadowGrokToolCall if executionId exists (async, don't block)
     if (context.executionId) {
-      await prisma.shadowGrokToolCall.create({
+      prisma.shadowGrokToolCall.create({
         data: {
           executionId: context.executionId,
           toolName,
@@ -221,6 +351,8 @@ export async function executeTool(
           requiresApproval: result.requiresApproval || false,
           executionTimeMs: result.executionTimeMs,
         }
+      }).catch(err => {
+        console.error(`[ShadowGrok] Failed to log tool execution: ${err}`);
       });
     }
 
