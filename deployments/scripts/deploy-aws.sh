@@ -242,12 +242,12 @@ $RSYNC_CMD \
     public/ \
     package*.json \
     Dockerfile \
-    docker-compose.prod.yml \
-    nginx.conf \
+    ../config/docker-compose.prod.yml \
+    ../config/nginx.conf \
     .env.production \
     start-dpanel.sh \
-    ssl/ \
-    implant/dist/ \
+    ../config/ssl/ \
+    ../../implant/dist/ \
     "$AWS_USER@$AWS_SERVER:$DEPLOY_PATH/"
 
 # Setup SSL certificates on server
