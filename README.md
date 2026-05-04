@@ -28,6 +28,7 @@ A Next.js-based administrative panel for managing [Hysteria 2](https://v2.hyster
   - Safety guardrails with approval workflows for high-risk operations
   - OPSEC risk assessment before sensitive actions
   - Multi-phase operation planning with automatic tool chaining
+  - Danger Mode support for development/testing environments
 - **OSINT Module** — comprehensive domain enumeration and intelligence gathering:
   - Certificate Transparency (crt.sh) subdomain discovery
   - Complete DNS enumeration (A, AAAA, MX, NS, TXT, CNAME, SOA)

@@ -1,12 +1,12 @@
 /**
- * Universal AI System Prompt
+ * Universal AI System Prompt (Optimized)
  *
  * Provides:
  *   - UNIVERSAL_BASE   — identity + platform context injected into every role
  *   - Role             — role constants (Chat, ShadowGrok, AgentRunner, …)
  *   - Persona          — operational persona toggle (Stealth, Aggressive, Exfil, Destruction)
- *   - buildSystemPrompt(role, opts) — compose base + role + persona + extra context
- *   - buildDynamicContext(opts)     — async helper that queries live state from the DB
+ *   - buildSystemPrompt(role, opts) — compose base + role + persona + extra context (with caching)
+ *   - buildDynamicContext(opts)     — async helper that queries live state from the DB (with caching)
  *
  * Usage:
  *   import { buildSystemPrompt, buildDynamicContext, Role, Persona } from "@/lib/ai/system-prompt"
@@ -18,6 +18,116 @@
  *   const ctx   = await buildDynamicContext({ operationGoal: "map internal subnets" })
  *   const prompt = buildSystemPrompt(Role.ShadowGrok, { persona: Persona.Stealth, extraContext: ctx })
  */
+
+import { prisma } from "@/lib/db"
+import { createHash } from "crypto"
+
+// ============================================================
+// PROMPT CACHING
+// ============================================================
+
+interface PromptCacheEntry {
+  prompt: string
+  timestamp: number
+  hits: number
+}
+
+class PromptCache {
+  private cache: Map<string, PromptCacheEntry> = new Map()
+  private maxEntries: number = 200
+  private ttl: number = 10 * 60 * 1000 // 10 minutes TTL for prompts
+  private hits: number = 0
+  private misses: number = 0
+
+  private generateKey(role: string, persona?: string, extraContext?: string): string {
+    const keyData = { role, persona, extraContext }
+    return createHash("sha256").update(JSON.stringify(keyData)).digest("hex")
+  }
+
+  get(role: string, persona?: string, extraContext?: string): string | null {
+    const key = this.generateKey(role, persona, extraContext)
+    const entry = this.cache.get(key)
+
+    if (!entry) {
+      this.misses++
+      return null
+    }
+
+    // Check TTL
+    if (Date.now() - entry.timestamp > this.ttl) {
+      this.cache.delete(key)
+      this.misses++
+      return null
+    }
+
+    entry.hits++
+    this.hits++
+    return entry.prompt
+  }
+
+  set(role: string, persona: string | undefined, extraContext: string | undefined, prompt: string): void {
+    const key = this.generateKey(role, persona, extraContext)
+
+    // Evict oldest entries if cache is full
+    if (this.cache.size >= this.maxEntries) {
+      let oldestKey: string | null = null
+      let oldestTime = Infinity
+
+      for (const [k, entry] of this.cache.entries()) {
+        if (entry.timestamp < oldestTime) {
+          oldestTime = entry.timestamp
+          oldestKey = k
+        }
+      }
+
+      if (oldestKey) {
+        this.cache.delete(oldestKey)
+      }
+    }
+
+    this.cache.set(key, {
+      prompt,
+      timestamp: Date.now(),
+      hits: 0,
+    })
+  }
+
+  clear(): void {
+    this.cache.clear()
+    this.hits = 0
+    this.misses = 0
+  }
+
+  getStats() {
+    return {
+      size: this.cache.size,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate: this.hits + this.misses > 0 ? this.hits / (this.hits + this.misses) : 0,
+    }
+  }
+}
+
+const promptCache = new PromptCache(200, 10 * 60 * 1000)
+
+export function getPromptCacheStats() {
+  return promptCache.getStats()
+}
+
+export function clearPromptCache() {
+  promptCache.clear()
+}
+
+export function getDynamicContextCacheStats() {
+  return {
+    size: dynamicContextCache['cache'].size,
+    ttl: dynamicContextCache['ttl'],
+  }
+}
+
+export function clearDynamicContextCache() {
+  dynamicContextCache.clear()
+}
 
 // ---------------------------------------------------------------------------
 // Universal base — injected into EVERY role
@@ -228,7 +338,7 @@ export interface BuildSystemPromptOptions {
 }
 
 /**
- * Build the full system prompt for a given role.
+ * Build the full system prompt for a given role (with caching).
  *
  * Composition order:
  *   UNIVERSAL_BASE → role section → persona modifier (optional) → extraContext (optional)
@@ -236,12 +346,21 @@ export interface BuildSystemPromptOptions {
 export function buildSystemPrompt(
   role: Role,
   opts: BuildSystemPromptOptions | string = {},
+  enableCache: boolean = true,
 ): string {
   // Accept plain string for backward-compat (previous callers passed extraContext directly)
   const options: BuildSystemPromptOptions =
     typeof opts === "string" ? { extraContext: opts } : opts
 
   const { persona, extraContext } = options
+
+  // Check cache
+  if (enableCache) {
+    const cachedPrompt = promptCache.get(role, persona, extraContext)
+    if (cachedPrompt) {
+      return cachedPrompt
+    }
+  }
 
   const parts: string[] = [UNIVERSAL_BASE, ROLE_APPENDAGES[role]]
 
@@ -253,28 +372,81 @@ export function buildSystemPrompt(
     parts.push("", extraContext)
   }
 
-  return parts.join("\n")
+  const prompt = parts.join("\n")
+
+  // Cache the result
+  if (enableCache) {
+    promptCache.set(role, persona, extraContext, prompt)
+  }
+
+  return prompt
 }
 
 // ---------------------------------------------------------------------------
-// buildDynamicContext — async, queries live DB state
+// buildDynamicContext — async, queries live DB state (with caching)
 // ---------------------------------------------------------------------------
+
+// Dynamic context cache with shorter TTL since data changes more frequently
+class DynamicContextCache {
+  private cache: Map<string, { context: string; timestamp: number }> = new Map()
+  private ttl: number = 60 * 1000 // 1 minute TTL for dynamic context
+
+  private generateKey(opts: DynamicContextOptions): string {
+    return createHash("sha256").update(JSON.stringify(opts)).digest("hex")
+  }
+
+  get(opts: DynamicContextOptions): string | null {
+    const key = this.generateKey(opts)
+    const entry = this.cache.get(key)
+
+    if (!entry) return null
+
+    if (Date.now() - entry.timestamp > this.ttl) {
+      this.cache.delete(key)
+      return null
+    }
+
+    return entry.context
+  }
+
+  set(opts: DynamicContextOptions, context: string): void {
+    const key = this.generateKey(opts)
+    this.cache.set(key, { context, timestamp: Date.now() })
+  }
+
+  clear(): void {
+    this.cache.clear()
+  }
+}
+
+const dynamicContextCache = new DynamicContextCache()
 
 export interface DynamicContextOptions {
   /** High-level goal for the current operation (operator-supplied) */
   operationGoal?: string
   /** Summary of tools available in this execution (e.g. ALL_TOOL_NAMES.join(", ")) */
   toolListSummary?: string
+  enableCache?: boolean
 }
 
 /**
  * Query live system state and return a formatted context block to inject into
  * the system prompt.  Safe to call on every agent invocation — uses
- * Promise.allSettled so a DB failure degrades gracefully.
+ * Promise.allSettled so a DB failure degrades gracefully. Now with caching.
  */
 export async function buildDynamicContext(
   opts: DynamicContextOptions = {},
 ): Promise<string> {
+  const { enableCache = true, ...cacheOpts } = opts
+
+  // Check cache
+  if (enableCache) {
+    const cachedContext = dynamicContextCache.get(cacheOpts)
+    if (cachedContext) {
+      return cachedContext
+    }
+  }
+
   // Lazy import to avoid pulling Prisma into client bundles
   const { countNodes, getNodeStats } = await import("@/lib/db/nodes")
   const { countImplants, getImplantStats } = await import("@/lib/db/implants")
@@ -325,5 +497,12 @@ export async function buildDynamicContext(
     lines.push(`- Available tools         : ${opts.toolListSummary}`)
   }
 
-  return lines.join("\n")
+  const context = lines.join("\n")
+
+  // Cache the result
+  if (enableCache) {
+    dynamicContextCache.set(cacheOpts, context)
+  }
+
+  return context
 }

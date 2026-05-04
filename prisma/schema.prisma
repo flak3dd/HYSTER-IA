@@ -756,3 +756,193 @@ model EmailHarvestResult {
   @@index([target])
   @@map("email_harvest_results")
 }
+
+// ---------------------------------------------------------------------------
+// Multi-Agent Swarm Architecture Models
+// ---------------------------------------------------------------------------
+
+model SwarmAgent {
+  id              String   @id @default(cuid())
+  agentId         String   @unique
+  name            String
+  type            String   // recon, evasion, exfiltration, persistence, orchestrator, etc.
+  version         String   @default("1.0.0")
+  llmModel        String
+  capabilities    Json     @default("[]") // AgentCapability[]
+  maxConcurrentTasks Int   @default(5)
+  resourceLimits  Json     @default("{}") // Resource limits
+  securityLevel   String   @default("medium") // low, medium, high, critical
+  priority        Int      @default(5) // 1-10
+  status          String   @default("initializing") // initializing, idle, busy, offline, degraded, error
+  currentTasks    String   @default("[]") // Task IDs
+  completedTasks  Int      @default(0)
+  failedTasks     Int      @default(0)
+  averageResponseTime Int  @default(0)
+  lastHeartbeat   DateTime @default(now())
+  uptime          BigInt   @default(0)
+  reputation      Float    @default(1.0) // 0-1
+  load            Float    @default(0) // 0-1
+  metadata        Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([type, status])
+  @@index([status])
+  @@map("swarm_agents")
+}
+
+model SwarmOperation {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  objectives      Json     @default("[]") // String[]
+  status          String   @default("planning") // planning, negotiating, executing, monitoring, completed, failed
+  priority        String   @default("normal") // critical, high, normal, low
+  tasks           SwarmTask[]
+  assignedAgents  String   @default("[]") // Agent IDs
+  createdAt       DateTime @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdBy       String
+  constraints     Json     @default("{}") // Operation constraints
+  metadata        Json     @default("{}")
+
+  @@index([status, priority])
+  @@index([createdBy])
+  @@map("swarm_operations")
+}
+
+model SwarmTask {
+  id              String   @id @default(cuid())
+  operationId     String
+  operation       SwarmOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  title           String
+  description     String
+  type            String
+  priority        String   @default("normal") // critical, high, normal, low
+  requiredCapabilities String @default("[]") // Capability names
+  assignedAgent   String?
+  status          String   @default("pending") // pending, assigned, in_progress, completed, failed
+  dependencies    String   @default("[]") // Task IDs
+  estimatedDuration Int
+  actualDuration  Int?
+  createdAt       DateTime @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+  result          Json?
+  error           String?
+  metadata        Json     @default("{}")
+
+  @@index([operationId, status])
+  @@index([assignedAgent, status])
+  @@map("swarm_tasks")
+}
+
+model SwarmNegotiation {
+  id              String   @id @default(cuid())
+  operationId     String
+  proposingAgent  String
+  proposalType    String // resource_allocation, approach_selection, timeline_adjustment
+  proposal        Json
+  estimatedCost   Int      @default(0)
+  estimatedBenefit Int     @default(0)
+  confidence      Float    @default(0.8)
+  timestamp       DateTime @default(now())
+  expiresAt       DateTime
+  status          String   @default("pending") // pending, accepted, rejected, countered
+  responses       Json     @default("[]") // NegotiationResponse[]
+  metadata        Json     @default("{}")
+
+  @@index([operationId, status])
+  @@index([proposingAgent])
+  @@map("swarm_negotiations")
+}
+
+model SwarmVoting {
+  id              String   @id @default(cuid())
+  subject         String
+  votingMechanism String   @default("majority") // unanimous, majority, weighted, delegated
+  initiatedBy     String
+  initiatedAt     DateTime @default(now())
+  expiresAt       DateTime
+  options         Json     @default("[]") // Voting options
+  participants    Json     @default("[]") // Participants and votes
+  status          String   @default("ongoing") // ongoing, completed, failed
+  result          String?
+  quorumRequired  Int      @default(1)
+  quorumReached   Boolean  @default(false)
+  metadata        Json     @default("{}")
+
+  @@index([status])
+  @@index([initiatedBy])
+  @@map("swarm_votings")
+}
+
+model SwarmConflictResolution {
+  id              String   @id @default(cuid())
+  conflictType    String
+  conflictingAgents String  @default("[]") // Agent IDs
+  strategy        String // priority, auction, temporal, escalation
+  initiatedBy     String
+  timestamp       DateTime @default(now())
+  resolution      Json?
+  outcome         String   @default("pending") // resolved, escalated, deferred
+  reasoning       String?
+  metadata        Json     @default("{}")
+
+  @@index([outcome])
+  @@map("swarm_conflict_resolutions")
+}
+
+model SwarmKnowledgeBase {
+  id              String   @id @default(cuid())
+  type            String // technique, pattern, lesson, configuration
+  title           String
+  content         Json
+  tags            String   @default("[]") // String[]
+  sourceAgent     String?
+  operationId     String?
+  successRate     Float    @default(0)
+  usageCount      Int      @default(0)
+  lastUsed        DateTime?
+  confidence      Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  metadata        Json     @default("{}")
+
+  @@index([type])
+  @@index([tags])
+  @@map("swarm_knowledge_base")
+}
+
+model SwarmExperience {
+  id              String   @id @default(cuid())
+  agentId         String
+  operationId     String
+  taskType        String
+  approach        String
+  outcome         String   // success, failure, partial
+  duration        Int
+  resourceUsage   Float
+  lessons         String   @default("[]") // String[]
+  timestamp       DateTime @default(now())
+  confidence      Float    @default(0)
+  metadata        Json     @default("{}")
+
+  @@index([agentId, timestamp])
+  @@index([operationId])
+  @@map("swarm_experiences")
+}
+
+model SwarmEvent {
+  id              String   @id @default(cuid())
+  type            String // agent_registered, task_completed, etc.
+  timestamp       DateTime @default(now())
+  source          String
+  data            Json
+  metadata        Json     @default("{}")
+
+  @@index([type, timestamp])
+  @@index([source])
+  @@map("swarm_events")
+}
