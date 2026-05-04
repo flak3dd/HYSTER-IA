@@ -12,6 +12,7 @@ import type {
 } from './types'
 import { ResponseGenerator } from './response-generator'
 import { getProactiveIntelligence } from './proactive-intelligence'
+import { reasoningTraceSystem } from '../ai/reasoning/reasoning-trace'
 
 const prisma = new PrismaClient()
 const responseGenerator = new ResponseGenerator()
@@ -22,6 +23,14 @@ export class WorkflowEngine {
    * Create a new workflow session
    */
   async createSession(input: CreateWorkflowSessionInput): Promise<WorkflowSessionResponse> {
+    // Start reasoning trace for this workflow session
+    const traceSessionId = reasoningTraceSystem.startSession(randomUUID())
+    
+    reasoningTraceSystem.logEvent('reasoning_start', {
+      workflowType: input.workflowType,
+      initialRequest: input.initialRequest,
+    })
+
     // Clear conversation history for new session
     const { IntentAnalyzer } = await import('./intent-analyzer')
     const analyzer = new IntentAnalyzer()
@@ -37,6 +46,7 @@ export class WorkflowEngine {
         context: {
           initialRequest: input.initialRequest,
           startTime: new Date().toISOString(),
+          traceSessionId, // Store trace session ID in context
         },
       },
       include: {
@@ -48,6 +58,11 @@ export class WorkflowEngine {
     const initialStep = await this.createStep(session.id, 0, 'ai_question', {
       content: 'Analyzing your request...',
       aiPrompt: input.initialRequest,
+    })
+
+    reasoningTraceSystem.logEvent('decision_made', {
+      decision: 'create_initial_step',
+      stepId: initialStep.id,
     })
 
     return {
@@ -71,10 +86,24 @@ export class WorkflowEngine {
       throw new Error(`Session ${sessionId} not found`)
     }
 
+    // Resume reasoning trace if session ID exists in context
+    const traceSessionId = (session.context as any)?.traceSessionId
+    if (traceSessionId) {
+      reasoningTraceSystem.logEvent('reasoning_start', {
+        sessionId,
+        workflowType: session.workflowType,
+      })
+    }
+
     // Update session status
     await prisma.workflowSession.update({
       where: { id: sessionId },
       data: { status: 'processing' },
+    })
+
+    reasoningTraceSystem.logEvent('decision_made', {
+      decision: 'update_status',
+      status: 'processing',
     })
 
     try {
@@ -85,6 +114,11 @@ export class WorkflowEngine {
       }
 
       // Analyze the user's intent based on the initial request or response
+      reasoningTraceSystem.logEvent('decision_made', {
+        decision: 'analyze_intent',
+        stepId: currentStep.id,
+      })
+
       const intentAnalysis = await this.analyzeIntent(session, currentStep)
 
       // Get proactive suggestions
@@ -123,6 +157,11 @@ export class WorkflowEngine {
       // Determine the next action based on intent analysis
       if (intentAnalysis.requiresClarification) {
         // Ask clarifying questions
+        reasoningTraceSystem.logEvent('decision_made', {
+          decision: 'request_clarification',
+          confidence: intentAnalysis.confidence,
+        })
+
         await this.createStep(sessionId, session.currentStepOrder + 1, 'ai_question', {
           content: enhancedMessage + '\n\n' + intentAnalysis.clarificationQuestions.join('\n'),
           aiPrompt: 'Please provide more details to help me assist you better.',
@@ -156,6 +195,12 @@ export class WorkflowEngine {
         }
       } else if (intentAnalysis.suggestedFunction) {
         // Execute the suggested backend function
+        reasoningTraceSystem.logEvent('decision_made', {
+          decision: 'execute_function',
+          function: intentAnalysis.suggestedFunction,
+          confidence: intentAnalysis.confidence,
+        })
+
         await this.createStep(sessionId, session.currentStepOrder + 1, 'backend_execution', {
           content: enhancedMessage + `\n\n**Executing:** \`${intentAnalysis.suggestedFunction}\``,
           functionToExecute: intentAnalysis.suggestedFunction,
@@ -190,6 +235,11 @@ export class WorkflowEngine {
         }
       } else {
         // No clear intent, ask for clarification
+        reasoningTraceSystem.logEvent('decision_made', {
+          decision: 'request_clarification_no_intent',
+          confidence: intentAnalysis.confidence,
+        })
+
         await this.createStep(sessionId, session.currentStepOrder + 1, 'ai_question', {
           content: enhancedMessage + '\n\nI\'m not sure what you\'d like me to do. Could you please describe your goal more specifically?',
           aiPrompt: 'Please provide more details about what you want to accomplish.',
@@ -219,6 +269,8 @@ export class WorkflowEngine {
       }
     } catch (error) {
       // Enhanced error handling with recovery suggestions and proactive analysis
+      reasoningTraceSystem.addError(error as Error, { sessionId })
+
       const errorMessage = responseGenerator.generateErrorRecovery(
         error instanceof Error ? error : new Error(String(error)),
         session.context as Record<string, unknown>

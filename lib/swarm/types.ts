@@ -86,6 +86,7 @@ export interface AgentConfig {
   };
   securityLevel: 'low' | 'medium' | 'high' | 'critical';
   priority: number; // 1-10, higher = more important
+  reasoningConfig?: AgentReasoningConfig;
 }
 
 /**
@@ -306,6 +307,7 @@ export interface SwarmIntelligenceConfig {
   learningRate: number; // 0-1
   explorationRate: number; // 0-1
   knowledgeRetentionDays: number;
+  reasoningIntegrationEnabled: boolean;
 }
 
 /**
@@ -401,6 +403,96 @@ export interface ExperienceRecord {
   lessons: string[];
   timestamp: Date;
   confidence: number; // 0-1
+  reasoningTraceId?: string;
+}
+
+/**
+ * Agent Reasoning Configuration
+ */
+export interface AgentReasoningConfig {
+  enableChainOfThought: boolean;
+  enableMetaCognition: boolean;
+  enableReasoningTraces: boolean;
+  enableCollaborativeReasoning: boolean;
+  enableReasoningSharing: boolean;
+  chainOfThoughtConfig: {
+    maxDepth: number;
+    maxBranching: number;
+    confidenceThreshold: number;
+    enableVerification: boolean;
+  };
+  metaCognitionConfig: {
+    enableUncertaintyQuantification: boolean;
+    enableKnowledgeGapDetection: boolean;
+    enableSelfQuestioning: boolean;
+    confidenceThreshold: number;
+  };
+  reasoningTraceConfig: {
+    enableDetailedLogging: boolean;
+    enableTraceSharing: boolean;
+    retentionHours: number;
+  };
+}
+
+/**
+ * Shared Reasoning Trace
+ */
+export interface SharedReasoningTrace {
+  id: string;
+  sourceAgent: string;
+  operationId: string;
+  taskId: string;
+  reasoningType: 'chain_of_thought' | 'meta_cognition' | 'combined';
+  content: any;
+  confidence: number;
+  outcome: 'success' | 'failure' | 'partial';
+  timestamp: Date;
+  sharedWith: string[];
+  usageCount: number;
+  effectiveness: number; // 0-1
+}
+
+/**
+ * Collaborative Reasoning Session
+ */
+export interface CollaborativeReasoningSession {
+  id: string;
+  operationId: string;
+  initiatingAgent: string;
+  participatingAgents: string[];
+  objective: string;
+  status: 'active' | 'completed' | 'failed';
+  reasoningSteps: CollaborativeReasoningStep[];
+  consensus: any;
+  timestamp: Date;
+  completedAt?: Date;
+}
+
+/**
+ * Collaborative Reasoning Step
+ */
+export interface CollaborativeReasoningStep {
+  id: string;
+  sessionId: string;
+  agentId: string;
+  stepType: 'proposal' | 'evaluation' | 'refinement' | 'consensus';
+  content: any;
+  confidence: number;
+  timestamp: Date;
+  responses: CollaborativeReasoningResponse[];
+}
+
+/**
+ * Collaborative Reasoning Response
+ */
+export interface CollaborativeReasoningResponse {
+  id: string;
+  stepId: string;
+  fromAgent: string;
+  response: 'agree' | 'disagree' | 'propose_alternative';
+  reasoning: string;
+  confidence: number;
+  timestamp: Date;
 }
 
 /**
@@ -427,7 +519,11 @@ export type SwarmEventType =
   | 'voting_initiated'
   | 'voting_completed'
   | 'knowledge_added'
-  | 'experience_recorded';
+  | 'experience_recorded'
+  | 'reasoning_trace_shared'
+  | 'collaborative_reasoning_started'
+  | 'collaborative_reasoning_completed'
+  | 'reasoning_pattern_discovered';
 
 /**
  * Swarm Event

@@ -17,6 +17,8 @@ import { AgentRegistry } from '../agent-registry';
 import { MessageBus } from '../communication/message-bus';
 import { MessageFactory } from '../communication/message-builder';
 import { logger } from '../../logger';
+import { cotEngine } from '../../ai/reasoning/chain-of-thought';
+import { metaCognitionEngine } from '../../ai/reasoning/meta-cognition';
 
 export class NegotiationEngine extends EventEmitter {
   private registry: AgentRegistry;
@@ -25,8 +27,9 @@ export class NegotiationEngine extends EventEmitter {
   private activeVotings: Map<string, VotingRecord>;
   private conflictResolutions: Map<string, ConflictResolution>;
   private negotiationTimeout: number;
+  private enableReasoning: boolean;
 
-  constructor(registry: AgentRegistry, messageBus: MessageBus, negotiationTimeout: number = 60000) {
+  constructor(registry: AgentRegistry, messageBus: MessageBus, negotiationTimeout: number = 60000, enableReasoning: boolean = true) {
     super();
     this.registry = registry;
     this.messageBus = messageBus;
@@ -34,6 +37,7 @@ export class NegotiationEngine extends EventEmitter {
     this.activeVotings = new Map();
     this.conflictResolutions = new Map();
     this.negotiationTimeout = negotiationTimeout;
+    this.enableReasoning = enableReasoning;
   }
 
   /**
@@ -58,6 +62,12 @@ export class NegotiationEngine extends EventEmitter {
   ): Promise<string> {
     const negotiationId = uuidv4();
     
+    // Use reasoning to estimate confidence if enabled
+    let confidence = 0.8;
+    if (this.enableReasoning) {
+      confidence = await this.estimateProposalConfidence(proposal, proposalType, targetAgents);
+    }
+    
     const negotiation: NegotiationProposal = {
       id: negotiationId,
       operationId,
@@ -66,7 +76,7 @@ export class NegotiationEngine extends EventEmitter {
       proposal,
       estimatedCost: this.estimateCost(proposal),
       estimatedBenefit: this.estimateBenefit(proposal),
-      confidence: 0.8,
+      confidence,
       timestamp: new Date(),
       expiresAt: new Date(Date.now() + this.negotiationTimeout),
       status: 'pending',
@@ -87,7 +97,7 @@ export class NegotiationEngine extends EventEmitter {
       await this.messageBus.sendMessage(message);
     }
 
-    logger.info(`Negotiation ${negotiationId} initiated by ${proposingAgent}`);
+    logger.info(`Negotiation ${negotiationId} initiated by ${proposingAgent} with confidence ${confidence}`);
     
     // Set timeout for negotiation
     setTimeout(() => {
@@ -125,19 +135,24 @@ export class NegotiationEngine extends EventEmitter {
       return;
     }
 
-    // Analyze responses
-    const acceptCount = negotiation.responses.filter(r => r.response === 'accept').length;
-    const totalCount = negotiation.responses.length;
-
-    if (acceptCount === totalCount) {
-      negotiation.status = 'accepted';
-      logger.info(`Negotiation ${negotiationId} accepted unanimously`);
-    } else if (acceptCount > totalCount / 2) {
-      negotiation.status = 'accepted';
-      logger.info(`Negotiation ${negotiationId} accepted by majority`);
+    // Use reasoning for decision making if enabled
+    if (this.enableReasoning) {
+      await this.reasoningBasedConclusion(negotiation);
     } else {
-      negotiation.status = 'rejected';
-      logger.info(`Negotiation ${negotiationId} rejected`);
+      // Standard conclusion logic
+      const acceptCount = negotiation.responses.filter(r => r.response === 'accept').length;
+      const totalCount = negotiation.responses.length;
+
+      if (acceptCount === totalCount) {
+        negotiation.status = 'accepted';
+        logger.info(`Negotiation ${negotiationId} accepted unanimously`);
+      } else if (acceptCount > totalCount / 2) {
+        negotiation.status = 'accepted';
+        logger.info(`Negotiation ${negotiationId} accepted by majority`);
+      } else {
+        negotiation.status = 'rejected';
+        logger.info(`Negotiation ${negotiationId} rejected`);
+      }
     }
 
     this.emit('negotiation_completed', { negotiation });
@@ -451,6 +466,112 @@ export class NegotiationEngine extends EventEmitter {
   }
 
   // Helper methods
+
+  /**
+   * Estimate proposal confidence using meta-cognition
+   */
+  private async estimateProposalConfidence(
+    proposal: any,
+    proposalType: string,
+    targetAgents: string[]
+  ): Promise<number> {
+    try {
+      const assessment = await metaCognitionEngine.assessUncertainty(
+        JSON.stringify({
+          proposal,
+          proposalType,
+          targetAgents,
+          targetAgentCount: targetAgents.length,
+        }),
+        { context: 'proposal_evaluation' }
+      );
+
+      return assessment.confidence;
+    } catch (error) {
+      logger.error('Error estimating proposal confidence, using default', error);
+      return 0.8;
+    }
+  }
+
+  /**
+   * Reasoning-based negotiation conclusion
+   */
+  private async reasoningBasedConclusion(negotiation: NegotiationProposal): Promise<void> {
+    try {
+      // Use chain-of-thought to analyze responses and make decision
+      const cotResult = await cotEngine.reason(
+        JSON.stringify({
+          proposal: negotiation.proposal,
+          proposalType: negotiation.proposalType,
+          responses: negotiation.responses,
+          estimatedCost: negotiation.estimatedCost,
+          estimatedBenefit: negotiation.estimatedBenefit,
+          initialConfidence: negotiation.confidence,
+        }),
+        { context: 'negotiation_conclusion', negotiationId: negotiation.id },
+        this.getNegotiationTools()
+      );
+
+      // Extract decision from reasoning
+      const decision = this.extractDecisionFromReasoning(cotResult);
+      negotiation.status = decision;
+
+      logger.info(`Negotiation ${negotiation.id} concluded with reasoning-based decision: ${decision}`);
+    } catch (error) {
+      logger.error('Reasoning-based conclusion failed, falling back to standard logic', error);
+      
+      // Fallback to standard logic
+      const acceptCount = negotiation.responses.filter(r => r.response === 'accept').length;
+      const totalCount = negotiation.responses.length;
+
+      if (acceptCount === totalCount) {
+        negotiation.status = 'accepted';
+      } else if (acceptCount > totalCount / 2) {
+        negotiation.status = 'accepted';
+      } else {
+        negotiation.status = 'rejected';
+      }
+    }
+  }
+
+  /**
+   * Extract decision from chain-of-thought reasoning
+   */
+  private extractDecisionFromReasoning(cotResult: any): 'accepted' | 'rejected' {
+    const reasoningText = cotResult.finalAnswer.toLowerCase();
+    
+    if (reasoningText.includes('accept') || reasoningText.includes('approve') || reasoningText.includes('agree')) {
+      return 'accepted';
+    } else if (reasoningText.includes('reject') || reasoningText.includes('deny') || reasoningText.includes('disagree')) {
+      return 'rejected';
+    }
+    
+    // Default to accept if unclear
+    return 'accepted';
+  }
+
+  /**
+   * Get negotiation tools for chain-of-thought reasoning
+   */
+  private getNegotiationTools(): any[] {
+    return [
+      {
+        name: 'analyze_responses',
+        description: 'Analyze negotiation responses from agents',
+        input_schema: { type: 'object' },
+      },
+      {
+        name: 'evaluate_cost_benefit',
+        description: 'Evaluate cost vs benefit of proposal',
+        input_schema: { type: 'object' },
+      },
+      {
+        name: 'assess_agent_reputation',
+        description: 'Assess reputation of responding agents',
+        input_schema: { type: 'object' },
+      },
+    ];
+  }
 
   private determineTargetAgents(negotiation: NegotiationProposal): string[] {
     // Would determine target agents based on operation and proposal type

@@ -13,12 +13,15 @@ import {
   AgentState, 
   AgentType,
   SwarmHealth,
-  SwarmEvent 
+  SwarmEvent,
+  CollaborativeReasoningSession
 } from '../types';
 import { AgentRegistry } from '../agent-registry';
 import { MessageBus } from '../communication/message-bus';
 import { MessageFactory } from '../communication/message-builder';
 import { logger } from '../../logger';
+import { cotEngine } from '../../ai/reasoning/chain-of-thought';
+import { metaCognitionEngine } from '../../ai/reasoning/meta-cognition';
 
 export class SwarmCoordinator extends EventEmitter {
   private registry: AgentRegistry;
@@ -26,14 +29,18 @@ export class SwarmCoordinator extends EventEmitter {
   private operations: Map<string, SwarmOperation>;
   private activeTasks: Map<string, SwarmTask>;
   private isRunning: boolean;
+  private enableReasoning: boolean;
+  private collaborativeReasoningSessions: Map<string, CollaborativeReasoningSession>;
 
-  constructor(registry: AgentRegistry, messageBus: MessageBus) {
+  constructor(registry: AgentRegistry, messageBus: MessageBus, enableReasoning: boolean = true) {
     super();
     this.registry = registry;
     this.messageBus = messageBus;
     this.operations = new Map();
     this.activeTasks = new Map();
     this.isRunning = false;
+    this.enableReasoning = enableReasoning;
+    this.collaborativeReasoningSessions = new Map();
   }
 
   /**
@@ -99,8 +106,13 @@ export class SwarmCoordinator extends EventEmitter {
     logger.info(`Planning operation ${operationId}`);
     operation.status = 'planning';
 
-    // Decompose objectives into tasks using LLM
-    const tasks = await this.decomposeObjectives(operation.objectives, operation.constraints);
+    // Use reasoning for task decomposition if enabled
+    let tasks: SwarmTask[];
+    if (this.enableReasoning) {
+      tasks = await this.reasoningBasedDecomposition(operation);
+    } else {
+      tasks = await this.decomposeObjectives(operation.objectives, operation.constraints);
+    }
     
     // Resolve task dependencies
     await this.resolveDependencies(tasks);
@@ -154,6 +166,135 @@ export class SwarmCoordinator extends EventEmitter {
   }
 
   /**
+   * Reasoning-based task decomposition using Chain-of-Thought
+   */
+  private async reasoningBasedDecomposition(operation: SwarmOperation): Promise<SwarmTask[]> {
+    const operationContext = {
+      name: operation.name,
+      description: operation.description,
+      objectives: operation.objectives,
+      constraints: operation.constraints,
+      riskTolerance: operation.constraints.riskTolerance,
+    };
+
+    try {
+      // Use chain-of-thought for systematic decomposition
+      const cotResult = await cotEngine.reason(
+        JSON.stringify(operationContext),
+        { 
+          context: 'operation_decomposition',
+          operationId: operation.id,
+        },
+        this.getCoordinatorTools()
+      );
+
+      // Extract tasks from reasoning
+      const tasks = this.extractTasksFromReasoning(cotResult, operation);
+      
+      logger.info(`Reasoning-based decomposition completed for operation ${operation.id}`);
+      return tasks;
+    } catch (error) {
+      logger.error(`Reasoning-based decomposition failed for operation ${operation.id}, falling back to standard decomposition`, error);
+      return this.decomposeObjectives(operation.objectives, operation.constraints);
+    }
+  }
+
+  /**
+   * Extract tasks from chain-of-thought reasoning
+   */
+  private extractTasksFromReasoning(cotResult: any, operation: SwarmOperation): SwarmTask[] {
+    const tasks: SwarmTask[] = [];
+    
+    // Parse the reasoning result to extract structured tasks
+    // This is a simplified implementation - would use more sophisticated parsing in production
+    try {
+      const reasoningText = cotResult.finalAnswer;
+      const taskMatches = reasoningText.match(/Task \d+: ([^\n]+)/g) || [];
+      
+      for (let i = 0; i < taskMatches.length; i++) {
+        const match = taskMatches[i];
+        const description = match.replace(/Task \d+: /, '');
+        
+        const task: SwarmTask = {
+          id: uuidv4(),
+          operationId: operation.id,
+          title: `Task ${i + 1}`,
+          description,
+          type: this.inferTaskType(description),
+          priority: operation.priority,
+          requiredCapabilities: this.inferRequiredCapabilities(description),
+          status: 'pending',
+          dependencies: [],
+          estimatedDuration: this.estimateTaskDuration(description),
+          createdAt: new Date(),
+        };
+        
+        tasks.push(task);
+      }
+    } catch (error) {
+      logger.error('Error extracting tasks from reasoning', error);
+    }
+    
+    return tasks;
+  }
+
+  /**
+   * Infer task type from description
+   */
+  private inferTaskType(description: string): string {
+    const lowerDesc = description.toLowerCase();
+    
+    if (lowerDesc.includes('recon') || lowerDesc.includes('scan') || lowerDesc.includes('gather')) {
+      return 'reconnaissance';
+    } else if (lowerDesc.includes('evade') || lowerDesc.includes('stealth') || lowerDesc.includes('hide')) {
+      return 'evasion';
+    } else if (lowerDesc.includes('exfil') || lowerDesc.includes('extract') || lowerDesc.includes('transfer')) {
+      return 'exfiltration';
+    } else if (lowerDesc.includes('persist') || lowerDesc.includes('maintain') || lowerDesc.includes('backup')) {
+      return 'persistence';
+    } else if (lowerDesc.includes('move') || lowerDesc.includes('lateral') || lowerDesc.includes('traverse')) {
+      return 'lateral_movement';
+    } else {
+      return 'general';
+    }
+  }
+
+  /**
+   * Infer required capabilities from description
+   */
+  private inferRequiredCapabilities(description: string): string[] {
+    const capabilities: string[] = [];
+    const lowerDesc = description.toLowerCase();
+    
+    if (lowerDesc.includes('network') || lowerDesc.includes('scan')) {
+      capabilities.push('network_scanning');
+    }
+    if (lowerDesc.includes('vulnerability')) {
+      capabilities.push('vulnerability_assessment');
+    }
+    if (lowerDesc.includes('osint')) {
+      capabilities.push('osint_gathering');
+    }
+    if (lowerDesc.includes('encrypt')) {
+      capabilities.push('encryption');
+    }
+    if (lowerDesc.includes('covert')) {
+      capabilities.push('covert_channels');
+    }
+    
+    return capabilities.length > 0 ? capabilities : ['general'];
+  }
+
+  /**
+   * Estimate task duration based on description
+   */
+  private estimateTaskDuration(description: string): number {
+    const complexity = description.length;
+    // Simple heuristic: 1 second per 10 characters, minimum 30 seconds
+    return Math.max(30000, complexity * 1000);
+  }
+
+  /**
    * Resolve task dependencies
    */
   private async resolveDependencies(tasks: SwarmTask[]): Promise<void> {
@@ -170,7 +311,10 @@ export class SwarmCoordinator extends EventEmitter {
   private async assignAgentsToTasks(operation: SwarmOperation): Promise<void> {
     for (const task of operation.tasks) {
       if (task.status === 'pending') {
-        const agent = this.selectAgentForTask(task, operation.constraints);
+        const agent = this.enableReasoning 
+          ? await this.reasoningBasedAgentSelection(task, operation)
+          : this.selectAgentForTask(task, operation.constraints);
+        
         if (agent) {
           task.assignedAgent = agent.config.id;
           task.status = 'assigned';
@@ -323,6 +467,161 @@ export class SwarmCoordinator extends EventEmitter {
     });
 
     return agents.length > 0 ? agents[0] : null;
+  }
+
+  /**
+   * Reasoning-based agent selection using meta-cognition
+   */
+  private async reasoningBasedAgentSelection(task: SwarmTask, operation: SwarmOperation): Promise<AgentState | null> {
+    const availableAgents = this.getAvailableAgents(task, operation.constraints);
+    
+    if (availableAgents.length === 0) {
+      return null;
+    }
+
+    // If only one agent available, return it
+    if (availableAgents.length === 1) {
+      return availableAgents[0];
+    }
+
+    // Use meta-cognition to assess uncertainty in agent selection
+    try {
+      const assessment = await metaCognitionEngine.assessUncertainty(
+        JSON.stringify({
+          task: task.description,
+          taskType: task.type,
+          requiredCapabilities: task.requiredCapabilities,
+          availableAgents: availableAgents.map(a => ({
+            id: a.config.id,
+            type: a.config.type,
+            reputation: a.reputation,
+            load: a.load,
+            capabilities: a.config.capabilities.map(c => c.name),
+          })),
+        }),
+        { context: 'agent_selection', taskId: task.id }
+      );
+
+      // If high uncertainty, use chain-of-thought for deeper analysis
+      if (assessment.confidence < 0.7) {
+        const cotResult = await cotEngine.reason(
+          JSON.stringify({
+            task: task.description,
+            agents: availableAgents.map(a => ({
+              id: a.config.id,
+              type: a.config.type,
+              reputation: a.reputation,
+              load: a.load,
+              capabilities: a.config.capabilities,
+            })),
+          }),
+          { context: 'agent_selection', taskId: task.id },
+          this.getCoordinatorTools()
+        );
+
+        // Parse reasoning to select best agent
+        const selectedAgentId = this.extractAgentIdFromReasoning(cotResult, availableAgents);
+        const selectedAgent = availableAgents.find(a => a.config.id === selectedAgentId);
+        return selectedAgent || availableAgents[0];
+      }
+
+      // Otherwise, use standard selection with confidence weighting
+      return this.selectAgentWithConfidence(availableAgents, assessment.confidence);
+    } catch (error) {
+      logger.error('Reasoning-based agent selection failed, falling back to standard selection', error);
+      return this.selectAgentForTask(task, operation.constraints);
+    }
+  }
+
+  /**
+   * Get available agents for a task
+   */
+  private getAvailableAgents(task: SwarmTask, constraints: any): AgentState[] {
+    const requiredCapabilities = task.requiredCapabilities || [];
+    const allowedTypes = constraints.allowedAgentTypes || [];
+
+    let agents = this.registry.getAllAgents();
+
+    // Filter by allowed types
+    if (allowedTypes.length > 0) {
+      agents = agents.filter(a => allowedTypes.includes(a.config.type));
+    }
+
+    // Filter by capabilities
+    if (requiredCapabilities.length > 0) {
+      agents = agents.filter(a => {
+        const agentCapabilities = new Set(a.config.capabilities.map(c => c.name));
+        return requiredCapabilities.every(cap => agentCapabilities.has(cap));
+      });
+    }
+
+    // Filter by status
+    agents = agents.filter(a => a.status === 'idle' || a.status === 'busy');
+
+    return agents;
+  }
+
+  /**
+   * Select agent with confidence weighting
+   */
+  private selectAgentWithConfidence(agents: AgentState[], confidence: number): AgentState {
+    // Sort by reputation and load, but add randomness based on confidence
+    const sortedAgents = [...agents].sort((a, b) => {
+      if (b.reputation !== a.reputation) {
+        return b.reputation - a.reputation;
+      }
+      return a.load - b.load;
+    });
+
+    // If confidence is high, pick the best agent
+    if (confidence > 0.8) {
+      return sortedAgents[0];
+    }
+
+    // If confidence is moderate, pick from top 3
+    const topN = Math.min(3, sortedAgents.length);
+    const selectedIndex = Math.floor(Math.random() * topN);
+    return sortedAgents[selectedIndex];
+  }
+
+  /**
+   * Extract agent ID from reasoning
+   */
+  private extractAgentIdFromReasoning(cotResult: any, availableAgents: AgentState[]): string {
+    // Simple implementation - extract agent ID from reasoning text
+    const reasoningText = cotResult.finalAnswer.toLowerCase();
+    
+    for (const agent of availableAgents) {
+      if (reasoningText.includes(agent.config.id.toLowerCase())) {
+        return agent.config.id;
+      }
+    }
+
+    // Default to first agent if no match found
+    return availableAgents[0].config.id;
+  }
+
+  /**
+   * Get coordinator tools for chain-of-thought reasoning
+   */
+  private getCoordinatorTools(): any[] {
+    return [
+      {
+        name: 'get_agent_states',
+        description: 'Get current states of all agents',
+        input_schema: { type: 'object' },
+      },
+      {
+        name: 'get_agent_capabilities',
+        description: 'Get capabilities of specific agents',
+        input_schema: { type: 'object' },
+      },
+      {
+        name: 'analyze_task_complexity',
+        description: 'Analyze the complexity of a task',
+        input_schema: { type: 'object' },
+      },
+    ];
   }
 
   /**
