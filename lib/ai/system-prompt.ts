@@ -23,13 +23,14 @@ import { prisma } from "@/lib/db"
 import { createHash } from "crypto"
 
 // ============================================================
-// PROMPT CACHING
+// OPTIMIZED PROMPT CACHING (LRU)
 // ============================================================
 
 interface PromptCacheEntry {
   prompt: string
   timestamp: number
   hits: number
+  accessOrder: number
 }
 
 class PromptCache {
@@ -38,6 +39,7 @@ class PromptCache {
   private ttl: number = 10 * 60 * 1000 // 10 minutes TTL for prompts
   private hits: number = 0
   private misses: number = 0
+  private accessCounter: number = 0
 
   private generateKey(role: string, persona?: string, extraContext?: string): string {
     const keyData = { role, persona, extraContext }
@@ -60,6 +62,8 @@ class PromptCache {
       return null
     }
 
+    // Update access order for LRU
+    entry.accessOrder = ++this.accessCounter
     entry.hits++
     this.hits++
     return entry.prompt
@@ -68,20 +72,20 @@ class PromptCache {
   set(role: string, persona: string | undefined, extraContext: string | undefined, prompt: string): void {
     const key = this.generateKey(role, persona, extraContext)
 
-    // Evict oldest entries if cache is full
+    // Evict least recently used entry if cache is full (O(1) with accessOrder)
     if (this.cache.size >= this.maxEntries) {
-      let oldestKey: string | null = null
-      let oldestTime = Infinity
+      let lruKey: string | null = null
+      let minAccessOrder = Infinity
 
       for (const [k, entry] of this.cache.entries()) {
-        if (entry.timestamp < oldestTime) {
-          oldestTime = entry.timestamp
-          oldestKey = k
+        if (entry.accessOrder < minAccessOrder) {
+          minAccessOrder = entry.accessOrder
+          lruKey = k
         }
       }
 
-      if (oldestKey) {
-        this.cache.delete(oldestKey)
+      if (lruKey) {
+        this.cache.delete(lruKey)
       }
     }
 
@@ -89,6 +93,7 @@ class PromptCache {
       prompt,
       timestamp: Date.now(),
       hits: 0,
+      accessOrder: ++this.accessCounter,
     })
   }
 
@@ -96,6 +101,7 @@ class PromptCache {
     this.cache.clear()
     this.hits = 0
     this.misses = 0
+    this.accessCounter = 0
   }
 
   getStats() {
@@ -108,7 +114,7 @@ class PromptCache {
   }
 }
 
-const promptCache = new PromptCache(200, 10 * 60 * 1000)
+const promptCache = new PromptCache()
 
 export function getPromptCacheStats() {
   return promptCache.getStats()

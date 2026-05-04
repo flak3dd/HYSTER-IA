@@ -37,13 +37,14 @@ import type { DeploymentConfig } from "@/lib/deploy/types";
 const execAsync = promisify(exec);
 
 // ============================================================
-// TOOL RESULT CACHING
+// OPTIMIZED TOOL RESULT CACHING (LRU)
 // ============================================================
 
 interface ToolCacheEntry {
   result: ToolResult;
   timestamp: number;
   hits: number;
+  accessOrder: number;
 }
 
 class ToolResultCache {
@@ -52,6 +53,7 @@ class ToolResultCache {
   private ttl: number = 2 * 60 * 1000 // 2 minutes TTL for tool results
   private hits: number = 0
   private misses: number = 0
+  private accessCounter: number = 0
 
   private generateKey(toolName: string, args: Record<string, any>): string {
     const keyData = { toolName, args }
@@ -74,6 +76,8 @@ class ToolResultCache {
       return null
     }
 
+    // Update access order for LRU
+    entry.accessOrder = ++this.accessCounter
     entry.hits++
     this.hits++
     return entry.result
@@ -82,20 +86,20 @@ class ToolResultCache {
   set(toolName: string, args: Record<string, any>, result: ToolResult): void {
     const key = this.generateKey(toolName, args)
 
-    // Evict oldest entries if cache is full
+    // Evict least recently used entry if cache is full (O(1) with accessOrder)
     if (this.cache.size >= this.maxEntries) {
-      let oldestKey: string | null = null
-      let oldestTime = Infinity
+      let lruKey: string | null = null
+      let minAccessOrder = Infinity
 
       for (const [k, entry] of this.cache.entries()) {
-        if (entry.timestamp < oldestTime) {
-          oldestTime = entry.timestamp
-          oldestKey = k
+        if (entry.accessOrder < minAccessOrder) {
+          minAccessOrder = entry.accessOrder
+          lruKey = k
         }
       }
 
-      if (oldestKey) {
-        this.cache.delete(oldestKey)
+      if (lruKey) {
+        this.cache.delete(lruKey)
       }
     }
 
@@ -103,6 +107,7 @@ class ToolResultCache {
       result,
       timestamp: Date.now(),
       hits: 0,
+      accessOrder: ++this.accessCounter,
     })
   }
 
@@ -110,6 +115,7 @@ class ToolResultCache {
     this.cache.clear()
     this.hits = 0
     this.misses = 0
+    this.accessCounter = 0
   }
 
   getStats() {
@@ -122,7 +128,7 @@ class ToolResultCache {
   }
 }
 
-const toolResultCache = new ToolResultCache(500, 2 * 60 * 1000)
+const toolResultCache = new ToolResultCache()
 
 export function getToolCacheStats() {
   return toolResultCache.getStats()
