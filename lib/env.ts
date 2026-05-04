@@ -57,6 +57,9 @@ const ServerEnvSchema = z.object({
   SHADOWGROK_TOOL_CALLING_AGGRESSIVENESS: z.enum(["conservative", "balanced", "aggressive"]).default("balanced"),
   SHADOWGROK_ENABLE_STREAMING_BY_DEFAULT: z.coerce.boolean().default(true),
 
+  // AI Debug Logging
+  AI_DEBUG: z.coerce.boolean().default(false),
+
   // Azure OpenAI Configuration (highest priority when set)
   AZURE_OPENAI_ENDPOINT: z.string().url().or(z.literal("")).optional(),       // e.g. https://your-resource.openai.azure.com/
   AZURE_OPENAI_API_KEY: z.string().min(1).or(z.literal("")).optional(),

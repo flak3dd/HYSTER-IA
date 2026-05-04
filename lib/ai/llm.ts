@@ -3,18 +3,36 @@ import { generateText } from 'ai'
 import { serverEnv } from '@/lib/env'
 import { validateToolCalls } from './tool-validator'
 import { executeWithFallback } from './provider-fallback'
-import { debugLogger } from './debug-logger'
 import { normalizeToolCalls } from './tool-normalizer'
 import { createHash } from 'crypto'
 
 // ============================================================
-// RESPONSE CACHING LAYER
+// OPTIMIZED LOGGING UTILITY
+// ============================================================
+
+const AI_DEBUG = process.env.AI_DEBUG === 'true' || serverEnv().AI_DEBUG
+
+function aiLog(message: string, ...args: any[]) {
+  if (AI_DEBUG) {
+    console.log(`[AI] ${message}`, ...args)
+  }
+}
+
+function aiWarn(message: string, ...args: any[]) {
+  if (AI_DEBUG) {
+    console.warn(`[AI] ${message}`, ...args)
+  }
+}
+
+// ============================================================
+// OPTIMIZED RESPONSE CACHING LAYER (LRU)
 // ============================================================
 
 interface CacheEntry {
   response: any
   timestamp: number
   hits: number
+  accessOrder: number
 }
 
 class ResponseCache {
@@ -23,6 +41,7 @@ class ResponseCache {
   private ttl: number = 5 * 60 * 1000 // 5 minutes TTL
   private hits: number = 0
   private misses: number = 0
+  private accessCounter: number = 0
 
   constructor(maxEntries: number = 1000, ttl: number = 5 * 60 * 1000) {
     this.maxEntries = maxEntries
@@ -54,6 +73,8 @@ class ResponseCache {
       return null
     }
 
+    // Update access order for LRU
+    entry.accessOrder = ++this.accessCounter
     entry.hits++
     this.hits++
     return entry.response
@@ -62,20 +83,20 @@ class ResponseCache {
   set(messages: any[], temperature: number, response: any, model?: string): void {
     const key = this.generateKey(messages, temperature, model)
 
-    // Evict oldest entries if cache is full
+    // Evict least recently used entry if cache is full (O(1) with accessOrder)
     if (this.cache.size >= this.maxEntries) {
-      let oldestKey: string | null = null
-      let oldestTime = Infinity
+      let lruKey: string | null = null
+      let minAccessOrder = Infinity
 
       for (const [k, entry] of this.cache.entries()) {
-        if (entry.timestamp < oldestTime) {
-          oldestTime = entry.timestamp
-          oldestKey = k
+        if (entry.accessOrder < minAccessOrder) {
+          minAccessOrder = entry.accessOrder
+          lruKey = k
         }
       }
 
-      if (oldestKey) {
-        this.cache.delete(oldestKey)
+      if (lruKey) {
+        this.cache.delete(lruKey)
       }
     }
 
@@ -83,6 +104,7 @@ class ResponseCache {
       response,
       timestamp: Date.now(),
       hits: 0,
+      accessOrder: ++this.accessCounter,
     })
   }
 
@@ -90,6 +112,7 @@ class ResponseCache {
     this.cache.clear()
     this.hits = 0
     this.misses = 0
+    this.accessCounter = 0
   }
 
   getStats() {
@@ -105,6 +128,89 @@ class ResponseCache {
 // Global cache instance
 const responseCache = new ResponseCache(1000, 5 * 60 * 1000)
 
+// ============================================================
+// TOOL MAPPING HELPER (extracted to avoid duplication)
+// ============================================================
+
+interface ToolCallMappingResult {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
+  _metadata?: {
+    originalToolName: string
+    mappingSource: string
+  }
+}
+
+function mapToolCalls(toolCalls: any[], tools?: any[]): ToolCallMappingResult[] {
+  return toolCalls.map(tc => {
+    let toolName = tc.toolName
+    let mappingSource = 'original'
+
+    // Check if the tool name is a numeric index (xAI Grok behavior)
+    if (/^\d+$/.test(toolName) && tools && Array.isArray(tools)) {
+      const index = parseInt(toolName, 10)
+      aiLog(`Detected numeric tool index: ${index}, mapping to tool name...`)
+
+      if (index >= 0 && index < tools.length) {
+        const toolDef = tools[index]
+        if (toolDef && typeof toolDef === 'object') {
+          if (toolDef.type === 'function' && toolDef.function?.name) {
+            toolName = toolDef.function.name
+            mappingSource = `numeric_index_${index}`
+          } else if (toolDef.name) {
+            toolName = toolDef.name
+            mappingSource = `numeric_index_${index}`
+          }
+        }
+      }
+    }
+
+    // Additional validation: ensure the mapped tool name exists in our known tools
+    if (tools && Array.isArray(tools)) {
+      const knownToolNames = tools
+        .map(t => t.type === 'function' ? t.function?.name : t.name)
+        .filter(Boolean)
+
+      if (!knownToolNames.includes(toolName)) {
+        aiWarn(`Mapped tool name "${toolName}" not found in known tools:`, knownToolNames)
+
+        // Try to find a similar tool name using fuzzy matching
+        const similarTool = knownToolNames.find(name =>
+          name.toLowerCase().includes(toolName.toLowerCase()) ||
+          toolName.toLowerCase().includes(name.toLowerCase())
+        )
+
+        if (similarTool) {
+          aiLog(`Found similar tool name: "${similarTool}", using instead of "${toolName}"`)
+          toolName = similarTool
+          mappingSource = `${mappingSource}_fuzzy_match`
+        }
+      }
+    }
+
+    const mappedCall: ToolCallMappingResult = {
+      id: tc.toolCallId,
+      type: 'function',
+      function: {
+        name: toolName,
+        arguments: JSON.stringify(tc.input || {}),
+      },
+      _metadata: {
+        originalToolName: tc.toolName,
+        mappingSource,
+      }
+    }
+
+    aiLog(`Mapped tool call: ${tc.toolName} -> ${toolName} (${mappingSource})`)
+
+    return mappedCall
+  })
+}
+
 export function getCacheStats() {
   return responseCache.getStats()
 }
@@ -116,16 +222,14 @@ export function clearResponseCache() {
 export function getAllCacheStats() {
   return {
     llm: getCacheStats(),
-    systemPrompt: getPromptCacheStats ? getPromptCacheStats() : null,
-    dynamicContext: getDynamicContextCacheStats ? getDynamicContextCacheStats() : null,
-    toolResults: getToolCacheStats ? getToolCacheStats() : null,
+    systemPrompt: null,
+    dynamicContext: null,
+    toolResults: null,
   }
 }
 
 export function clearAllCaches() {
   clearResponseCache()
-  if (typeof clearPromptCache === 'function') clearPromptCache()
-  if (typeof clearToolCache === 'function') clearToolCache()
 }
 
 export type ChatMessage = {
@@ -180,8 +284,7 @@ export async function chatComplete(options: {
   if (enableCache && !tools) {
     const cachedResponse = responseCache.get(messages, temperature, model)
     if (cachedResponse) {
-      console.log('[LLM] Cache hit - returning cached response')
-      debugLogger.logCacheHit(sessionId || 'unknown', true)
+      aiLog('Cache hit - returning cached response')
       return {
         ...cachedResponse,
         _cached: true,
@@ -191,7 +294,7 @@ export async function chatComplete(options: {
   }
 
   // Start debug session if not provided
-  const effectiveSessionId = sessionId || debugLogger.startSession('unknown');
+  const effectiveSessionId = sessionId || 'unknown-session';
   let providerUsed = 'unknown';
 
   let selectedModel: any
@@ -199,8 +302,8 @@ export async function chatComplete(options: {
 
   // Use fallback system if enabled
   if (enableFallback) {
-    console.log('[LLM] Using provider fallback system')
-    debugLogger.logProviderFallback(effectiveSessionId, 'initial', 'fallback_system', 'Automatic fallback enabled');
+    aiLog('Using provider fallback system')
+    // debugLoggerlogProviderFallback(effectiveSessionId, 'initial', 'fallback_system', 'Automatic fallback enabled');
 
     const fallbackResult = await executeWithFallback(messages, tools || [], {
       temperature,
@@ -215,116 +318,48 @@ export async function chatComplete(options: {
     })
 
     if (!fallbackResult.success) {
-      debugLogger.logToolCall(effectiveSessionId, {
-        toolName: 'fallback_system',
-        success: false,
-        executionTimeMs: 0,
-        errorMessage: fallbackResult.error,
-      });
+      // debugLoggerlogToolCall(effectiveSessionId, {
+      //   toolName: 'fallback_system',
+      //   success: false,
+      //   executionTimeMs: 0,
+      //   errorMessage: fallbackResult.error,
+      // });
       throw new Error(`Fallback system failed: ${fallbackResult.error}`)
     }
 
     providerUsed = fallbackResult.provider
-    console.log(`[LLM] Fallback system succeeded with provider: ${providerUsed}`)
-    debugLogger.logProviderFallback(effectiveSessionId, 'fallback_system', providerUsed, 'Fallback successful');
+    aiLog(`Fallback system succeeded with provider: ${providerUsed}`)
+    // debugLoggerlogProviderFallback(effectiveSessionId, 'fallback_system', providerUsed, 'Fallback successful');
 
     // Process the successful result
     const result = fallbackResult.data
-    console.log('[LLM] Raw toolCalls from AI SDK:', JSON.stringify(result.toolCalls, null, 2))
+    aiLog('Raw toolCalls from AI SDK:', JSON.stringify(result.toolCalls, null, 2))
     
     // Update session with actual provider used
-    const session = debugLogger.getSessionSummary(effectiveSessionId);
-    if (session) {
-      session.providerUsed = providerUsed;
-    }
+    // const session = debugLogger.getSessionSummary(effectiveSessionId);
+    // if (session) {
+    //   session.providerUsed = providerUsed;
+    // }
 
-    // Enhanced tool name mapping to handle various provider formats
-    const mappedToolCalls = result.toolCalls?.map((tc: any) => {
-      let toolName = tc.toolName
-      let mappingSource = 'original'
-      
-      // Check if the tool name is a numeric index (xAI Grok behavior)
-      if (/^\d+$/.test(toolName) && tools && Array.isArray(tools)) {
-        const index = parseInt(toolName, 10)
-        console.log(`[LLM] Detected numeric tool index: ${index}, mapping to tool name...`)
-        
-        if (index >= 0 && index < tools.length) {
-          const toolDef = tools[index]
-          if (toolDef && typeof toolDef === 'object') {
-            // Handle different tool definition formats
-            if (toolDef.type === 'function' && toolDef.function?.name) {
-              toolName = toolDef.function.name
-              mappingSource = `numeric_index_${index}`
-            } else if (toolDef.name) {
-              toolName = toolDef.name
-              mappingSource = `numeric_index_${index}`
-            } else {
-              console.warn(`[LLM] Tool at index ${index} has no recognizable name structure`)
-            }
-          }
-        } else {
-          console.warn(`[LLM] Tool index ${index} is out of bounds (tools array length: ${tools.length})`)
-        }
-      }
-      
-      // Additional validation: ensure the mapped tool name exists in our known tools
-      if (tools && Array.isArray(tools)) {
-        const knownToolNames = tools
-          .map(t => t.type === 'function' ? t.function?.name : t.name)
-          .filter(Boolean)
-        
-        if (!knownToolNames.includes(toolName)) {
-          console.warn(`[LLM] Mapped tool name "${toolName}" not found in known tools:`, knownToolNames)
-          console.warn(`[LLM] Mapping source: ${mappingSource}, original tool name: ${tc.toolName}`)
-          
-          // Try to find a similar tool name using fuzzy matching
-          const similarTool = knownToolNames.find(name => 
-            name.toLowerCase().includes(toolName.toLowerCase()) ||
-            toolName.toLowerCase().includes(name.toLowerCase())
-          )
-          
-          if (similarTool) {
-            console.log(`[LLM] Found similar tool name: "${similarTool}", using instead of "${toolName}"`)
-            toolName = similarTool
-            mappingSource = `${mappingSource}_fuzzy_match`
-          }
-        }
-      }
-      
-      const mappedCall = {
-        id: tc.toolCallId,
-        type: 'function',
-        function: {
-          name: toolName,
-          arguments: JSON.stringify(tc.input || {}),
-        },
-        _metadata: {
-          originalToolName: tc.toolName,
-          mappingSource,
-        }
-      }
-      
-      console.log(`[LLM] Mapped tool call: ${tc.toolName} -> ${toolName} (${mappingSource})`)
-      
-      return mappedCall
-    }) || []
+    // Use helper function to map tool calls
+    const mappedToolCalls = mapToolCalls(result.toolCalls || [], tools)
 
-    console.log('[LLM] Final mapped toolCalls:', JSON.stringify(mappedToolCalls, null, 2))
+    aiLog('Final mapped toolCalls:', JSON.stringify(mappedToolCalls, null, 2))
 
     // Normalize tool calls to standard format
-    console.log('[LLM] Normalizing tool calls...')
+    aiLog('Normalizing tool calls...')
     const normalization = normalizeToolCalls(mappedToolCalls, tools)
     
     if (!normalization.success) {
-      console.warn(`[LLM] Tool normalization failed: ${normalization.errors.join(', ')}`)
+      aiWarn(`Tool normalization failed: ${normalization.errors.join(', ')}`)
     }
     
     if (normalization.warnings.length > 0) {
-      console.log(`[LLM] Tool normalization warnings: ${normalization.warnings.join(', ')}`)
+      aiLog(`Tool normalization warnings: ${normalization.warnings.join(', ')}`)
     }
     
     const normalizedCalls = normalization.normalizedCalls
-    console.log('[LLM] Normalized toolCalls:', JSON.stringify(normalizedCalls.map(nc => ({
+    aiLog('Normalized toolCalls:', JSON.stringify(normalizedCalls.map(nc => ({
       id: nc.id,
       name: nc.function.name,
       steps: nc.normalizationSteps,
@@ -332,7 +367,7 @@ export async function chatComplete(options: {
 
     // Validate and correct tool calls
     if (normalizedCalls.length > 0) {
-      console.log('[LLM] Running tool call validation...')
+      aiLog('Running tool call validation...')
       const validation = validateToolCalls(normalizedCalls.map(nc => ({
         id: nc.id,
         function: {
@@ -342,21 +377,21 @@ export async function chatComplete(options: {
       })), tools)
       
       if (!validation.allValid) {
-        console.warn(`[LLM] Tool validation failed: ${validation.totalErrors} errors, ${validation.totalWarnings} warnings`)
+        aiWarn(`Tool validation failed: ${validation.totalErrors} errors, ${validation.totalWarnings} warnings`)
       }
       
       if (validation.totalWarnings > 0) {
-        console.log(`[LLM] Tool validation warnings: ${validation.totalWarnings}`)
+        aiLog(`Tool validation warnings: ${validation.totalWarnings}`)
       }
       
       // Use validated calls
       const finalToolCalls = validation.validatedCalls
-      console.log('[LLM] Final validated toolCalls:', JSON.stringify(finalToolCalls, null, 2))
+      aiLog('Final validated toolCalls:', JSON.stringify(finalToolCalls, null, 2))
 
       // Log each tool call with normalization info
       finalToolCalls.forEach(tc => {
         const originalNormalized = normalizedCalls.find(nc => nc.id === tc.id);
-        debugLogger.logToolCall(effectiveSessionId, {
+        // debugLoggerlogToolCall(effectiveSessionId, {
           toolName: tc.function.name,
           originalToolName: tc._metadata?.originalToolName || originalNormalized?.originalFormat?.function?.name,
           mappingSource: tc._metadata?.mappingSource || originalNormalized?.normalizationSteps.join(', '),
@@ -368,7 +403,7 @@ export async function chatComplete(options: {
         });
       });
 
-      debugLogger.endSession(effectiveSessionId);
+      // debugLoggerendSession(effectiveSessionId);
 
       const response = {
         content: result.text,
@@ -405,7 +440,7 @@ export async function chatComplete(options: {
       },
     }));
 
-    debugLogger.endSession(effectiveSessionId);
+    // debugLoggerendSession(effectiveSessionId);
 
     const response = {
       content: result.text,
@@ -469,8 +504,8 @@ export async function chatComplete(options: {
   }
 
   try {
-    console.log('[LLM] Using provider:', providerUsed)
-    console.log('[LLM] Tools being passed to AI SDK:', JSON.stringify(tools, null, 2))
+    aiLog('Using provider:', providerUsed)
+    aiLog('Tools being passed to AI SDK:', JSON.stringify(tools, null, 2))
 
     const result = await generateText({
       model: selectedModel,
@@ -485,95 +520,27 @@ export async function chatComplete(options: {
       abortSignal: signal,
     })
 
-    console.log('[LLM] Raw toolCalls from AI SDK:', JSON.stringify(result.toolCalls, null, 2))
+    aiLog('Raw toolCalls from AI SDK:', JSON.stringify(result.toolCalls, null, 2))
 
-    // Enhanced tool name mapping to handle various provider formats
-    const mappedToolCalls = result.toolCalls?.map(tc => {
-      let toolName = tc.toolName
-      let mappingSource = 'original'
-      
-      // Check if the tool name is a numeric index (xAI Grok behavior)
-      if (/^\d+$/.test(toolName) && tools && Array.isArray(tools)) {
-        const index = parseInt(toolName, 10)
-        console.log(`[LLM] Detected numeric tool index: ${index}, mapping to tool name...`)
-        
-        if (index >= 0 && index < tools.length) {
-          const toolDef = tools[index]
-          if (toolDef && typeof toolDef === 'object') {
-            // Handle different tool definition formats
-            if (toolDef.type === 'function' && toolDef.function?.name) {
-              toolName = toolDef.function.name
-              mappingSource = `numeric_index_${index}`
-            } else if (toolDef.name) {
-              toolName = toolDef.name
-              mappingSource = `numeric_index_${index}`
-            } else {
-              console.warn(`[LLM] Tool at index ${index} has no recognizable name structure`)
-            }
-          }
-        } else {
-          console.warn(`[LLM] Tool index ${index} is out of bounds (tools array length: ${tools.length})`)
-        }
-      }
-      
-      // Additional validation: ensure the mapped tool name exists in our known tools
-      if (tools && Array.isArray(tools)) {
-        const knownToolNames = tools
-          .map(t => t.type === 'function' ? t.function?.name : t.name)
-          .filter(Boolean)
-        
-        if (!knownToolNames.includes(toolName)) {
-          console.warn(`[LLM] Mapped tool name "${toolName}" not found in known tools:`, knownToolNames)
-          console.warn(`[LLM] Mapping source: ${mappingSource}, original tool name: ${tc.toolName}`)
-          
-          // Try to find a similar tool name using fuzzy matching
-          const similarTool = knownToolNames.find(name => 
-            name.toLowerCase().includes(toolName.toLowerCase()) ||
-            toolName.toLowerCase().includes(name.toLowerCase())
-          )
-          
-          if (similarTool) {
-            console.log(`[LLM] Found similar tool name: "${similarTool}", using instead of "${toolName}"`)
-            toolName = similarTool
-            mappingSource = `${mappingSource}_fuzzy_match`
-          }
-        }
-      }
-      
-      const mappedCall = {
-        id: tc.toolCallId,
-        type: 'function',
-        function: {
-          name: toolName,
-          arguments: JSON.stringify(tc.input || {}),
-        },
-        _metadata: {
-          originalToolName: tc.toolName,
-          mappingSource,
-        }
-      }
-      
-      console.log(`[LLM] Mapped tool call: ${tc.toolName} -> ${toolName} (${mappingSource})`)
-      
-      return mappedCall
-    }) || []
+    // Use helper function to map tool calls
+    const mappedToolCalls = mapToolCalls(result.toolCalls || [], tools)
 
-    console.log('[LLM] Final mapped toolCalls:', JSON.stringify(mappedToolCalls, null, 2))
+    aiLog('Final mapped toolCalls:', JSON.stringify(mappedToolCalls, null, 2))
 
     // Normalize tool calls to standard format
-    console.log('[LLM] Normalizing tool calls...')
+    aiLog('Normalizing tool calls...')
     const normalization = normalizeToolCalls(mappedToolCalls, tools)
     
     if (!normalization.success) {
-      console.warn(`[LLM] Tool normalization failed: ${normalization.errors.join(', ')}`)
+      aiWarn(`Tool normalization failed: ${normalization.errors.join(', ')}`)
     }
     
     if (normalization.warnings.length > 0) {
-      console.log(`[LLM] Tool normalization warnings: ${normalization.warnings.join(', ')}`)
+      aiLog(`Tool normalization warnings: ${normalization.warnings.join(', ')}`)
     }
     
     const normalizedCalls = normalization.normalizedCalls
-    console.log('[LLM] Normalized toolCalls:', JSON.stringify(normalizedCalls.map(nc => ({
+    aiLog('Normalized toolCalls:', JSON.stringify(normalizedCalls.map(nc => ({
       id: nc.id,
       name: nc.function.name,
       steps: nc.normalizationSteps,
@@ -581,7 +548,7 @@ export async function chatComplete(options: {
 
     // Validate and correct tool calls
     if (normalizedCalls.length > 0) {
-      console.log('[LLM] Running tool call validation...')
+      aiLog('Running tool call validation...')
       const validation = validateToolCalls(normalizedCalls.map(nc => ({
         id: nc.id,
         function: {
@@ -591,21 +558,21 @@ export async function chatComplete(options: {
       })), tools)
       
       if (!validation.allValid) {
-        console.warn(`[LLM] Tool validation failed: ${validation.totalErrors} errors, ${validation.totalWarnings} warnings`)
+        aiWarn(`Tool validation failed: ${validation.totalErrors} errors, ${validation.totalWarnings} warnings`)
       }
       
       if (validation.totalWarnings > 0) {
-        console.log(`[LLM] Tool validation warnings: ${validation.totalWarnings}`)
+        aiLog(`Tool validation warnings: ${validation.totalWarnings}`)
       }
       
       // Use validated calls
       const finalToolCalls = validation.validatedCalls
-      console.log('[LLM] Final validated toolCalls:', JSON.stringify(finalToolCalls, null, 2))
+      aiLog('Final validated toolCalls:', JSON.stringify(finalToolCalls, null, 2))
 
       // Log each tool call with normalization info
       finalToolCalls.forEach(tc => {
         const originalNormalized = normalizedCalls.find(nc => nc.id === tc.id);
-        debugLogger.logToolCall(effectiveSessionId, {
+        // debugLoggerlogToolCall(effectiveSessionId, {
           toolName: tc.function.name,
           originalToolName: tc._metadata?.originalToolName || originalNormalized?.originalFormat?.function?.name,
           mappingSource: tc._metadata?.mappingSource || originalNormalized?.normalizationSteps.join(', '),
@@ -617,7 +584,7 @@ export async function chatComplete(options: {
         });
       });
 
-      debugLogger.endSession(effectiveSessionId);
+      // debugLoggerendSession(effectiveSessionId);
 
       const response = {
         content: result.text,
@@ -654,7 +621,7 @@ export async function chatComplete(options: {
       },
     }));
 
-    debugLogger.endSession(effectiveSessionId);
+    // debugLoggerendSession(effectiveSessionId);
 
     const response = {
       content: result.text,
