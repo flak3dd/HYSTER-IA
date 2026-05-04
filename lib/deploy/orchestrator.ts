@@ -92,6 +92,7 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
       region: config.region,
       size: config.size,
       sshKeyContent: keyPair.publicKey,
+      resourceGroup: config.resourceGroup,
     })
   } catch (err) {
     emit(id, "failed", `VPS creation failed`, err instanceof Error ? err.message : String(err))

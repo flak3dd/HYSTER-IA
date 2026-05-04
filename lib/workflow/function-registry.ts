@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client'
 import type { BackendFunction } from './types'
+import { runAiTool } from '@/lib/ai/tools'
 
 const prisma = new PrismaClient()
 
@@ -178,11 +179,10 @@ export class FunctionRegistry {
       {
         id: 'builtin-generate_config',
         name: 'generate_config',
-        description: 'Generate client configuration for a user',
+        description: 'Generate a Hysteria2 server configuration YAML from a natural language description',
         category: 'configuration',
         parameters: [
-          { name: 'userId', type: 'string', description: 'User ID', required: true },
-          { name: 'format', type: 'string', description: 'Config format (yaml, uri, clash, singbox)', required: false },
+          { name: 'description', type: 'string', description: 'Natural language description of the desired Hysteria2 server config', required: true },
         ],
         implementation: 'builtin',
         requiresAuth: true,
@@ -472,19 +472,23 @@ export class FunctionRegistry {
   }
 
   private async generateConfig(params: Record<string, unknown>): Promise<unknown> {
-    const { userId, format } = params
+    const { description } = params
 
-    if (!userId) {
-      throw new Error('userId is required')
+    if (!description || typeof description !== 'string') {
+      throw new Error('description is required and must be a string')
     }
 
-    // This would integrate with the existing config generation logic
-    // For now, return a placeholder
-    return {
-      success: true,
-      message: 'Config generation would be implemented here',
-      userId,
-      format: format || 'yaml',
+    try {
+      const ctx = {
+        metadata: { source: 'workflow-function-registry' },
+      }
+      const result = await runAiTool('generate_config', { description }, ctx)
+      return {
+        success: true,
+        config: result,
+      }
+    } catch (error) {
+      throw new Error(`Config generation failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

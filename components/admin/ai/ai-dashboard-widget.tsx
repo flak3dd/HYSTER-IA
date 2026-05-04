@@ -1,11 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api/fetch"
 import {
   Bot,
   ShieldAlert,
@@ -16,6 +18,7 @@ import {
   MessageSquarePlus,
   Wrench,
   TrendingUp,
+  RefreshCw,
 } from "lucide-react"
 
 type AIStats = {
@@ -25,11 +28,16 @@ type AIStats = {
   successRate: number
 }
 
-const MOCK_STATS: AIStats = {
-  totalConversations: 12,
-  activeAgents: 2,
-  totalExecutions: 48,
-  successRate: 94,
+type RecentActivity = {
+  type: "chat" | "shadowgrok"
+  message: string
+  time: string
+  status: "success" | "warning" | "error"
+}
+
+type AIStatsResponse = {
+  stats: AIStats
+  recentActivity: RecentActivity[]
 }
 
 const QUICK_ACTIONS = [
@@ -62,15 +70,39 @@ const QUICK_ACTIONS = [
   },
 ]
 
-const RECENT_ACTIVITY = [
-  { type: "chat", message: "Config generation completed", time: "2m ago", status: "success" },
-  { type: "shadowgrok", message: "Traffic analysis finished", time: "15m ago", status: "success" },
-  { type: "chat", message: "Implant status query", time: "1h ago", status: "success" },
-  { type: "shadowgrok", message: "OPSEC assessment", time: "3h ago", status: "warning" },
-]
-
 export function AIDashboardWidget() {
-  const [stats] = useState<AIStats>(MOCK_STATS)
+  const [stats, setStats] = useState<AIStats | null>(null)
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const fetchStats = async () => {
+    try {
+      const res = await apiFetch("/api/admin/ai/stats")
+      if (res.ok) {
+        const data: AIStatsResponse = await res.json()
+        setStats(data.stats)
+        setRecentActivity(data.recentActivity)
+      }
+    } catch (error) {
+      console.error("Failed to fetch AI stats:", error)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchStats()
+    // Refresh stats every 30 seconds
+    const interval = setInterval(fetchStats, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleRefresh = () => {
+    setRefreshing(true)
+    fetchStats()
+  }
 
   return (
     <Card className="shadow-lg shadow-primary/5 border-primary/20 overflow-hidden">
@@ -87,46 +119,99 @@ export function AIDashboardWidget() {
             </div>
             AI Assistant
           </CardTitle>
-          <Link href="/admin/ai">
-            <Button variant="ghost" size="sm" className="gap-1 text-micro text-primary hover:text-primary hover:bg-primary/10">
-              View All
-              <ChevronRight className="h-3 w-3" />
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-micro text-primary hover:text-primary hover:bg-primary/10"
+              onClick={handleRefresh}
+              disabled={refreshing}
+            >
+              <RefreshCw className={cn("h-3 w-3", refreshing && "animate-spin")} />
             </Button>
-          </Link>
+            <Link href="/admin/ai">
+              <Button variant="ghost" size="sm" className="gap-1 text-micro text-primary hover:text-primary hover:bg-primary/10">
+                View All
+                <ChevronRight className="h-3 w-3" />
+              </Button>
+            </Link>
+          </div>
         </div>
       </CardHeader>
       
       <CardContent className="p-4 space-y-4">
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-lg bg-background/50 border border-border/50 p-3">
-            <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
-              <Bot className="h-3 w-3" />
-              <span>Conversations</span>
-            </div>
-            <div className="text-heading-lg text-foreground">{stats.totalConversations}</div>
-          </div>
-          <div className="rounded-lg bg-background/50 border border-border/50 p-3">
-            <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
-              <Zap className="h-3 w-3" />
-              <span>Executions</span>
-            </div>
-            <div className="text-heading-lg text-foreground">{stats.totalExecutions}</div>
-          </div>
-          <div className="rounded-lg bg-background/50 border border-border/50 p-3">
-            <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
-              <Activity className="h-3 w-3" />
-              <span>Active Agents</span>
-            </div>
-            <div className="text-heading-lg text-foreground">{stats.activeAgents}</div>
-          </div>
-          <div className="rounded-lg bg-background/50 border border-border/50 p-3">
-            <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
-              <TrendingUp className="h-3 w-3" />
-              <span>Success Rate</span>
-            </div>
-            <div className="text-heading-lg text-success">{stats.successRate}%</div>
-          </div>
+          {loading ? (
+            <>
+              <Skeleton className="h-16 rounded-lg" />
+              <Skeleton className="h-16 rounded-lg" />
+              <Skeleton className="h-16 rounded-lg" />
+              <Skeleton className="h-16 rounded-lg" />
+            </>
+          ) : stats ? (
+            <>
+              <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+                <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
+                  <Bot className="h-3 w-3" />
+                  <span>Conversations</span>
+                </div>
+                <div className="text-heading-lg text-foreground">{stats.totalConversations}</div>
+              </div>
+              <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+                <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
+                  <Zap className="h-3 w-3" />
+                  <span>Executions</span>
+                </div>
+                <div className="text-heading-lg text-foreground">{stats.totalExecutions}</div>
+              </div>
+              <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+                <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
+                  <Activity className="h-3 w-3" />
+                  <span>Active Agents</span>
+                </div>
+                <div className="text-heading-lg text-foreground">{stats.activeAgents}</div>
+              </div>
+              <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+                <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
+                  <TrendingUp className="h-3 w-3" />
+                  <span>Success Rate</span>
+                </div>
+                <div className="text-heading-lg text-success">{stats.successRate}%</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+                <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
+                  <Bot className="h-3 w-3" />
+                  <span>Conversations</span>
+                </div>
+                <div className="text-heading-lg text-muted-foreground">-</div>
+              </div>
+              <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+                <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
+                  <Zap className="h-3 w-3" />
+                  <span>Executions</span>
+                </div>
+                <div className="text-heading-lg text-muted-foreground">-</div>
+              </div>
+              <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+                <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
+                  <Activity className="h-3 w-3" />
+                  <span>Active Agents</span>
+                </div>
+                <div className="text-heading-lg text-muted-foreground">-</div>
+              </div>
+              <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+                <div className="flex items-center gap-2 text-micro text-muted-foreground mb-1">
+                  <TrendingUp className="h-3 w-3" />
+                  <span>Success Rate</span>
+                </div>
+                <div className="text-heading-lg text-muted-foreground">-</div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Quick Actions */}
@@ -165,18 +250,30 @@ export function AIDashboardWidget() {
               Live
             </Badge>
           </div>
-          <div className="space-y-1.5">
-            {RECENT_ACTIVITY.slice(0, 3).map((activity, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50 transition-colors">
-                <div className={cn(
-                  "h-1.5 w-1.5 rounded-full",
-                  activity.status === "success" ? "bg-success" : "bg-warning"
-                )} />
-                <span className="flex-1 text-micro text-foreground truncate">{activity.message}</span>
-                <span className="text-micro text-muted-foreground">{activity.time}</span>
-              </div>
-            ))}
-          </div>
+          {loading ? (
+            <div className="space-y-1.5">
+              <Skeleton className="h-8 rounded-lg" />
+              <Skeleton className="h-8 rounded-lg" />
+              <Skeleton className="h-8 rounded-lg" />
+            </div>
+          ) : recentActivity.length > 0 ? (
+            <div className="space-y-1.5">
+              {recentActivity.slice(0, 3).map((activity, i) => (
+                <div key={i} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/50 transition-colors">
+                  <div className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    activity.status === "success" ? "bg-success" : activity.status === "warning" ? "bg-warning" : "bg-destructive"
+                  )} />
+                  <span className="flex-1 text-micro text-foreground truncate">{activity.message}</span>
+                  <span className="text-micro text-muted-foreground">{activity.time}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-micro text-muted-foreground text-center py-4">
+              No recent activity
+            </div>
+          )}
         </div>
 
         {/* CTA Button */}
