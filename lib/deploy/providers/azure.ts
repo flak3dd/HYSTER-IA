@@ -70,7 +70,7 @@ async function armPut(
     headers: headers(token),
     body: JSON.stringify(body),
   })
-  if (!res.ok && res.status !== 201) {
+  if (!res.ok && res.status !== 201 && res.status !== 200) {
     const text = await res.text()
     throw new Error(`Azure PUT failed (${res.status}): ${text.slice(0, 400)}`)
   }
@@ -124,15 +124,28 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
     async createServer(opts): Promise<VpsCreateResult> {
       const token = await getAccessToken(auth)
       const safeName = sanitizeName(opts.name)
-      const rgName = `hysteria-${safeName}`
+      // Use provided resource group or create a new one
+      const rgName = opts.resourceGroup || `hysteria-${safeName}`
       const location = opts.region
 
-      // 1. Create Resource Group
-      await armPut(
-        token,
-        `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}?api-version=${ARM_API_VERSION_RESOURCES}`,
-        { location },
-      )
+      // 1. Create Resource Group (only if not using existing one)
+      if (!opts.resourceGroup) {
+        await armPut(
+          token,
+          `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}?api-version=${ARM_API_VERSION_RESOURCES}`,
+          { location },
+        )
+      } else {
+        // Verify the existing resource group exists and is in the correct location
+        try {
+          await armGet(
+            token,
+            `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}?api-version=${ARM_API_VERSION_RESOURCES}`,
+          )
+        } catch (error) {
+          throw new Error(`Resource group "${rgName}" not found or inaccessible. Please create it first or omit resourceGroup parameter.`)
+        }
+      }
 
       // 2. Create Network Security Group (allow SSH + Hysteria port)
       const nsgName = `${safeName}-nsg`

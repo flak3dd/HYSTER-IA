@@ -37,6 +37,23 @@ import type { DeploymentConfig } from "@/lib/deploy/types";
 const execAsync = promisify(exec);
 
 // ============================================================
+// DANGER MODE SETTINGS
+// ============================================================
+
+let dangerModeSettings = {
+  disableAIGuardRails: false,
+  bypassDeploymentApprovals: false,
+};
+
+export function setDangerModeSettings(settings: typeof dangerModeSettings) {
+  dangerModeSettings = settings;
+}
+
+export function getDangerModeSettings() {
+  return dangerModeSettings;
+}
+
+// ============================================================
 // TYPES
 // ============================================================
 
@@ -479,6 +496,14 @@ async function sendC2TaskToImplant(args: any, context: ToolContext): Promise<Too
 async function queryImplantStatus(args: any): Promise<ToolResult> {
   const { implant_ids, include_traffic_stats = true, include_task_history = false } = args;
 
+  // Validate implant_ids
+  if (!implant_ids || !Array.isArray(implant_ids)) {
+    return {
+      success: false,
+      error: "implant_ids is required and must be an array",
+    };
+  }
+
   // Implant model doesn't exist in schema - stubbing
   // const implants = await prisma.implant.findMany({
   //   where: { id: { in: implant_ids } },
@@ -914,7 +939,11 @@ async function orchestrateFullOperation(args: any, context: ToolContext): Promis
 async function runPanelCommand(args: any, context: ToolContext): Promise<ToolResult> {
   const { command, working_dir = "/home/workdir", require_approval = true, timeout = 30, dry_run = false } = args;
 
-  if (require_approval && !context.dryRun) {
+  // Check if danger mode is enabled to bypass approvals
+  const dangerMode = getDangerModeSettings();
+  const bypassApproval = dangerMode.disableAIGuardRails;
+
+  if (require_approval && !context.dryRun && !bypassApproval) {
     // Create pending approval record
     const approval = await prisma.shadowGrokToolCall.create({
       data: {
@@ -1289,12 +1318,12 @@ async function getDeploymentStatus(args: any): Promise<ToolResult> {
   }
 
   // Format the steps for better readability
-  const formattedSteps = deployment.steps.map((step) => ({
+  const formattedSteps = Array.isArray(deployment.steps) ? deployment.steps.map((step) => ({
     status: step.status,
     message: step.message,
     timestamp: new Date(step.timestamp).toISOString(),
     error: step.error,
-  }));
+  })) : [];
 
   return {
     success: true,
@@ -1432,6 +1461,14 @@ async function updateImplantConfigTool(args: any, context: ToolContext): Promise
 
 async function implantHealthMonitor(args: any): Promise<ToolResult> {
   const { implant_ids, time_range_hours = 24, include_recommendations = true } = args;
+
+  // Validate implant_ids
+  if (!implant_ids || !Array.isArray(implant_ids)) {
+    return {
+      success: false,
+      error: "implant_ids is required and must be an array",
+    };
+  }
 
   const implants = await prisma.implant.findMany({
     where: { implantId: { in: implant_ids } },
@@ -1639,13 +1676,13 @@ async function subscriptionAnalyticsTool(args: any): Promise<ToolResult> {
   let usageBreakdown = null;
   if (include_usage_breakdown) {
     const subscriptions = await listSubscriptions({ take: 100 });
-    usageBreakdown = subscriptions.map(sub => ({
+    usageBreakdown = Array.isArray(subscriptions) ? subscriptions.map(sub => ({
       id: sub.id,
       userId: sub.userId,
       totalBytes: sub.usageStats.totalBytes || 0,
       connectionCount: sub.usageStats.connectionCount || 0,
       status: sub.status,
-    }));
+    })) : [];
   }
 
   return {

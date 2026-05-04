@@ -1,7 +1,7 @@
 "use client"
 import { apiFetch } from "@/lib/api/fetch"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useMemo } from "react"
 import { toast } from "sonner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,9 @@ import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 import {
@@ -35,6 +37,13 @@ import {
   Info,
   MessageSquare,
   Activity,
+  Search,
+  Filter,
+  X,
+  Download,
+  XCircle,
+  Keyboard,
+  BarChart3,
 } from "lucide-react"
 
 /* ------------------------------------------------------------------ */
@@ -68,6 +77,7 @@ type Conversation = {
   messages: ChatMessage[]
   createdAt: number
   updatedAt: number
+  tags: string[]
 }
 
 type Template = {
@@ -115,12 +125,98 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [sidebarLoading, setSidebarLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [filterType, setFilterType] = useState<"all" | "recent" | "with-tools" | "tag">("all")
+  const [selectedTag, setSelectedTag] = useState<string | null>(null)
+  const [editingTagsForId, setEditingTagsForId] = useState<string | null>(null)
+  const [newTag, setNewTag] = useState("")
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [messagesPage, setMessagesPage] = useState(1)
+  const MESSAGES_PER_PAGE = 20
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [])
+
+  /* ---- Filter conversations ---- */
+  const filteredConversations = conversations.filter(conv => {
+    // Search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      const matchesTitle = conv.title.toLowerCase().includes(query)
+      const matchesMessages = conv.messages.some(msg => 
+        msg.content?.toLowerCase().includes(query)
+      )
+      if (!matchesTitle && !matchesMessages) return false
+    }
+    
+    // Type filter
+    if (filterType === "recent") {
+      const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+      if (conv.updatedAt < oneWeekAgo) return false
+    } else if (filterType === "with-tools") {
+      const hasTools = conv.messages.some(msg => msg.toolCalls && msg.toolCalls.length > 0)
+      if (!hasTools) return false
+    } else if (filterType === "tag" && selectedTag) {
+      if (!conv.tags.includes(selectedTag)) return false
+    }
+    
+    return true
+  }).sort((a, b) => b.updatedAt - a.updatedAt)
+
+  /* ---- Get all unique tags ---- */
+  const allTags = [...new Set(conversations.flatMap(c => c.tags))].sort()
+
+  /* ---- Add tag to conversation ---- */
+  const addTag = async (conversationId: string, tag: string) => {
+    if (!tag.trim()) return
+    const conv = conversations.find(c => c.id === conversationId)
+    if (!conv) return
+    
+    const updatedTags = [...new Set([...conv.tags, tag.trim()])]
+    try {
+      const res = await apiFetch("/api/admin/ai/conversations", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ conversationId, tags: updatedTags }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setConversations(prev => prev.map(c => 
+          c.id === conversationId ? { ...c, tags: updatedTags } : c
+        ))
+        toast.success("Tag added")
+      }
+    } catch {
+      toast.error("Failed to add tag")
+    }
+  }
+
+  /* ---- Remove tag from conversation ---- */
+  const removeTag = async (conversationId: string, tag: string) => {
+    const conv = conversations.find(c => c.id === conversationId)
+    if (!conv) return
+    
+    const updatedTags = conv.tags.filter(t => t !== tag)
+    try {
+      const res = await apiFetch("/api/admin/ai/conversations", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ conversationId, tags: updatedTags }),
+      })
+      if (res.ok) {
+        setConversations(prev => prev.map(c => 
+          c.id === conversationId ? { ...c, tags: updatedTags } : c
+        ))
+        toast.success("Tag removed")
+      }
+    } catch {
+      toast.error("Failed to remove tag")
+    }
+  }
 
   /* ---- Auto-resize textarea ---- */
   const adjustTextarea = useCallback(() => {
@@ -154,6 +250,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const selectConversation = useCallback(
     async (id: string) => {
       setActiveId(id)
+      setMessagesPage(1)
       const cached = conversations.find((c) => c.id === id)
       if (cached) {
         setMessages(cached.messages)
@@ -173,6 +270,14 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     },
     [conversations, scrollToBottom],
   )
+
+  /* ---- Paginated messages ---- */
+  const paginatedMessages = messages.slice(0, messagesPage * MESSAGES_PER_PAGE)
+  const hasMoreMessages = messages.length > paginatedMessages.length
+
+  const loadMoreMessages = () => {
+    setMessagesPage(prev => prev + 1)
+  }
 
   /* ---- Create new conversation ---- */
   const createConversation = useCallback(async () => {
@@ -298,18 +403,167 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     toast.success("Copied to clipboard")
   }
 
+  /* ---- Export conversation ---- */
+  const exportConversation = (format: "json" | "markdown" | "txt") => {
+    if (!activeId) return
+    
+    const conv = conversations.find(c => c.id === activeId)
+    if (!conv) return
+
+    let content: string
+    let filename: string
+    let mimeType: string
+
+    if (format === "json") {
+      content = JSON.stringify(conv, null, 2)
+      filename = `conversation-${conv.id}.json`
+      mimeType = "application/json"
+    } else if (format === "markdown") {
+      content = `# ${conv.title}\n\n`
+      content += `**Created:** ${new Date(conv.createdAt).toLocaleString()}\n`
+      content += `**Updated:** ${new Date(conv.updatedAt).toLocaleString()}\n`
+      content += `**Tags:** ${conv.tags.join(", ") || "None"}\n\n---\n\n`
+      
+      for (const msg of conv.messages) {
+        const role = msg.role === "user" ? "👤 User" : msg.role === "assistant" ? "🤖 Assistant" : msg.role === "tool" ? "🔧 Tool" : "⚙️ System"
+        content += `### ${role}\n\n${msg.content || "No content"}\n\n`
+        
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          content += "**Tool Calls:**\n"
+          for (const tc of msg.toolCalls) {
+            content += `- ${tc.name}\n`
+          }
+          content += "\n"
+        }
+      }
+      
+      filename = `conversation-${conv.id}.md`
+      mimeType = "text/markdown"
+    } else {
+      content = `${conv.title}\n`
+      content += `${"=".repeat(conv.title.length)}\n\n`
+      content += `Created: ${new Date(conv.createdAt).toLocaleString()}\n`
+      content += `Updated: ${new Date(conv.updatedAt).toLocaleString()}\n`
+      content += `Tags: ${conv.tags.join(", ") || "None"}\n\n`
+      content += `${"=".repeat(50)}\n\n`
+      
+      for (const msg of conv.messages) {
+        const role = msg.role === "user" ? "USER" : msg.role === "assistant" ? "ASSISTANT" : msg.role === "tool" ? "TOOL" : "SYSTEM"
+        content += `[${role}]\n${msg.content || "No content"}\n\n`
+      }
+      
+      filename = `conversation-${conv.id}.txt`
+      mimeType = "text/plain"
+    }
+
+    const blob = new Blob([content], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    
+    toast.success(`Exported as ${format.toUpperCase()}`)
+  }
+
   /* ---- Template categories ---- */
   const categories = [...new Set(templates.map((t) => t.category))]
+
+  /* ---- Tool usage analytics ---- */
+  const toolUsageStats = useMemo(() => {
+    const toolCounts: Record<string, number> = {}
+    let totalToolCalls = 0
+    let successfulToolCalls = 0
+
+    conversations.forEach(conv => {
+      conv.messages.forEach(msg => {
+        if (msg.toolCalls) {
+          msg.toolCalls.forEach(tc => {
+            toolCounts[tc.name] = (toolCounts[tc.name] || 0) + 1
+            totalToolCalls++
+          })
+        }
+        if (msg.role === 'tool' && msg.toolResult) {
+          successfulToolCalls++
+        }
+      })
+    })
+
+    const sortedTools = Object.entries(toolCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name, count]) => ({ name, count }))
+
+    return {
+      totalToolCalls,
+      successfulToolCalls,
+      successRate: totalToolCalls > 0 ? Math.round((successfulToolCalls / totalToolCalls) * 100) : 100,
+      topTools: sortedTools,
+    }
+  }, [conversations])
+
+  /* ---- Keyboard shortcuts ---- */
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + K: Focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+      }
+      
+      // Ctrl/Cmd + N: New conversation
+      if ((e.ctrlKey || e.metaKey) && e.key === "n") {
+        e.preventDefault()
+        createConversation()
+      }
+      
+      // Ctrl/Cmd + /: Show shortcuts
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault()
+        setShowShortcuts(prev => !prev)
+      }
+      
+      // Escape: Close shortcuts or deselect
+      if (e.key === "Escape") {
+        if (showShortcuts) {
+          setShowShortcuts(false)
+        }
+        if (editingTagsForId) {
+          setEditingTagsForId(null)
+        }
+        if (activeId) {
+          textareaRef.current?.focus()
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [showShortcuts, editingTagsForId, activeId, createConversation])
 
   return (
     <div className="flex flex-col gap-6">
       {!hideHeader && (
-        <div>
-          <h1 className="text-heading-xl">AI Assistant</h1>
-          <p className="mt-1 text-body-sm text-muted-foreground">
-            Multi-tool agent for config generation, traffic analysis, troubleshooting,
-            payload creation, and infrastructure management.
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-heading-xl">AI Assistant</h1>
+            <p className="mt-1 text-body-sm text-muted-foreground">
+              Multi-tool agent for config generation, traffic analysis, troubleshooting,
+              payload creation, and infrastructure management.
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowShortcuts(true)}
+            className="gap-1 text-micro text-muted-foreground hover:text-foreground"
+          >
+            <Keyboard className="h-3 w-3" />
+            Shortcuts
+          </Button>
         </div>
       )}
 
@@ -325,6 +579,83 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
             New Conversation
           </Button>
 
+          {/* Search and Filter */}
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search conversations..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-8 py-2 text-body-sm rounded-lg border border-border/50 bg-background/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 placeholder:text-muted-foreground/60"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-1">
+              <Button
+                variant={filterType === "all" ? "secondary" : "ghost"}
+                size="sm"
+                className="flex-1 text-micro h-7"
+                onClick={() => setFilterType("all")}
+              >
+                All
+              </Button>
+              <Button
+                variant={filterType === "recent" ? "secondary" : "ghost"}
+                size="sm"
+                className="flex-1 text-micro h-7"
+                onClick={() => setFilterType("recent")}
+              >
+                Recent
+              </Button>
+              <Button
+                variant={filterType === "with-tools" ? "secondary" : "ghost"}
+                size="sm"
+                className="flex-1 text-micro h-7"
+                onClick={() => setFilterType("with-tools")}
+              >
+                Tools
+              </Button>
+              <Button
+                variant={filterType === "tag" ? "secondary" : "ghost"}
+                size="sm"
+                className="flex-1 text-micro h-7"
+                onClick={() => setFilterType("tag")}
+              >
+                Tags
+              </Button>
+            </div>
+            
+            {filterType === "tag" && allTags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {allTags.map(tag => (
+                  <button
+                    key={tag}
+                    onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                    className={cn(
+                      "px-2 py-0.5 rounded-full text-micro transition-colors",
+                      selectedTag === tag
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    )}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="relative flex-1 rounded-xl border border-border/50 bg-card/50 overflow-hidden">
             <ScrollArea className="flex-1 h-full">
               <div className="space-y-0.5 p-2">
@@ -334,51 +665,129 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                       <Skeleton key={i} className="h-10 w-full rounded-lg" />
                     ))}
                   </div>
-                ) : conversations.length === 0 ? (
+                ) : filteredConversations.length === 0 ? (
                   <div className="flex flex-col items-center gap-2 py-12 text-center">
                     <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted/50">
                       <MessageSquare className="h-6 w-6 text-muted-foreground/40" />
                     </div>
                     <p className="text-caption text-muted-foreground">
-                      No conversations yet
+                      {searchQuery ? "No conversations found" : "No conversations yet"}
                     </p>
                     <p className="text-micro text-muted-foreground/60">
-                      Start a new conversation to begin
+                      {searchQuery ? "Try a different search term" : "Start a new conversation to begin"}
                     </p>
                   </div>
                 ) : (
-                  conversations.map((conv) => (
+                  filteredConversations.map((conv) => (
                     <div
                       key={conv.id}
                       className={cn(
-                        "group flex items-center gap-2 rounded-lg px-3 py-2.5 cursor-pointer transition-all",
+                        "group flex flex-col gap-1.5 rounded-lg px-3 py-2.5 cursor-pointer transition-all",
                         activeId === conv.id
                           ? "bg-primary/10 text-primary ring-1 ring-primary/20 shadow-sm"
                           : "hover:bg-muted/50 text-foreground border border-transparent hover:border-border/30",
                       )}
                       onClick={() => selectConversation(conv.id)}
                     >
-                      <Bot className={cn("h-3.5 w-3.5 shrink-0", activeId === conv.id ? "text-primary" : "opacity-50")} />
-                      <span className="flex-1 truncate text-body-sm">{conv.title}</span>
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
+                      <div className="flex items-center gap-2">
+                        <Bot className={cn("h-3.5 w-3.5 shrink-0", activeId === conv.id ? "text-primary" : "opacity-50")} />
+                        <span className="flex-1 truncate text-body-sm">{conv.title}</span>
+                        <div className="flex items-center gap-1">
+                          {editingTagsForId === conv.id ? (
                             <button
                               onClick={(e: React.MouseEvent) => {
                                 e.stopPropagation()
-                                deleteConversation(conv.id)
+                                setEditingTagsForId(null)
+                              }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 text-muted-foreground hover:text-foreground"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e: React.MouseEvent) => {
+                                e.stopPropagation()
+                                setEditingTagsForId(conv.id)
                               }}
                               className={cn(
                                 "opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5",
-                                "text-muted-foreground hover:text-destructive hover:bg-destructive/10",
+                                "text-muted-foreground hover:text-primary hover:bg-primary/10",
                               )}
-                            />
-                          }
-                        >
+                            >
+                              <Filter className="h-3 w-3" />
+                            </button>
+                          )}
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <button
+                                  onClick={(e: React.MouseEvent) => {
+                                    e.stopPropagation()
+                                    deleteConversation(conv.id)
+                                  }}
+                                  className={cn(
+                                    "opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5",
+                                    "text-muted-foreground hover:text-destructive hover:bg-destructive/10",
+                                  )}
+                                />
+                              }
+                            >
                           <Trash2 className="h-3 w-3" />
                         </TooltipTrigger>
                         <TooltipContent side="right">Delete</TooltipContent>
                       </Tooltip>
+                        </div>
+                      </div>
+                      
+                      {/* Tags display */}
+                      {editingTagsForId === conv.id ? (
+                        <div className="flex items-center gap-1 ml-5.5">
+                          <input
+                            type="text"
+                            placeholder="Add tag..."
+                            value={newTag}
+                            onChange={(e) => setNewTag(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && newTag.trim()) {
+                                e.preventDefault()
+                                addTag(conv.id, newTag)
+                                setNewTag("")
+                              }
+                            }}
+                            className="flex-1 px-2 py-1 text-micro rounded border border-border/50 bg-background/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          {conv.tags.map(tag => (
+                            <div
+                              key={tag}
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-micro"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {tag}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  removeTag(conv.id, tag)
+                                }}
+                                className="hover:text-destructive"
+                              >
+                                <X className="h-2.5 w-2.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : conv.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 ml-5.5">
+                          {conv.tags.map(tag => (
+                            <span
+                              key={tag}
+                              className="px-1.5 py-0.5 rounded-full bg-muted/50 text-muted-foreground text-micro"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -389,6 +798,37 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
 
         {/* ---- Center: Chat panel ---- */}
         <Card className="flex flex-col overflow-hidden shadow-lg shadow-primary/5 border-primary/20">
+          {activeId && (
+            <CardHeader className="flex flex-row items-center justify-between py-3 px-4 border-b border-border/50 bg-gradient-to-b from-primary/5 to-transparent">
+              <div className="flex items-center gap-2">
+                <Bot className="h-4 w-4 text-primary" />
+                <span className="text-body-sm font-medium text-foreground">
+                  {conversations.find(c => c.id === activeId)?.title || "Conversation"}
+                </span>
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="ghost" size="sm" className="gap-1 text-micro text-muted-foreground hover:text-foreground">
+                      <Download className="h-3 w-3" />
+                      Export
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => exportConversation("json")}>
+                    Export as JSON
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => exportConversation("markdown")}>
+                    Export as Markdown
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => exportConversation("txt")}>
+                    Export as Text
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </CardHeader>
+          )}
           {/* Messages area */}
           <ScrollArea className="flex-1">
             <div className="p-5 space-y-4">
@@ -425,13 +865,27 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                   </p>
                 </div>
               ) : (
-                messages.map((msg, i) => (
-                  <MessageBubble
-                    key={`${msg.timestamp}-${i}`}
-                    msg={msg}
-                    onCopy={copyToClipboard}
-                  />
-                ))
+                <>
+                  {hasMoreMessages && (
+                    <div className="flex justify-center py-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={loadMoreMessages}
+                        className="text-micro text-muted-foreground hover:text-foreground"
+                      >
+                        Load older messages ({messages.length - paginatedMessages.length} remaining)
+                      </Button>
+                    </div>
+                  )}
+                  {paginatedMessages.map((msg, i) => (
+                    <MessageBubble
+                      key={`${msg.timestamp}-${i}`}
+                      msg={msg}
+                      onCopy={copyToClipboard}
+                    />
+                  ))}
+                </>
               )}
               {loading && (
                 <div className="flex items-start gap-3">
@@ -603,6 +1057,60 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
             </CardContent>
           </Card>
 
+          {/* Tool Usage Analytics */}
+          <Card className="shadow-lg shadow-primary/5 border-primary/20">
+            <CardHeader className="pb-3 bg-gradient-to-b from-primary/5 to-transparent">
+              <CardTitle className="text-heading-sm flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
+                  <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                </div>
+                Tool Analytics
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-lg bg-background/50 border border-border/50 p-2">
+                  <div className="text-micro text-muted-foreground">Total Calls</div>
+                  <div className="text-heading-sm text-foreground">{toolUsageStats.totalToolCalls}</div>
+                </div>
+                <div className="rounded-lg bg-background/50 border border-border/50 p-2">
+                  <div className="text-micro text-muted-foreground">Success Rate</div>
+                  <div className={cn(
+                    "text-heading-sm",
+                    toolUsageStats.successRate >= 90 ? "text-success" : toolUsageStats.successRate >= 70 ? "text-warning" : "text-destructive"
+                  )}>
+                    {toolUsageStats.successRate}%
+                  </div>
+                </div>
+              </div>
+              
+              {toolUsageStats.topTools.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="text-micro text-muted-foreground">Most Used Tools</div>
+                  <div className="space-y-1.5">
+                    {toolUsageStats.topTools.map((tool, i) => (
+                      <div key={tool.name} className="flex items-center gap-2">
+                        <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 text-micro text-primary">
+                          {i + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <code className="text-micro font-mono text-foreground truncate block">{tool.name}</code>
+                        </div>
+                        <Badge variant="outline" className="text-micro">
+                          {tool.count}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-micro text-muted-foreground text-center py-2">
+                  No tool usage data yet
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Provider Info */}
           <Card>
             <CardHeader className="pb-2">
@@ -624,6 +1132,56 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           </Card>
         </div>
       </div>
+
+      {/* Keyboard Shortcuts Dialog */}
+      <Dialog open={showShortcuts} onOpenChange={setShowShortcuts}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Keyboard className="h-4 w-4" />
+              Keyboard Shortcuts
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <div className="flex items-center justify-between">
+              <span className="text-body-sm">Focus search</span>
+              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
+                <span className="text-muted-foreground">⌘</span> K
+              </kbd>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-body-sm">New conversation</span>
+              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
+                <span className="text-muted-foreground">⌘</span> N
+              </kbd>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-body-sm">Show shortcuts</span>
+              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
+                <span className="text-muted-foreground">⌘</span> /
+              </kbd>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-body-sm">Send message</span>
+              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
+                Enter
+              </kbd>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-body-sm">New line</span>
+              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
+                Shift + Enter
+              </kbd>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-body-sm">Close / Escape</span>
+              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
+                Esc
+              </kbd>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -764,32 +1322,69 @@ function ToolCallBubble({ call }: { call: ToolCall }) {
     args = call.arguments
   }
 
+  const status = call.status || "executing"
+  const isExecuting = status === "executing"
+  const isCompleted = status === "completed"
+  const isFailed = status === "failed"
+
   return (
     <div className="flex items-start gap-3 ml-10">
       <Collapsible open={expanded} onOpenChange={setExpanded}>
-        <div className="rounded-xl border border-info/20 bg-info/5 overflow-hidden">
+        <div className={cn(
+          "rounded-xl border overflow-hidden transition-all",
+          isExecuting ? "border-info/20 bg-info/5" : isCompleted ? "border-success/20 bg-success/5" : "border-destructive/20 bg-destructive/5"
+        )}>
           <CollapsibleTrigger
             render={<button type="button" />}
-            className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-info/10 transition-colors"
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/50 transition-colors"
           >
-            <Wrench className="h-3 w-3 text-info shrink-0" />
-            <span className="text-micro font-medium text-info">Tool call</span>
-            <code className="rounded bg-info/10 px-1.5 py-0.5 font-mono text-micro text-info-foreground">
+            <div className="flex items-center gap-2">
+              {isExecuting ? (
+                <Loader2 className="h-3 w-3 text-info shrink-0 animate-spin" />
+              ) : isCompleted ? (
+                <CheckCircle2 className="h-3 w-3 text-success shrink-0" />
+              ) : (
+                <XCircle className="h-3 w-3 text-destructive shrink-0" />
+              )}
+              <span className={cn(
+                "text-micro font-medium",
+                isExecuting ? "text-info" : isCompleted ? "text-success" : "text-destructive"
+              )}>
+                {isExecuting ? "Executing" : isCompleted ? "Completed" : "Failed"}
+              </span>
+            </div>
+            <code className={cn(
+              "rounded px-1.5 py-0.5 font-mono text-micro",
+              isExecuting ? "bg-info/10 text-info-foreground" : isCompleted ? "bg-success/10 text-success-foreground" : "bg-destructive/10 text-destructive-foreground"
+            )}>
               {call.name}
             </code>
+            {isExecuting && (
+              <div className="flex items-center gap-1.5">
+                <div className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
+                <div className="h-1.5 w-1.5 rounded-full bg-info animate-pulse delay-100" />
+                <div className="h-1.5 w-1.5 rounded-full bg-info animate-pulse delay-200" />
+              </div>
+            )}
             <span className="ml-auto">
               {expanded ? (
-                <ChevronDown className="h-3 w-3 text-info/50" />
+                <ChevronDown className="h-3 w-3 text-muted-foreground/50" />
               ) : (
-                <ChevronRight className="h-3 w-3 text-info/50" />
+                <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
               )}
             </span>
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <Separator className="bg-info/10" />
-            <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-micro text-muted-foreground">
-              {args}
-            </pre>
+            <Separator className="bg-border/50" />
+            <div className="p-3 space-y-2">
+              <div className="flex items-center gap-2 text-micro text-muted-foreground">
+                <Terminal className="h-3 w-3" />
+                <span>Arguments</span>
+              </div>
+              <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap rounded-lg bg-background/50 px-3 py-2 font-mono text-micro text-foreground">
+                {args}
+              </pre>
+            </div>
           </CollapsibleContent>
         </div>
       </Collapsible>

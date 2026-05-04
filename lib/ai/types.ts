@@ -41,6 +41,7 @@ export const AiConversation = z.object({
   createdBy: z.string().min(1),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
+  tags: z.array(z.string()).default([]),
 })
 export type AiConversation = z.infer<typeof AiConversation>
 
@@ -48,6 +49,12 @@ export const AiConversationCreate = z.object({
   title: z.string().max(200).optional(),
 })
 export type AiConversationCreate = z.infer<typeof AiConversationCreate>
+
+export const AiConversationUpdate = z.object({
+  title: z.string().max(200).optional(),
+  tags: z.array(z.string()).optional(),
+})
+export type AiConversationUpdate = z.infer<typeof AiConversationUpdate>
 
 /* ------------------------------------------------------------------ */
 /*  Chat request / response                                           */

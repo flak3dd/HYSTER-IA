@@ -925,15 +925,23 @@ function ToolResultCard({
             </Badge>
           )}
           <div className="ml-auto flex items-center gap-1">
-            <button
+            <div
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation()
                 onCopy(formatted)
               }}
-              className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation()
+                  onCopy(formatted)
+                }
+              }}
+              className="text-muted-foreground hover:text-foreground transition-colors p-0.5 cursor-pointer"
             >
               <Copy className="h-3 w-3" />
-            </button>
+            </div>
             {expanded ? (
               <ChevronDown className="h-3 w-3 text-muted-foreground/50" />
             ) : (

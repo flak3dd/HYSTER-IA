@@ -4,6 +4,7 @@ import {
   AiConversation,
   AiMessage,
   type AiConversationCreate,
+  type AiConversationUpdate,
 } from "@/lib/ai/types"
 
 // Simple in-memory cache for conversations (5-minute TTL)
@@ -49,6 +50,7 @@ function toConvZod(row: ConvWithMessages): AiConversation {
     createdBy: row.createdBy,
     createdAt: row.createdAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
+    tags: row.tags as string[] || [],
   }
 }
 
@@ -149,4 +151,25 @@ export async function deleteConversation(id: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+export async function updateConversation(
+  id: string,
+  input: AiConversationUpdate,
+  createdBy: string,
+): Promise<AiConversation | null> {
+  const existing = await prisma.aiConversation.findUnique({ where: { id } })
+  if (!existing || existing.createdBy !== createdBy) return null
+  
+  const updated = await prisma.aiConversation.update({
+    where: { id },
+    data: {
+      ...(input.title && { title: input.title }),
+      ...(input.tags !== undefined && { tags: input.tags }),
+    },
+    include: { messages: { orderBy: { sortOrder: "asc" } } },
+  })
+  
+  clearCached(id)
+  return toConvZod(updated)
 }

@@ -15,6 +15,9 @@ import {
   generatePayloadFromDescription,
   type PayloadBuild,
 } from "@/lib/payloads/generator"
+import { startDeployment, listDeployments, getDeployment } from "@/lib/deploy/orchestrator"
+import { allPresetsAsync } from "@/lib/deploy/providers"
+import type { DeploymentConfig } from "@/lib/deploy/types"
 
 /* ------------------------------------------------------------------ */
 /*  Tool: generate_config                                             */
@@ -464,10 +467,10 @@ export const troubleshootTool: AgentTool<
 /*  Tool: list_profiles                                               */
 /* ------------------------------------------------------------------ */
 
-const NoInput = z.object({})
+const ListProfilesInput = z.object({})
 
 export const listProfilesTool: AgentTool<
-  z.infer<typeof NoInput>,
+  z.infer<typeof ListProfilesInput>,
   Array<{
     id: string
     name: string
@@ -478,7 +481,7 @@ export const listProfilesTool: AgentTool<
 > = {
   name: "list_profiles",
   description: "List all configuration profiles. Each profile is a reusable config template that can be applied to nodes.",
-  parameters: NoInput,
+  parameters: ListProfilesInput,
   jsonSchema: { type: "object", properties: {} },
   async run() {
     const profiles = await listProfiles()
@@ -697,6 +700,195 @@ export const deletePayloadTool: AgentTool<
 }
 
 /* ------------------------------------------------------------------ */
+/*  Tool: deploy_node                                                 */
+/* ------------------------------------------------------------------ */
+
+const DeployNodeInput = z.object({
+  provider: z.enum(["hetzner", "digitalocean", "vultr", "lightsail", "azure"]).describe("Cloud provider to use"),
+  region: z.string().min(1).describe("Region/zone for deployment"),
+  size: z.string().min(1).describe("Server size/plan"),
+  name: z.string().min(1).max(120).describe("Node name"),
+  domain: z.string().optional().describe("Optional domain name for TLS"),
+  port: z.coerce.number().int().min(1).max(65535).default(443).describe("Port to listen on"),
+  tags: z.array(z.string().max(40)).default([]).describe("Tags for the node"),
+  panelUrl: z.string().url().describe("Panel URL for auth backend"),
+  bandwidthUp: z.string().optional().describe("Upload bandwidth limit"),
+  bandwidthDown: z.string().optional().describe("Download bandwidth limit"),
+  resourceGroup: z.string().optional().describe("Azure: existing resource group name (avoids permission issues)"),
+})
+
+export const deployNodeTool: AgentTool<
+  z.infer<typeof DeployNodeInput>,
+  { deploymentId: string; status: string; message: string }
+> = {
+  name: "deploy_node",
+  description: "Deploy a new Hysteria2 node to a cloud provider. Creates VPS, installs Hysteria2, and registers the node in the database. Provider must be one of: hetzner, digitalocean, vultr, lightsail, azure.",
+  parameters: DeployNodeInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      provider: {
+        type: "string",
+        enum: ["hetzner", "digitalocean", "vultr", "lightsail", "azure"],
+        description: "Cloud provider (must be exactly one of: hetzner, digitalocean, vultr, lightsail, azure)"
+      },
+      region: { type: "string", description: "Region for deployment (e.g., ewr, fra, eastus)" },
+      size: { type: "string", description: "Server size (e.g., vc2-2c-4gb, Standard_B2s)" },
+      name: { type: "string", description: "Node name" },
+      domain: { type: "string", description: "Optional domain name for TLS" },
+      port: { type: "integer", default: 443, description: "Port (default: 443)" },
+      tags: { type: "array", items: { type: "string" }, description: "Tags for organization" },
+      panelUrl: { type: "string", description: "Panel URL for auth backend (e.g., http://localhost:3000)" },
+      bandwidthUp: { type: "string", description: "Upload bandwidth (e.g., 1 gbps)" },
+      bandwidthDown: { type: "string", description: "Download bandwidth (e.g., 10 gbps)" },
+      resourceGroup: { type: "string", description: "Azure: existing resource group name to avoid permission issues" },
+    },
+    required: ["provider", "region", "size", "name", "panelUrl"],
+  },
+  async run(input, ctx) {
+    // Validate provider enum
+    const validProviders = ["hetzner", "digitalocean", "vultr", "lightsail", "azure"]
+    if (!validProviders.includes(input.provider)) {
+      throw new Error(`Invalid provider "${input.provider}". Must be one of: ${validProviders.join(", ")}`)
+    }
+
+    const config: DeploymentConfig = {
+      provider: input.provider,
+      region: input.region,
+      size: input.size,
+      name: input.name,
+      domain: input.domain,
+      port: input.port,
+      tags: input.tags,
+      panelUrl: input.panelUrl,
+      bandwidthUp: input.bandwidthUp,
+      bandwidthDown: input.bandwidthDown,
+      resourceGroup: input.resourceGroup,
+    }
+    const deployment = await startDeployment(config)
+    return {
+      deploymentId: deployment.id,
+      status: deployment.status,
+      message: `Deployment started for ${input.name} on ${input.provider}`,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: list_deployments                                            */
+/* ------------------------------------------------------------------ */
+
+const ListDeploymentsInput = z.object({})
+
+export const listDeploymentsTool: AgentTool<
+  z.infer<typeof ListDeploymentsInput>,
+  { deployments: Array<{ id: string; name: string; provider: string; status: string; createdAt: number }> }
+> = {
+  name: "list_deployments",
+  description: "List all active and recent deployments with their status",
+  parameters: ListDeploymentsInput,
+  jsonSchema: { type: "object", properties: {} },
+  async run() {
+    const deployments = listDeployments()
+    return {
+      deployments: deployments.map((d) => ({
+        id: d.id,
+        name: d.config.name,
+        provider: d.config.provider,
+        status: d.status,
+        createdAt: d.createdAt,
+      })),
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: get_deployment_status                                       */
+/* ------------------------------------------------------------------ */
+
+const GetDeploymentStatusInput = z.object({
+  deploymentId: z.string().min(1).describe("The deployment ID to check"),
+})
+
+export const getDeploymentStatusTool: AgentTool<
+  z.infer<typeof GetDeploymentStatusInput>,
+  {
+    found: boolean
+    deployment?: {
+      id: string
+      name: string
+      provider: string
+      status: string
+      vpsId: string | null
+      vpsIp: string | null
+      nodeId: string | null
+      steps: Array<{ status: string; message: string; timestamp: number; error: string | null }>
+      createdAt: number
+      updatedAt: number
+    }
+  }
+> = {
+  name: "get_deployment_status",
+  description: "Get detailed status of a specific deployment including progress steps",
+  parameters: GetDeploymentStatusInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      deploymentId: { type: "string", description: "Deployment ID" },
+    },
+    required: ["deploymentId"],
+  },
+  async run(input) {
+    const deployment = getDeployment(input.deploymentId)
+    if (!deployment) {
+      return { found: false }
+    }
+    return {
+      found: true,
+      deployment: {
+        id: deployment.id,
+        name: deployment.config.name,
+        provider: deployment.config.provider,
+        status: deployment.status,
+        vpsId: deployment.vpsId,
+        vpsIp: deployment.vpsIp,
+        nodeId: deployment.nodeId,
+        steps: deployment.steps,
+        createdAt: deployment.createdAt,
+        updatedAt: deployment.updatedAt,
+      },
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: list_provider_presets                                       */
+/* ------------------------------------------------------------------ */
+
+const ListProviderPresetsInput = z.object({})
+
+export const listProviderPresetsTool: AgentTool<
+  z.infer<typeof ListProviderPresetsInput>,
+  { presets: Array<{ id: string; label: string; regions: Array<{ id: string; label: string }>; sizes: Array<{ id: string; label: string }> }> }
+> = {
+  name: "list_provider_presets",
+  description: "List available cloud providers with their regions and server sizes",
+  parameters: ListProviderPresetsInput,
+  jsonSchema: { type: "object", properties: {} },
+  async run() {
+    const presets = await allPresetsAsync()
+    return {
+      presets: presets.map((p) => ({
+        id: p.id,
+        label: p.label,
+        regions: p.regions,
+        sizes: p.sizes,
+      })),
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Registry of all AI chat tools                                     */
 /* ------------------------------------------------------------------ */
 
@@ -711,6 +903,10 @@ export const AI_TOOLS = {
   [listPayloadsTool.name]: listPayloadsTool,
   [getPayloadStatusTool.name]: getPayloadStatusTool,
   [deletePayloadTool.name]: deletePayloadTool,
+  [deployNodeTool.name]: deployNodeTool,
+  [listDeploymentsTool.name]: listDeploymentsTool,
+  [getDeploymentStatusTool.name]: getDeploymentStatusTool,
+  [listProviderPresetsTool.name]: listProviderPresetsTool,
 } as const
 
 export const AI_TOOL_NAMES = Object.keys(AI_TOOLS)

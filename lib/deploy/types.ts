@@ -44,6 +44,7 @@ export const DeploymentConfig = z.object({
   bandwidthUp: z.string().optional(),
   bandwidthDown: z.string().optional(),
   profileId: z.string().optional(),
+  resourceGroup: z.string().optional(), // For Azure: existing resource group name
 })
 export type DeploymentConfig = z.infer<typeof DeploymentConfig>
 
@@ -81,6 +82,7 @@ export interface VpsProviderClient {
     region: string
     size: string
     sshKeyContent: string
+    resourceGroup?: string // Azure-specific: existing resource group
   }): Promise<VpsCreateResult>
   waitForIp(vpsId: string, timeoutMs?: number): Promise<string>
   destroyServer(vpsId: string): Promise<void>

@@ -45,13 +45,14 @@ type AllSections = {
   mailer: MailerConfig | null
 }
 
-type TabId = "server" | "providers" | "environment" | "mailer"
+type TabId = "server" | "providers" | "environment" | "mailer" | "danger"
 
 const TABS: { id: TabId; label: string; desc: string }[] = [
   { id: "server", label: "Hysteria2 Server", desc: "Core server configuration" },
   { id: "providers", label: "Provider Keys", desc: "VPS provider API keys" },
   { id: "environment", label: "Environment", desc: "Runtime environment variables (read-only)" },
   { id: "mailer", label: "Mail System", desc: "Mailer worker settings" },
+  { id: "danger", label: "Danger Mode", desc: "Disable safety checks and approvals" },
 ]
 
 /* ------------------------------------------------------------------ */
@@ -67,6 +68,12 @@ export default function SettingsPage() {
   // Editable copies
   const [serverDraft, setServerDraft] = useState<ServerConfig | null>(null)
   const [mailerDraft, setMailerDraft] = useState<MailerConfig | null>(null)
+
+  // Danger mode settings
+  const [dangerMode, setDangerMode] = useState({
+    disableAIGuardRails: false,
+    bypassDeploymentApprovals: false,
+  })
 
   const loadRef = useCallback(async () => {
     try {
@@ -177,6 +184,12 @@ export default function SettingsPage() {
           onChange={setMailerDraft}
           onSave={() => mailerDraft && saveSection("mailer", mailerDraft)}
           saving={saving}
+        />
+      )}
+      {activeTab === "danger" && (
+        <DangerModeSection
+          dangerMode={dangerMode}
+          onChange={setDangerMode}
         />
       )}
     </div>
@@ -708,6 +721,124 @@ function NumberField({
         className="w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-sm"
       />
     </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Danger Mode section                                                */
+/* ------------------------------------------------------------------ */
+
+function DangerModeSection({
+  dangerMode,
+  onChange,
+}: {
+  dangerMode: { disableAIGuardRails: boolean; bypassDeploymentApprovals: boolean }
+  onChange: (mode: { disableAIGuardRails: boolean; bypassDeploymentApprovals: boolean }) => void
+}) {
+  const handleToggle = async (key: keyof typeof dangerMode, value: boolean) => {
+    const newMode = { ...dangerMode, [key]: value }
+    onChange(newMode)
+
+    try {
+      const res = await fetch("/api/admin/config/danger-mode", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(newMode),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      toast.success("Danger mode settings updated")
+    } catch (err) {
+      toast.error("Failed to update danger mode", { description: err instanceof Error ? err.message : "Unknown" })
+      // Revert on error
+      onChange(dangerMode)
+    }
+  }
+
+  const anyEnabled = dangerMode.disableAIGuardRails || dangerMode.bypassDeploymentApprovals
+
+  return (
+    <Card className={cn("border-2", anyEnabled ? "border-red-500/50 bg-red-50/5 dark:bg-red-950/10" : "")}>
+      <CardHeader>
+        <CardTitle className={cn("flex items-center gap-2", anyEnabled ? "text-red-600 dark:text-red-400" : "")}>
+          <span>⚠️ Danger Mode</span>
+          {anyEnabled && <Badge variant="destructive">ACTIVE</Badge>}
+        </CardTitle>
+        <CardDescription>
+          {anyEnabled
+            ? "Safety checks and approval workflows are currently disabled. Use with caution."
+            : "Disable safety checks and bypass approval workflows for development/testing."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {anyEnabled && (
+          <div className="rounded-lg bg-red-100 dark:bg-red-950/30 border border-red-200 dark:border-red-900 p-4">
+            <p className="text-sm font-medium text-red-800 dark:text-red-200 mb-2">
+              ⚠️ Warning: Danger mode is active
+            </p>
+            <ul className="text-sm text-red-700 dark:text-red-300 space-y-1 list-disc list-inside">
+              <li>AI guardrails are disabled - AI may generate harmful or inappropriate content</li>
+              <li>Deployment approvals are bypassed - deployments will execute without review</li>
+              <li>These settings should only be used in development/test environments</li>
+              <li>Disable danger mode before returning to production use</li>
+            </ul>
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-background">
+            <div className="space-y-1">
+              <div className="font-medium">Disable AI Guard Rails</div>
+              <div className="text-sm text-muted-foreground">
+                Remove AI safety filters and content restrictions. AI may generate unrestricted content.
+              </div>
+            </div>
+            <button
+              onClick={() => handleToggle("disableAIGuardRails", !dangerMode.disableAIGuardRails)}
+              className={cn(
+                "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                dangerMode.disableAIGuardRails ? "bg-red-600" : "bg-input"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                  dangerMode.disableAIGuardRails ? "translate-x-6" : "translate-x-1"
+                )}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-background">
+            <div className="space-y-1">
+              <div className="font-medium">Bypass Deployment Approvals</div>
+              <div className="text-sm text-muted-foreground">
+                Skip approval workflows for node deployments. Deployments will execute immediately.
+              </div>
+            </div>
+            <button
+              onClick={() => handleToggle("bypassDeploymentApprovals", !dangerMode.bypassDeploymentApprovals)}
+              className={cn(
+                "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                dangerMode.bypassDeploymentApprovals ? "bg-red-600" : "bg-input"
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                  dangerMode.bypassDeploymentApprovals ? "translate-x-6" : "translate-x-1"
+                )}
+              />
+            </button>
+          </div>
+        </div>
+
+        <div className="pt-4 border-t border-border">
+          <p className="text-xs text-muted-foreground">
+            These settings are stored locally in your browser session. They will reset when you clear browser data or restart the server.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
