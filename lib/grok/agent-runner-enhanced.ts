@@ -10,6 +10,10 @@ import { SHADOWGROK_TOOLS, ALL_TOOL_NAMES } from "./grok-tools";
 import { chatComplete, type ChatMessage } from "@/lib/ai/llm";
 import { serverEnv } from "@/lib/env";
 import { buildSystemPrompt, buildDynamicContext, Role, Persona } from "@/lib/ai/system-prompt";
+import { ChainOfThoughtReasoning } from "@/lib/ai/reasoning/chain-of-thought";
+import { MetaCognitionEngine } from "@/lib/ai/reasoning/meta-cognition";
+import { reasoningTraceSystem } from "@/lib/ai/reasoning/reasoning-trace";
+import { randomUUID } from "crypto";
 
 export interface RunAgentOptions {
   prompt: string;
@@ -72,6 +76,17 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
     },
   });
 
+  // Start reasoning trace for this execution
+  const traceSessionId = randomUUID();
+  reasoningTraceSystem.startSession(traceSessionId);
+  reasoningTraceSystem.logEvent('execution_start', {
+    executionId: execution.id,
+    userId,
+    prompt,
+    persona,
+    operationGoal,
+  });
+
   // 2. Create AgentTask for compatibility with existing system
   const agentTask = await prisma.agentTask.create({
     data: {
@@ -94,8 +109,39 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
   const toolResults: any[] = [];
 
   try {
+    // Initialize reasoning engines
+    const cot = new ChainOfThoughtReasoning();
+    const meta = new MetaCognitionEngine();
+
     while (stepCount < maxSteps) {
       stepCount++;
+
+      reasoningTraceSystem.logEvent('step_start', {
+        stepCount,
+        executionId: execution.id,
+      });
+
+      // Use chain-of-thought reasoning for complex operations (step > 1 or complex prompt)
+      let reasoningContext = "";
+      if (stepCount > 1 || prompt.length > 200) {
+        try {
+          const reasoningSteps = await cot.reason({
+            goal: prompt,
+            availableTools: allowedTools,
+            context: messages.slice(-3).map(m => ({ role: m.role, content: m.content || '' })),
+          });
+
+          reasoningTraceSystem.logEvent('chain_of_thought', {
+            steps: reasoningSteps.steps,
+            confidence: reasoningSteps.confidence,
+          });
+
+          reasoningContext = `\n\n[Reasoning: ${reasoningSteps.summary}]`;
+        } catch (reasoningError) {
+          console.error('[ShadowGrok] Chain-of-thought reasoning error:', reasoningError);
+          // Continue without reasoning if it fails
+        }
+      }
 
       const response = await chatComplete({
         messages,
@@ -111,6 +157,44 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
         tool_calls: response.toolCalls,
       };
       messages.push(assistantMsg);
+
+      reasoningTraceSystem.logEvent('llm_response', {
+        hasToolCalls: !!assistantMsg.tool_calls?.length,
+        contentLength: assistantMsg.content?.length || 0,
+      });
+
+      // Use meta-cognition to evaluate confidence in tool selection
+      if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
+        try {
+          const assessment = await meta.assessUncertainty(
+            `Tool selection: ${assistantMsg.tool_calls[0].function.name}`,
+            {
+              goal: prompt,
+              selectedTool: assistantMsg.tool_calls[0].function.name,
+              toolArguments: JSON.parse(assistantMsg.tool_calls[0].function.arguments || "{}"),
+            }
+          );
+
+          const confidence = assessment.confidence;
+
+          reasoningTraceSystem.logEvent('meta_cognition', {
+            confidence,
+            tool: assistantMsg.tool_calls[0].function.name,
+          });
+
+          // If confidence is low, log a warning but continue (could be enhanced to request clarification)
+          if (confidence < 0.5) {
+            console.warn(`[ShadowGrok] Low confidence (${confidence.toFixed(2)}) for tool: ${assistantMsg.tool_calls[0].function.name}`);
+            reasoningTraceSystem.logEvent('low_confidence_warning', {
+              confidence,
+              tool: assistantMsg.tool_calls[0].function.name,
+            });
+          }
+        } catch (metaError) {
+          console.error('[ShadowGrok] Meta-cognition error:', metaError);
+          // Continue without meta-cognition if it fails
+        }
+      }
 
       // Record step
       await prisma.agentStep.create({
@@ -145,6 +229,12 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
 
         const result: ToolResult = await executeTool(toolName, args, context);
         toolResults.push({ tool: toolName, result });
+
+        reasoningTraceSystem.logEvent('tool_execution', {
+          tool: toolName,
+          success: result.success,
+          executionId: execution.id,
+        });
 
         // Record tool result in step
         await prisma.agentStep.updateMany({
@@ -187,6 +277,15 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
       },
     });
 
+    // Finalize reasoning trace
+    reasoningTraceSystem.logEvent('execution_complete', {
+      executionId: execution.id,
+      status: finalResponse.includes("paused") ? "pending_approval" : "completed",
+      stepCount,
+      toolExecutions: toolResults.length,
+    });
+    reasoningTraceSystem.endSession(traceSessionId);
+
     await prisma.agentTask.update({
       where: { id: agentTask.id },
       data: {
@@ -203,9 +302,18 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
       finalResponse,
       toolResults,
       steps: stepCount,
+      traceSessionId,
     };
 
   } catch (error: any) {
+    // Log error to reasoning trace
+    reasoningTraceSystem.addError(error, { executionId: execution.id });
+    reasoningTraceSystem.logEvent('execution_failed', {
+      executionId: execution.id,
+      error: error.message,
+    });
+    reasoningTraceSystem.endSession(traceSessionId);
+
     await prisma.shadowGrokExecution.update({
       where: { id: execution.id },
       data: { status: "failed", error: error.message },
