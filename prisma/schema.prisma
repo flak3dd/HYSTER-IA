@@ -970,3 +970,131 @@ model Notification {
   @@index([createdAt])
   @@map("notifications")
 }
+
+// ---------------------------------------------------------------------------
+// Post-Exploitation & Lateral Movement Models
+// ---------------------------------------------------------------------------
+
+model CompromisedHost {
+  id              String   @id @default(cuid())
+  hostname        String
+  ipAddress       String
+  os              String?
+  domain          String?
+  privileges      String   @default("user")
+  implantId       String?
+  firstCompromised DateTime @default(now())
+  lastSeen        DateTime @updatedAt
+  credentials     Credential[] @relation("CompromisedHostCredentials")
+  credentialSources Credential[] @relation("CredentialSource")
+  pivotPathsFrom   PivotPath[] @relation("FromHost")
+  pivotPathsTo     PivotPath[] @relation("ToHost")
+
+  @@index([ipAddress])
+  @@index([domain])
+  @@index([implantId])
+  @@map("compromised_hosts")
+}
+
+model Credential {
+  id              String   @id @default(cuid())
+  type            String   // NTLM, Kerberos, Plaintext, Hash, Ticket
+  username        String
+  password        String?  // encrypted
+  hash            String?
+  domain          String?
+  sourceHostId    String?
+  sourceHost      CompromisedHost? @relation("CredentialSource", fields: [sourceHostId], references: [id])
+  compromisedHosts CompromisedHost[] @relation("CompromisedHostCredentials")
+  createdAt       DateTime @default(now())
+
+  @@index([type])
+  @@index([username])
+  @@index([domain])
+  @@index([sourceHostId])
+  @@map("credentials")
+}
+
+model PivotPath {
+  id              String   @id @default(cuid())
+  fromHostId      String
+  toHostId        String
+  technique       String   // smb, winrm, pth, kerberoast, etc.
+  success         Boolean
+  timestamp       DateTime @default(now())
+  fromHost        CompromisedHost @relation("FromHost", fields: [fromHostId], references: [id])
+  toHost          CompromisedHost @relation("ToHost", fields: [toHostId], references: [id])
+
+  @@index([fromHostId])
+  @@index([toHostId])
+  @@index([technique])
+  @@map("pivot_paths")
+}
+
+model LateralMovementSession {
+  id              String   @id @default(cuid())
+  workflowSessionId String?
+  targetDomain    String?
+  status          String   @default("running")
+  discoveredHosts Int      @default(0)
+  compromisedHosts Int     @default(0)
+  credentialsFound Int     @default(0)
+  startTime       DateTime @default(now())
+  endTime         DateTime?
+  summary         Json?
+
+  @@index([workflowSessionId])
+  @@index([status])
+  @@index([startTime])
+  @@map("lateral_movement_sessions")
+}
+
+model KerberosTicket {
+  id              String   @id @default(cuid())
+  ticketType      String   // TGS, AS-REP
+  spn             String
+  accountName     String
+  domain          String
+  ticketData      String   @db.Text
+  crackStatus     String   @default("pending") // pending, cracking, cracked, failed
+  crackedHash     String?
+  sourceHostId    String?
+  createdAt       DateTime @default(now())
+
+  @@index([ticketType])
+  @@index([accountName])
+  @@index([domain])
+  @@index([crackStatus])
+  @@index([sourceHostId])
+  @@map("kerberos_tickets")
+}
+
+model BloodHoundNode {
+  id              String   @id @default(cuid())
+  objectId        String   @unique
+  name            String
+  type            String   // User, Computer, Group, GPO, Domain, OU
+  properties      Json
+  labels          String[] @default([])
+  domain          String?
+  createdAt       DateTime @default(now())
+
+  @@index([objectId])
+  @@index([type])
+  @@index([domain])
+  @@map("bloodhound_nodes")
+}
+
+model BloodHoundEdge {
+  id              String   @id @default(cuid())
+  sourceId        String
+  targetId        String
+  edgeType        String
+  aclRights       String?
+  createdAt       DateTime @default(now())
+
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([edgeType])
+  @@map("bloodhound_edges")
+}

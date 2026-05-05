@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 const LINKS = [
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/nodes", label: "Infrastructure" },
+  { href: "/admin/beacons", label: "Beacons" },
   { href: "/admin/transport", label: "Protocols" },
   { href: "/admin/payloads", label: "Payloads" },
   { href: "/admin/osint", label: "OSINT" },

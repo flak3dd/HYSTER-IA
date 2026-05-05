@@ -1,7 +1,7 @@
-import { Logger } from "@/lib/logger"
+import logger from "@/lib/logger"
 import { serverEnv } from "@/lib/env"
 
-const logger = new Logger('email-notifier')
+const emailNotifierLogger = logger.child({ component: 'email-notifier' })
 
 export interface EmailNotification {
   to: string
@@ -17,7 +17,7 @@ export async function sendEmailNotification(email: EmailNotification): Promise<b
   try {
     const resendApiKey = serverEnv.RESEND_API_KEY
     if (!resendApiKey) {
-      logger.warn('Resend API key not configured, skipping email notification')
+      emailNotifierLogger.warn('Resend API key not configured, skipping email notification')
       return false
     }
 
@@ -38,14 +38,14 @@ export async function sendEmailNotification(email: EmailNotification): Promise<b
 
     if (!response.ok) {
       const error = await response.text()
-      logger.error(`Failed to send email: ${error}`)
+      emailNotifierLogger.error(`Failed to send email: ${error}`)
       return false
     }
 
-    logger.info(`Email sent successfully to ${email.to}`)
+    emailNotifierLogger.info(`Email sent successfully to ${email.to}`)
     return true
   } catch (error) {
-    logger.error(`Error sending email notification: ${error}`)
+    emailNotifierLogger.error(`Error sending email notification: ${error}`)
     return false
   }
 }

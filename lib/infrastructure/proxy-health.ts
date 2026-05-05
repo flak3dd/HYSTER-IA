@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db"
-import { Logger } from "@/lib/logger"
+import logger from "@/lib/logger"
 
-const logger = new Logger('proxy-health')
+const proxyHealthLogger = logger.child({ component: 'proxy-health' })
 
 export type ProxyHealthStatus = 'unknown' | 'healthy' | 'unhealthy' | 'checking'
 
@@ -136,13 +136,13 @@ export async function checkNodeProxyHealth(nodeId: string): Promise<ProxyHealthC
   })
 
   if (!node) {
-    logger.error(`Node ${nodeId} not found`)
+    proxyHealthLogger.error(`Node ${nodeId} not found`)
     return null
   }
 
   const proxyUrl = node.socksProxyUrl || node.httpProxyUrl
   if (!proxyUrl) {
-    logger.warn(`Node ${node.name} has no proxy configured`)
+    proxyHealthLogger.warn(`Node ${node.name} has no proxy configured`)
     return null
   }
 
@@ -175,7 +175,7 @@ export async function checkNodeProxyHealth(nodeId: string): Promise<ProxyHealthC
     error: result.error,
   }
 
-  logger.info(`Proxy health check for ${node.name}: ${healthStatus} (${result.responseTimeMs}ms)`)
+  proxyHealthLogger.info(`Proxy health check for ${node.name}: ${healthStatus} (${result.responseTimeMs}ms)`)
 
   return healthCheck
 }
@@ -206,7 +206,7 @@ export async function checkAllProxyHealths(): Promise<ProxyHealthCheck[]> {
 export async function getBestProxy(): Promise<ProxyConfig | null> {
   const healthyProxies = await getHealthyProxies()
   if (healthyProxies.length === 0) {
-    logger.warn('No healthy proxies available')
+    proxyHealthLogger.warn('No healthy proxies available')
     return null
   }
 
@@ -223,10 +223,10 @@ export async function updateProxyPriority(nodeId: string, priority: number): Pro
       where: { id: nodeId },
       data: { proxyPriority: priority },
     })
-    logger.info(`Updated proxy priority for node ${nodeId} to ${priority}`)
+    proxyHealthLogger.info(`Updated proxy priority for node ${nodeId} to ${priority}`)
     return true
   } catch (error) {
-    logger.error(`Failed to update proxy priority: ${error}`)
+    proxyHealthLogger.error(`Failed to update proxy priority: ${error}`)
     return false
   }
 }
@@ -240,10 +240,10 @@ export async function markProxyUnhealthy(nodeId: string): Promise<boolean> {
       where: { id: nodeId },
       data: { proxyHealthStatus: 'unhealthy' },
     })
-    logger.info(`Manually marked proxy ${nodeId} as unhealthy`)
+    proxyHealthLogger.info(`Manually marked proxy ${nodeId} as unhealthy`)
     return true
   } catch (error) {
-    logger.error(`Failed to mark proxy as unhealthy: ${error}`)
+    proxyHealthLogger.error(`Failed to mark proxy as unhealthy: ${error}`)
     return false
   }
 }

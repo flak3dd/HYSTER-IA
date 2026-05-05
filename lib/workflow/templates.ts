@@ -6,7 +6,7 @@ export interface WorkflowTemplate {
   id: string
   name: string
   description: string
-  category: 'node_management' | 'user_management' | 'configuration' | 'system' | 'advanced'
+  category: 'node_management' | 'user_management' | 'configuration' | 'system' | 'advanced' | 'post_exploitation'
   initialPrompt: string
   icon?: string
   estimatedSteps: number
@@ -127,6 +127,60 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     initialPrompt: 'Perform comprehensive system health check',
     icon: 'heart',
     estimatedSteps: 3,
+  },
+  {
+    id: 'lateral_movement',
+    name: 'Lateral Movement',
+    description: 'Execute lateral movement across compromised network using various techniques',
+    category: 'post_exploitation',
+    initialPrompt: 'Execute lateral movement from a compromised host',
+    icon: 'arrow-right',
+    estimatedSteps: 4,
+    requiredParams: [
+      { name: 'sourceHostId', type: 'string', description: 'Source compromised host ID', placeholder: 'host-123' },
+      { name: 'targetHostId', type: 'string', description: 'Target host ID', placeholder: 'host-456' },
+      { name: 'technique', type: 'string', description: 'Movement technique (smb, winrm, pth)', placeholder: 'smb' },
+      { name: 'credentialId', type: 'string', description: 'Credential ID to use', placeholder: 'cred-789' },
+    ],
+  },
+  {
+    id: 'credential_harvest',
+    name: 'Credential Harvest',
+    description: 'Harvest credentials from compromised hosts using various methods',
+    category: 'post_exploitation',
+    initialPrompt: 'Harvest credentials from a compromised host',
+    icon: 'key',
+    estimatedSteps: 3,
+    requiredParams: [
+      { name: 'hostId', type: 'string', description: 'Compromised host ID', placeholder: 'host-123' },
+      { name: 'methods', type: 'array', description: 'Harvest methods (lsass, cached, registry)', placeholder: 'lsass, cached' },
+    ],
+  },
+  {
+    id: 'attack_path_discovery',
+    name: 'Attack Path Discovery',
+    description: 'Discover optimal attack paths using graph-based analysis',
+    category: 'post_exploitation',
+    initialPrompt: 'Discover attack paths to target privilege level',
+    icon: 'git-branch',
+    estimatedSteps: 2,
+    requiredParams: [
+      { name: 'sourceHostId', type: 'string', description: 'Source compromised host ID', placeholder: 'host-123' },
+      { name: 'targetPrivilege', type: 'string', description: 'Target privilege level (user, admin, domain_admin)', placeholder: 'domain_admin' },
+    ],
+  },
+  {
+    id: 'auto_pivot',
+    name: 'Auto Pivot',
+    description: 'Automatically pivot through network to reach target privilege level',
+    category: 'post_exploitation',
+    initialPrompt: 'Auto-pivot to Domain Admin',
+    icon: 'git-merge',
+    estimatedSteps: 5,
+    requiredParams: [
+      { name: 'sourceHostId', type: 'string', description: 'Source compromised host ID', placeholder: 'host-123' },
+      { name: 'targetPrivilege', type: 'string', description: 'Target privilege level', placeholder: 'domain_admin' },
+    ],
   },
 ]
 

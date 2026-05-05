@@ -129,7 +129,7 @@ export function checkPasswordStrength(password: string): PasswordStrengthResult 
   // Ensure score is within bounds
   score = Math.max(0, Math.min(4, score))
 
-  let strength: PasswordStrengthResult['strength']
+  let strength: PasswordStrengthResult['strength'] = 'weak'
   switch (score) {
     case 0:
       strength = 'very weak'
@@ -371,7 +371,7 @@ export function runSecurityChecklist(config: {
 
     checks.push({
       name: 'TLS Configuration',
-      passed: config.tls.mode === 'acme' || (config.tls.cert?.includes('BEGIN CERTIFICATE') && config.tls.key?.includes('PRIVATE KEY')),
+      passed: config.tls.mode === 'acme' || ((config.tls.cert?.includes('BEGIN CERTIFICATE') ?? false) && (config.tls.key?.includes('PRIVATE KEY') ?? false)),
       severity: 'high',
       description: 'TLS configuration should be valid',
       recommendation: 'Ensure certificate and key are properly formatted',

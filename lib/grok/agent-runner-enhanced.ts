@@ -79,7 +79,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
   // Start reasoning trace for this execution
   const traceSessionId = randomUUID();
   reasoningTraceSystem.startSession(traceSessionId);
-  reasoningTraceSystem.logEvent('execution_start', {
+  reasoningTraceSystem.logEvent('reasoning_start', {
     executionId: execution.id,
     userId,
     prompt,
@@ -116,7 +116,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
     while (stepCount < maxSteps) {
       stepCount++;
 
-      reasoningTraceSystem.logEvent('step_start', {
+      reasoningTraceSystem.logEvent('reasoning_start', {
         stepCount,
         executionId: execution.id,
       });
@@ -125,18 +125,20 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
       let reasoningContext = "";
       if (stepCount > 1 || prompt.length > 200) {
         try {
-          const reasoningSteps = await cot.reason({
-            goal: prompt,
-            availableTools: allowedTools,
-            context: messages.slice(-3).map(m => ({ role: m.role, content: m.content || '' })),
-          });
+          const reasoningSteps = await cot.reason(
+            prompt,
+            {
+              availableTools: allowedTools,
+              context: messages.slice(-3).map(m => ({ role: m.role, content: m.content || '' })),
+            }
+          );
 
-          reasoningTraceSystem.logEvent('chain_of_thought', {
-            steps: reasoningSteps.steps,
+          reasoningTraceSystem.logEvent('thought_created', {
+            steps: reasoningSteps.reasoningSteps,
             confidence: reasoningSteps.confidence,
           });
 
-          reasoningContext = `\n\n[Reasoning: ${reasoningSteps.summary}]`;
+          reasoningContext = `\n\n[Reasoning: ${reasoningSteps.finalAnswer}]`;
         } catch (reasoningError) {
           console.error('[ShadowGrok] Chain-of-thought reasoning error:', reasoningError);
           // Continue without reasoning if it fails
@@ -158,7 +160,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
       };
       messages.push(assistantMsg);
 
-      reasoningTraceSystem.logEvent('llm_response', {
+      reasoningTraceSystem.logEvent('decision_made', {
         hasToolCalls: !!assistantMsg.tool_calls?.length,
         contentLength: assistantMsg.content?.length || 0,
       });
@@ -177,7 +179,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
 
           const confidence = assessment.confidence;
 
-          reasoningTraceSystem.logEvent('meta_cognition', {
+          reasoningTraceSystem.logEvent('uncertainty_assessed', {
             confidence,
             tool: assistantMsg.tool_calls[0].function.name,
           });
@@ -185,7 +187,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
           // If confidence is low, log a warning but continue (could be enhanced to request clarification)
           if (confidence < 0.5) {
             console.warn(`[ShadowGrok] Low confidence (${confidence.toFixed(2)}) for tool: ${assistantMsg.tool_calls[0].function.name}`);
-            reasoningTraceSystem.logEvent('low_confidence_warning', {
+            reasoningTraceSystem.logEvent('error_occurred', {
               confidence,
               tool: assistantMsg.tool_calls[0].function.name,
             });
@@ -230,7 +232,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
         const result: ToolResult = await executeTool(toolName, args, context);
         toolResults.push({ tool: toolName, result });
 
-        reasoningTraceSystem.logEvent('tool_execution', {
+        reasoningTraceSystem.logEvent('tool_called', {
           tool: toolName,
           success: result.success,
           executionId: execution.id,
@@ -278,7 +280,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
     });
 
     // Finalize reasoning trace
-    reasoningTraceSystem.logEvent('execution_complete', {
+    reasoningTraceSystem.logEvent('reasoning_complete', {
       executionId: execution.id,
       status: finalResponse.includes("paused") ? "pending_approval" : "completed",
       stepCount,
@@ -308,7 +310,7 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
   } catch (error: any) {
     // Log error to reasoning trace
     reasoningTraceSystem.addError(error, { executionId: execution.id });
-    reasoningTraceSystem.logEvent('execution_failed', {
+    reasoningTraceSystem.logEvent('error_occurred', {
       executionId: execution.id,
       error: error.message,
     });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyAdmin } from '@/lib/auth/verify-admin'
+import { verifyAdmin } from '@/lib/auth/admin'
 import {
   markNotificationAsRead,
   deleteNotification,
@@ -7,15 +7,17 @@ import {
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { notificationId: string } }
+  { params }: { params: Promise<{ notificationId: string }> }
 ) {
-  const auth = await verifyAdmin(request)
-  if (!auth.success) {
+  try {
+    await verifyAdmin(request)
+  } catch (error) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const success = await markNotificationAsRead(params.notificationId)
+    const { notificationId } = await params
+    const success = await markNotificationAsRead(notificationId)
     if (success) {
       return NextResponse.json({ success: true })
     } else {
@@ -32,15 +34,17 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { notificationId: string } }
+  { params }: { params: Promise<{ notificationId: string }> }
 ) {
-  const auth = await verifyAdmin(request)
-  if (!auth.success) {
+  try {
+    await verifyAdmin(request)
+  } catch (error) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const success = await deleteNotification(params.notificationId)
+    const { notificationId } = await params
+    const success = await deleteNotification(notificationId)
     if (success) {
       return NextResponse.json({ success: true })
     } else {
