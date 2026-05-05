@@ -20,6 +20,40 @@
   --animation-easing-out: cubic-bezier(0.4, 0, 1, 1);
   --animation-easing-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --animation-easing-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* Spacing scale (8pt grid) */
+  --spacing-0: 0;
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-10: 2.5rem;
+  --spacing-12: 3rem;
+  --spacing-16: 4rem;
+  --spacing-20: 5rem;
+  --spacing-24: 6rem;
+
+  /* Shadow elevation system */
+  --shadow-elevation-1: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-elevation-2: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  --shadow-elevation-3: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-elevation-4: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-elevation-5: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+
+  /* Colored shadows */
+  --shadow-primary: 0 4px 12px rgba(13, 148, 136, 0.15);
+  --shadow-primary-glow: 0 0 20px rgba(13, 148, 136, 0.3);
+  --shadow-success: 0 4px 12px rgba(16, 185, 129, 0.15);
+  --shadow-warning: 0 4px 12px rgba(245, 158, 11, 0.15);
+  --shadow-critical: 0 4px 12px rgba(220, 38, 38, 0.15);
+
+  /* Inset shadows */
+  --shadow-inset-sm: inset 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-inset-md: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+  --shadow-inset-lg: inset 0 4px 8px 0 rgba(0, 0, 0, 0.08);
 }
 
 /* ------------------------------------------------------------------ */
@@ -30,8 +64,9 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", "Monaco", "Inconsolata", "Fira Mono", monospace;
   --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -76,6 +111,16 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+
+  /* Semantic status colors */
+  --color-critical: var(--critical);
+  --color-critical-foreground: var(--critical-foreground);
+  --color-stable: var(--stable);
+  --color-stable-foreground: var(--stable-foreground);
+  --color-maintenance: var(--maintenance);
+  --color-maintenance-foreground: var(--maintenance-foreground);
+  --color-pending: var(--pending);
+  --color-pending-foreground: var(--pending-foreground);
 }
 
 /* ------------------------------------------------------------------ */
@@ -114,6 +159,16 @@
   --warning-foreground: #FFFBEB;
   --info: #06B6D4;
   --info-foreground: #ECFEFF;
+
+  /* Semantic status colors */
+  --critical: #DC2626;
+  --critical-foreground: #FEF2F2;
+  --stable: #10B981;
+  --stable-foreground: #ECFDF5;
+  --maintenance: #F59E0B;
+  --maintenance-foreground: #FFFBEB;
+  --pending: #6366F1;
+  --pending-foreground: #EEF2FF;
 
   --sidebar: #FFFFFF;
   --sidebar-foreground: #334155;
@@ -162,6 +217,16 @@
   --info: #22D3EE;
   --info-foreground: #164E63;
 
+  /* Semantic status colors */
+  --critical: #F87171;
+  --critical-foreground: #450A0A;
+  --stable: #34D399;
+  --stable-foreground: #064E3B;
+  --maintenance: #FBBF24;
+  --maintenance-foreground: #78350F;
+  --pending: #818CF8;
+  --pending-foreground: #1E1B4B;
+
   --sidebar: #18181F;
   --sidebar-foreground: #94A3B8;
   --sidebar-primary: #2DD4BF;
@@ -209,6 +274,16 @@
   --info: #DC2626;
   --info-foreground: #FEF2F2;
 
+  /* Semantic status colors */
+  --critical: #EF4444;
+  --critical-foreground: #FEF2F2;
+  --stable: #DC2626;
+  --stable-foreground: #FEF2F2;
+  --maintenance: #F59E0B;
+  --maintenance-foreground: #FFFBEB;
+  --pending: #F87171;
+  --pending-foreground: #450A0A;
+
   --sidebar: #0A0505;
   --sidebar-foreground: #FCA5A5;
   --sidebar-primary: #DC2626;
@@ -244,6 +319,97 @@
 }
 
 /* ------------------------------------------------------------------ */
+/*  Reduced Motion Support                                              */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-pulse,
+  .animate-ping,
+  .animate-bounce,
+  .animate-spin {
+    animation: none !important;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  High Contrast Mode                                                  */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-contrast: high) {
+  :root {
+    --border: #000000;
+    --input: #000000;
+    --ring: #000000;
+  }
+
+  .dark {
+    --border: #FFFFFF;
+    --input: #FFFFFF;
+    --ring: #FFFFFF;
+  }
+
+  button,
+  a,
+  [role="button"] {
+    border: 2px solid currentColor;
+  }
+
+  .border-border {
+    border-width: 2px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Forced Colors Mode (Windows High Contrast)                          */
+/* ------------------------------------------------------------------ */
+
+@media (forced-colors: active) {
+  :root {
+    --background: Canvas;
+    --foreground: CanvasText;
+    --card: Canvas;
+    --card-foreground: CanvasText;
+    --popover: Canvas;
+    --popover-foreground: CanvasText;
+    --primary: ButtonText;
+    --primary-foreground: ButtonFace;
+    --secondary: ButtonFace;
+    --secondary-foreground: ButtonText;
+    --muted: Canvas;
+    --muted-foreground: GrayText;
+    --accent: Canvas;
+    --accent-foreground: CanvasText;
+    --destructive: LinkText;
+    --destructive-foreground: Canvas;
+    --border: CanvasText;
+    --input: CanvasText;
+    --ring: CanvasText;
+  }
+
+  button,
+  [role="button"] {
+    border: 2px solid CanvasText;
+  }
+
+  .shadow-elevation-1,
+  .shadow-elevation-2,
+  .shadow-elevation-3,
+  .shadow-elevation-4,
+  .shadow-elevation-5 {
+    box-shadow: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Custom Utilities                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -272,6 +438,55 @@
   font-size: 0.875rem;
   line-height: 1.25rem;
   font-weight: 600;
+}
+
+/* Display font scale for hero sections */
+@utility text-display-2xl {
+  font-size: 2.5rem;
+  line-height: 3rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+@utility text-display-xl {
+  font-size: 2rem;
+  line-height: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+@utility text-display-lg {
+  font-size: 1.75rem;
+  line-height: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* Tabular figures for numerical data */
+@utility font-tabular-nums {
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tracking utilities */
+@utility tracking-tight {
+  letter-spacing: -0.025em;
+}
+
+@utility tracking-normal {
+  letter-spacing: 0;
+}
+
+@utility tracking-wide {
+  letter-spacing: 0.025em;
+}
+
+@utility tracking-wider {
+  letter-spacing: 0.05em;
+}
+
+@utility tracking-widest {
+  letter-spacing: 0.1em;
 }
 
 @utility text-body-lg {
@@ -323,6 +538,90 @@
 
 @utility glow-primary {
   box-shadow: 0 0 8px rgba(45, 212, 191, 0.3);
+}
+
+/* Glass morphism utilities */
+@utility glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+@utility glass-dark {
+  background: rgba(26, 26, 34, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@utility glass-subtle {
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+@utility glass-strong {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/* Shadow elevation utilities */
+@utility shadow-elevation-1 {
+  box-shadow: var(--shadow-elevation-1);
+}
+
+@utility shadow-elevation-2 {
+  box-shadow: var(--shadow-elevation-2);
+}
+
+@utility shadow-elevation-3 {
+  box-shadow: var(--shadow-elevation-3);
+}
+
+@utility shadow-elevation-4 {
+  box-shadow: var(--shadow-elevation-4);
+}
+
+@utility shadow-elevation-5 {
+  box-shadow: var(--shadow-elevation-5);
+}
+
+/* Colored shadow utilities */
+@utility shadow-primary {
+  box-shadow: var(--shadow-primary);
+}
+
+@utility shadow-primary-glow {
+  box-shadow: var(--shadow-primary-glow);
+}
+
+@utility shadow-success {
+  box-shadow: var(--shadow-success);
+}
+
+@utility shadow-warning {
+  box-shadow: var(--shadow-warning);
+}
+
+@utility shadow-critical {
+  box-shadow: var(--shadow-critical);
+}
+
+/* Inset shadow utilities */
+@utility shadow-inset-sm {
+  box-shadow: var(--shadow-inset-sm);
+}
+
+@utility shadow-inset-md {
+  box-shadow: var(--shadow-inset-md);
+}
+
+@utility shadow-inset-lg {
+  box-shadow: var(--shadow-inset-lg);
 }
 
 /* ------------------------------------------------------------------ */
@@ -410,6 +709,17 @@
   50% { opacity: 0.7; }
 }
 
+@keyframes fall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /*  Animation Utilities                                                */
 /* ------------------------------------------------------------------ */
@@ -436,6 +746,10 @@
 
 @utility animate-pulse-subtle {
   animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+@utility animate-fall {
+  animation: fall 3s ease-in forwards;
 }
 
 /* ------------------------------------------------------------------ */

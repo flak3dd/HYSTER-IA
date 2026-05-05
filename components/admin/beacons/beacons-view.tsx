@@ -8,6 +8,7 @@ import { BeaconDetailModal } from "./beacon-detail-modal"
 import { Button } from "@/components/ui/button"
 import { Plus, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
+import { apiFetch } from "@/lib/api/fetch"
 
 // Types
 export type BeaconStatus = "online" | "idle" | "stale" | "offline"
@@ -23,13 +24,15 @@ export interface Beacon {
   domain?: string
   user: string
   privileges: PrivilegeLevel
-  lastCheckin: Date
+  lastCheckin: number
   status: BeaconStatus
   implantType: string
   egressNode?: string
   runningTasks: number
-  firstSeen: Date
+  firstSeen: number
   nodeId?: string
+  createdAt: number
+  updatedAt: number
 }
 
 export interface BeaconsFilters {
@@ -69,109 +72,55 @@ export default function BeaconsView() {
   const fetchBeacons = useCallback(async () => {
     setLoading(true)
     try {
-      // This would be replaced with actual API call
-      // For now, simulate data
-      const mockBeacons: Beacon[] = [
-        {
-          id: "1",
-          implantId: "implant-001",
-          hostname: "DESKTOP-ABC123",
-          ipAddress: "10.0.0.45",
-          os: "Windows",
-          osVersion: "11 Pro",
-          domain: "corp.local",
-          user: "jsmith",
-          privileges: "admin",
-          lastCheckin: new Date(Date.now() - 2 * 60 * 1000), // 2 minutes ago
-          status: "online",
-          implantType: "Hysteria2",
-          egressNode: "node-sg-01",
-          runningTasks: 3,
-          firstSeen: new Date(Date.now() - 24 * 60 * 60 * 1000),
-          nodeId: "node-1"
-        },
-        {
-          id: "2",
-          implantId: "implant-002",
-          hostname: "WORKSTATION-XYZ",
-          ipAddress: "10.0.0.67",
-          os: "Windows",
-          osVersion: "10 Pro",
-          domain: "corp.local",
-          user: "bjohnson",
-          privileges: "user",
-          lastCheckin: new Date(Date.now() - 5 * 60 * 1000), // 5 minutes ago
-          status: "idle",
-          implantType: "Hysteria2",
-          egressNode: "node-sg-01",
-          runningTasks: 0,
-          firstSeen: new Date(Date.now() - 48 * 60 * 60 * 1000),
-          nodeId: "node-1"
-        },
-        {
-          id: "3",
-          implantId: "implant-003",
-          hostname: "SRV-001",
-          ipAddress: "10.0.0.100",
-          os: "Windows",
-          osVersion: "Server 2022",
-          domain: "corp.local",
-          user: "SYSTEM",
-          privileges: "system",
-          lastCheckin: new Date(Date.now() - 1 * 60 * 1000), // 1 minute ago
-          status: "online",
-          implantType: "Swarm",
-          egressNode: "node-us-east-1",
-          runningTasks: 5,
-          firstSeen: new Date(Date.now() - 72 * 60 * 60 * 1000),
-          nodeId: "node-2"
-        },
-        {
-          id: "4",
-          implantId: "implant-004",
-          hostname: "linux-box-01",
-          ipAddress: "10.0.0.200",
-          os: "Linux",
-          osVersion: "Ubuntu 22.04",
-          domain: "corp.local",
-          user: "root",
-          privileges: "root",
-          lastCheckin: new Date(Date.now() - 20 * 60 * 1000), // 20 minutes ago
-          status: "stale",
-          implantType: "Hysteria2",
-          egressNode: "node-eu-west-1",
-          runningTasks: 1,
-          firstSeen: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-          nodeId: "node-3"
+      const params = new URLSearchParams()
+      
+      if (filters.status.length > 0) {
+        filters.status.forEach(s => params.append("status", s))
+      }
+      if (filters.privilegeLevel.length > 0) {
+        filters.privilegeLevel.forEach(p => params.append("privilegeLevel", p))
+      }
+      if (filters.osFamily.length > 0) {
+        filters.osFamily.forEach(o => params.append("osFamily", o))
+      }
+      if (filters.domain.length > 0) {
+        filters.domain.forEach(d => params.append("domain", d))
+      }
+      if (filters.search) {
+        params.append("search", filters.search)
+      }
+      
+      const res = await apiFetch(`/api/admin/beacons?${params.toString()}`)
+      
+      if (res.ok) {
+        const data = await res.json()
+        setBeacons(data.beacons || [])
+        const apiStats = data.stats || {
+          total: 0,
+          online: 0,
+          idle: 0,
+          stale: 0,
+          offline: 0,
+          highPrivilege: 0,
+          domains: 0,
         }
-      ]
-
-      setBeacons(mockBeacons)
-      updateStats(mockBeacons)
+        setStats({
+          total: apiStats.total,
+          active: apiStats.online + apiStats.idle,
+          highPrivilege: apiStats.highPrivilege,
+          domains: apiStats.domains,
+          stale: apiStats.stale
+        })
+      } else {
+        toast.error("Failed to fetch beacons")
+      }
     } catch (error) {
+      console.error("Error fetching beacons:", error)
       toast.error("Failed to fetch beacons")
-      console.error(error)
     } finally {
       setLoading(false)
     }
-  }, [])
-
-  // Update statistics
-  const updateStats = useCallback((data: Beacon[]) => {
-    const uniqueDomains = new Set(data.map(b => b.domain).filter(Boolean))
-    const highPrivilegeCount = data.filter(
-      b => b.privileges === "admin" || b.privileges === "system" || b.privileges === "root"
-    ).length
-    const staleCount = data.filter(b => b.status === "stale" || b.status === "offline").length
-
-    setStats({
-      total: data.length,
-      active: data.filter(b => b.status === "online" || b.status === "idle").length,
-      highPrivilege: highPrivilegeCount,
-      domains: uniqueDomains.size,
-      stale: staleCount
-    })
-  }, [])
+  }, [filters])
 
   // Auto-refresh every 5 seconds
   useEffect(() => {

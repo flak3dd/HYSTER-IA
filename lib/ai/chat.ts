@@ -6,6 +6,14 @@ import { buildSystemPrompt, Role } from "@/lib/ai/system-prompt"
 
 const MAX_TOOL_ROUNDS = 15
 
+type ProgressCallback = (progress: {
+  type: "step" | "tool_start" | "tool_complete" | "tool_error"
+  step?: string
+  toolName?: string
+  toolArgs?: string
+  toolResult?: string
+}) => Promise<void> | void
+
 // Format tool results for human-readable summary
 function formatToolResultSummary(toolName: string, result: unknown): string {
   if (toolName === "generate_payload") {
@@ -73,6 +81,7 @@ export async function runChat(
   conversationId: string,
   userMessage: string,
   invokerUid: string,
+  onProgress?: ProgressCallback,
 ): Promise<{ messages: AiMessage[]; error?: string }> {
   const conversation = await getConversation(conversationId)
   if (!conversation) {
@@ -123,6 +132,8 @@ export async function runChat(
   const newMessages: AiMessage[] = [userMsg]
 
   try {
+    await onProgress?.({ type: "step", step: "Thinking about your request..." })
+    
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       let result: { content: string | null; toolCalls: { id: string; type: "function"; function: { name: string; arguments: string } }[]; finishReason: string | null }
       
@@ -137,12 +148,24 @@ export async function runChat(
         // LLM unavailable - try rule-based fallback for payload intents
         const payloadIntent = detectPayloadIntent(userMessage)
         if (payloadIntent) {
+          await onProgress?.({ 
+            type: "tool_start", 
+            toolName: payloadIntent.toolName,
+            toolArgs: JSON.stringify(payloadIntent.args)
+          })
+          
           // Execute the tool directly
           const toolResult = await runAiTool(
             payloadIntent.toolName,
             payloadIntent.args,
             { signal: AbortSignal.timeout(60_000), invokerUid }
           )
+          
+          await onProgress?.({ 
+            type: "tool_complete", 
+            toolName: payloadIntent.toolName,
+            toolResult: JSON.stringify(toolResult)
+          })
           
           // Create synthetic responses
           const assistantMsg: AiMessage = {
@@ -206,6 +229,11 @@ export async function runChat(
 
         // Execute each tool call (parallel for independent tools)
         const toolExecutionPromises = result.toolCalls.map(async (call) => {
+          await onProgress?.({ 
+            type: "tool_start", 
+            toolName: call.function.name,
+            toolArgs: call.function.arguments
+          })
           let parsedArgs: unknown = {}
           try {
             parsedArgs = call.function.arguments
@@ -223,9 +251,21 @@ export async function runChat(
               { signal: AbortSignal.timeout(90_000), invokerUid }, // Increased timeout
             )
             resultContent = JSON.stringify(toolResult)
+            
+            await onProgress?.({ 
+              type: "tool_complete", 
+              toolName: call.function.name,
+              toolResult: resultContent
+            })
           } catch (err) {
             resultContent = JSON.stringify({
               error: err instanceof Error ? err.message : String(err),
+            })
+            
+            await onProgress?.({ 
+              type: "tool_error", 
+              toolName: call.function.name,
+              toolResult: resultContent
             })
           }
 

@@ -97,7 +97,7 @@ export function BeaconsDataTable({
         "24h": 24 * 60 * 60 * 1000
       }
       filtered = filtered.filter(b => {
-        const checkinTime = b.lastCheckin.getTime()
+        const checkinTime = b.lastCheckin
         return now - checkinTime <= thresholds[filters.lastCheckin]
       })
     }
@@ -177,9 +177,10 @@ export function BeaconsDataTable({
     }
   }
 
-  const getRelativeTime = (date: Date) => {
+  const getRelativeTime = (date: Date | number) => {
     const now = Date.now()
-    const diff = now - date.getTime()
+    const timestamp = typeof date === 'number' ? date : date.getTime()
+    const diff = now - timestamp
     const minutes = Math.floor(diff / (1000 * 60))
 
     if (minutes < 1) return "Just now"

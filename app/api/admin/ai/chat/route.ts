@@ -6,42 +6,37 @@ import { runChat } from "@/lib/ai/chat"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+type ProgressEvent = {
+  type: "step" | "tool_start" | "tool_complete" | "tool_error"
+  step?: string
+  toolName?: string
+  toolArgs?: string
+  toolResult?: string
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const admin = await verifyAdmin(req)
     const body = await req.json()
     const input = AiChatRequest.parse(body)
     
-    // Add timeout and better error handling
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 120000) // 2 minute timeout
+    // Collect progress events
+    const progressEvents: ProgressEvent[] = []
     
-    try {
-      const result = await runChat(
-        input.conversationId,
-        input.message,
-        admin.id,
-      )
-      
-      clearTimeout(timeout)
-      
-      if (result.error) {
-        return NextResponse.json(
-          { messages: result.messages, error: result.error },
-          { status: 500 },
-        )
+    const result = await runChat(
+      input.conversationId,
+      input.message,
+      admin.id,
+      (progress) => {
+        progressEvents.push(progress)
       }
-      return NextResponse.json({ messages: result.messages })
-    } catch (error: any) {
-      clearTimeout(timeout)
-      if (error.name === 'AbortError') {
-        return NextResponse.json(
-          { error: 'Request timeout - AI response took too long' },
-          { status: 504 }
-        )
-      }
-      throw error
-    }
+    )
+    
+    return NextResponse.json({
+      messages: result.messages,
+      error: result.error,
+      progress: progressEvents,
+    })
   } catch (err) {
     return toErrorResponse(err)
   }

@@ -43,7 +43,6 @@ import {
   Download,
   XCircle,
   Keyboard,
-  BarChart3,
 } from "lucide-react"
 
 /* ------------------------------------------------------------------ */
@@ -55,6 +54,14 @@ type ToolCall = {
   name: string
   arguments: string
   status?: "executing" | "completed" | "failed"
+}
+
+type ProgressEvent = {
+  type: "step" | "tool_start" | "tool_complete" | "tool_error"
+  step?: string
+  toolName?: string
+  toolArgs?: string
+  toolResult?: string
 }
 
 type ToolResult = {
@@ -132,6 +139,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const [newTag, setNewTag] = useState("")
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [messagesPage, setMessagesPage] = useState(1)
+  const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
+  const [currentProgressIndex, setCurrentProgressIndex] = useState(0)
   const MESSAGES_PER_PAGE = 20
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -324,6 +333,10 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     async (prompt: string) => {
       if (!prompt.trim() || loading) return
 
+      // Reset progress state
+      setProgressEvents([])
+      setCurrentProgressIndex(0)
+
       let convId = activeId
       if (!convId) {
         convId = await createConversation()
@@ -360,6 +373,10 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
 
         const data = await res.json()
         const newMsgs = (data.messages as ChatMessage[]) ?? []
+        const progress = (data.progress as ProgressEvent[]) ?? []
+
+        // Set progress events for animation
+        setProgressEvents(progress)
 
         setMessages((prev) => {
           const withoutPending = prev.slice(0, -1)
@@ -505,7 +522,17 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     }
   }, [conversations])
 
-  /* ---- Keyboard shortcuts ---- */
+  /* ---- Animate progress events ---- */
+  useEffect(() => {
+    if (progressEvents.length > 0 && currentProgressIndex < progressEvents.length) {
+      const timer = setTimeout(() => {
+        setCurrentProgressIndex(prev => prev + 1)
+      }, 800) // Show each step for 800ms
+      return () => clearTimeout(timer)
+    }
+  }, [progressEvents, currentProgressIndex])
+
+/* ---- Keyboard shortcuts ---- */
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ctrl/Cmd + K: Focus search
@@ -567,7 +594,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[280px_1fr_300px]" style={{ minHeight: hideHeader ? "calc(100vh - 280px)" : "calc(100vh - 220px)" }}>
+      <div className="grid gap-4 lg:grid-cols-[260px_1fr_280px] md:grid-cols-[240px_1fr] grid-cols-1" style={{ minHeight: hideHeader ? "calc(100vh - 200px)" : "calc(100vh - 160px)" }}>
         {/* ---- Left: Conversations ---- */}
         <div className="flex flex-col gap-3">
           <Button 
@@ -894,15 +921,50 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                       <Bot className="h-3.5 w-3.5" />
                     </AvatarFallback>
                   </Avatar>
-                  <div className="rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 shadow-sm">
-                    <div className="flex items-center gap-2 text-body-sm text-primary">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      <span>Processing…</span>
-                    </div>
-                    <div className="mt-2 flex items-center gap-1.5 text-micro text-muted-foreground">
-                      <div className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-pulse" />
-                      <span>Analyzing request and executing tools</span>
-                    </div>
+                  <div className="rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 shadow-sm w-full max-w-md">
+                    {progressEvents.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 text-body-sm text-primary">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <span>Working on your request…</span>
+                        </div>
+                        <div className="space-y-1.5 mt-3">
+                          {progressEvents.slice(0, currentProgressIndex + 1).map((event, idx) => (
+                            <div key={idx} className="flex items-start gap-2 text-micro">
+                              <div className={cn(
+                                "mt-0.5 h-1.5 w-1.5 rounded-full shrink-0",
+                                idx === currentProgressIndex ? "bg-primary animate-pulse" : "bg-success"
+                              )} />
+                              <div className="flex-1">
+                                {event.type === "step" && (
+                                  <span className="text-foreground/80">{event.step}</span>
+                                )}
+                                {event.type === "tool_start" && (
+                                  <span className="text-foreground/80">
+                                    Running <code className="text-primary font-mono">{event.toolName}</code>
+                                  </span>
+                                )}
+                                {event.type === "tool_complete" && (
+                                  <span className="text-success">
+                                    ✓ <code className="font-mono">{event.toolName}</code> completed
+                                  </span>
+                                )}
+                                {event.type === "tool_error" && (
+                                  <span className="text-destructive">
+                                    ✗ <code className="font-mono">{event.toolName}</code> failed
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-body-sm text-primary">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Processing…</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -959,124 +1021,119 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           </div>
         </Card>
 
-        {/* ---- Right panel: Templates + Tools ---- */}
-        <div className="flex flex-col gap-4">
-          {/* Templates */}
+        {/* ---- Right panel: Resources ---- */}
+        <div className="flex flex-col gap-3 hidden lg:flex">
           <Card className="flex flex-col shadow-lg shadow-primary/5 border-primary/20">
-            <CardHeader className="pb-3 bg-gradient-to-b from-primary/5 to-transparent">
-              <CardTitle className="text-heading-sm flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" />
-                </div>
-                Templates
-              </CardTitle>
-            </CardHeader>
             <CardContent className="p-0">
-              <Tabs defaultValue={categories[0] ?? "config"} className="w-full">
-                <div className="px-4 pb-2 border-b border-border/50">
-                  <TabsList className="w-full h-auto flex-wrap gap-1 bg-transparent p-0">
-                    {categories.map((cat) => (
-                      <TabsTrigger
-                        key={cat}
-                        value={cat}
-                        className="text-micro px-2.5 py-1 rounded-md capitalize data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-sm"
-                      >
-                        {CATEGORY_CONFIG[cat]?.label ?? cat}
-                      </TabsTrigger>
-                    ))}
+              <Tabs defaultValue="templates" className="w-full">
+                <div className="px-3 pt-3 pb-2 border-b border-border/50">
+                  <TabsList className="w-full h-auto bg-muted/50 p-0.5">
+                    <TabsTrigger
+                      value="templates"
+                      className="flex-1 gap-1.5 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm px-2 py-1.5"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      Templates
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="tools"
+                      className="flex-1 gap-1.5 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm px-2 py-1.5"
+                    >
+                      <Wrench className="h-3 w-3" />
+                      Tools
+                    </TabsTrigger>
                   </TabsList>
                 </div>
-                {categories.map((cat) => (
-                  <TabsContent key={cat} value={cat} className="mt-0">
-                    <ScrollArea className="h-[260px]">
-                      <div className="space-y-1.5 px-4 pb-4">
-                        {templates
-                          .filter((t) => t.category === cat)
-                          .map((t) => (
-                            <button
-                              key={t.id}
-                              onClick={() => sendMessage(t.prompt)}
-                              disabled={loading}
-                              className="w-full rounded-lg border border-border/50 bg-background/50 px-3 py-2.5 text-left transition-all hover:bg-muted/50 hover:border-primary/30 hover:shadow-sm disabled:opacity-50 group"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="text-body-sm font-medium group-hover:text-primary transition-colors">
-                                  {t.label}
-                                </span>
-                                {cat === "payload" && (
-                                  <Badge variant="outline" className="h-4 px-1 text-micro border-destructive/30 bg-destructive/10 text-destructive">
-                                    Risk
-                                  </Badge>
-                                )}
-                              </div>
-                              <p className="mt-0.5 text-micro text-muted-foreground line-clamp-2">
-                                {t.description}
-                              </p>
-                            </button>
-                          ))}
-                      </div>
-                    </ScrollArea>
-                  </TabsContent>
-                ))}
+                
+                <TabsContent value="templates" className="mt-0">
+                  <Tabs defaultValue={categories[0] ?? "config"} className="w-full">
+                    <div className="px-3 pb-2 border-b border-border/50">
+                      <TabsList className="w-full h-auto flex-wrap gap-1 bg-transparent p-0">
+                        {categories.map((cat) => (
+                          <TabsTrigger
+                            key={cat}
+                            value={cat}
+                            className="text-xs px-2 py-1 rounded-md capitalize data-[state=active]:bg-primary/10 data-[state=active]:text-primary"
+                          >
+                            {CATEGORY_CONFIG[cat]?.label ?? cat}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+                    </div>
+                    {categories.map((cat) => (
+                      <TabsContent key={cat} value={cat} className="mt-0">
+                        <ScrollArea className="h-[280px]">
+                          <div className="space-y-1.5 px-3 pb-3">
+                            {templates
+                              .filter((t) => t.category === cat)
+                              .map((t) => (
+                                <button
+                                  key={t.id}
+                                  onClick={() => sendMessage(t.prompt)}
+                                  disabled={loading}
+                                  className="w-full rounded-lg border border-border/50 bg-background/50 px-3 py-2 text-left transition-all hover:bg-muted/50 hover:border-primary/30 disabled:opacity-50 group"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium group-hover:text-primary transition-colors">
+                                      {t.label}
+                                    </span>
+                                    {cat === "payload" && (
+                                      <Badge variant="outline" className="h-4 px-1 text-xs border-destructive/30 bg-destructive/10 text-destructive">
+                                        Risk
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
+                                    {t.description}
+                                  </p>
+                                </button>
+                              ))}
+                          </div>
+                        </ScrollArea>
+                      </TabsContent>
+                    ))}
+                  </Tabs>
+                </TabsContent>
+
+                <TabsContent value="tools" className="mt-0">
+                  <ScrollArea className="h-[340px]">
+                    <div className="space-y-1 px-3 pb-3">
+                      {TOOLS_LIST.map((tool) => {
+                        const Icon = tool.icon
+                        return (
+                          <div
+                            key={tool.name}
+                            className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-muted/50 transition-colors group"
+                          >
+                            <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                              <Icon className="h-3 w-3 shrink-0 text-primary" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <code className="text-xs font-mono text-foreground/80 group-hover:text-primary transition-colors">{tool.name}</code>
+                              <p className="text-xs text-muted-foreground truncate">{tool.desc}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
               </Tabs>
             </CardContent>
           </Card>
 
-          {/* Available Tools */}
+          {/* Quick Stats */}
           <Card className="shadow-lg shadow-primary/5 border-primary/20">
-            <CardHeader className="pb-3 bg-gradient-to-b from-primary/5 to-transparent">
-              <CardTitle className="text-heading-sm flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
-                  <Wrench className="h-3.5 w-3.5 text-primary" />
-                </div>
-                Available Tools
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[200px]">
-                <div className="space-y-1">
-                  {TOOLS_LIST.map((tool) => {
-                    const Icon = tool.icon
-                    return (
-                      <div
-                        key={tool.name}
-                        className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted/50 transition-colors group"
-                      >
-                        <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 group-hover:bg-primary/20 transition-colors">
-                          <Icon className="h-3 w-3 shrink-0 text-primary" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <code className="text-micro font-mono text-foreground/80 group-hover:text-primary transition-colors">{tool.name}</code>
-                          <p className="text-micro text-muted-foreground truncate">{tool.desc}</p>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          {/* Tool Usage Analytics */}
-          <Card className="shadow-lg shadow-primary/5 border-primary/20">
-            <CardHeader className="pb-3 bg-gradient-to-b from-primary/5 to-transparent">
-              <CardTitle className="text-heading-sm flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
-                  <BarChart3 className="h-3.5 w-3.5 text-primary" />
-                </div>
-                Tool Analytics
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="p-3">
               <div className="grid grid-cols-2 gap-2">
                 <div className="rounded-lg bg-background/50 border border-border/50 p-2">
-                  <div className="text-micro text-muted-foreground">Total Calls</div>
-                  <div className="text-heading-sm text-foreground">{toolUsageStats.totalToolCalls}</div>
+                  <div className="text-xs text-muted-foreground">Total Calls</div>
+                  <div className="text-sm font-semibold text-foreground">{toolUsageStats.totalToolCalls}</div>
                 </div>
                 <div className="rounded-lg bg-background/50 border border-border/50 p-2">
-                  <div className="text-micro text-muted-foreground">Success Rate</div>
+                  <div className="text-xs text-muted-foreground">Success Rate</div>
                   <div className={cn(
-                    "text-heading-sm",
+                    "text-sm font-semibold",
                     toolUsageStats.successRate >= 90 ? "text-success" : toolUsageStats.successRate >= 70 ? "text-warning" : "text-destructive"
                   )}>
                     {toolUsageStats.successRate}%
@@ -1084,50 +1141,26 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                 </div>
               </div>
               
-              {toolUsageStats.topTools.length > 0 ? (
-                <div className="space-y-2">
-                  <div className="text-micro text-muted-foreground">Most Used Tools</div>
+              {toolUsageStats.topTools.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <div className="text-xs text-muted-foreground font-medium">Top Tools</div>
                   <div className="space-y-1.5">
-                    {toolUsageStats.topTools.map((tool, i) => (
+                    {toolUsageStats.topTools.slice(0, 3).map((tool, i) => (
                       <div key={tool.name} className="flex items-center gap-2">
-                        <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 text-micro text-primary">
+                        <div className="flex h-4 w-4 items-center justify-center rounded bg-primary/10 text-xs text-primary">
                           {i + 1}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <code className="text-micro font-mono text-foreground truncate block">{tool.name}</code>
+                          <code className="text-xs font-mono text-foreground truncate block">{tool.name}</code>
                         </div>
-                        <Badge variant="outline" className="text-micro">
+                        <Badge variant="outline" className="text-xs h-5 px-1.5">
                           {tool.count}
                         </Badge>
                       </div>
                     ))}
                   </div>
                 </div>
-              ) : (
-                <div className="text-micro text-muted-foreground text-center py-2">
-                  No tool usage data yet
-                </div>
               )}
-            </CardContent>
-          </Card>
-
-          {/* Provider Info */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-heading-sm flex items-center gap-2">
-                <Info className="h-3.5 w-3.5 text-primary" />
-                Provider
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-micro text-muted-foreground space-y-2">
-              <p>
-                Uses your configured LLM provider via{" "}
-                <code className="rounded bg-muted px-1.5 py-0.5 text-foreground/70">LLM_PROVIDER_BASE_URL</code>.
-              </p>
-              <p>
-                Conversations persisted in Firestore for audit. Generated configs are{" "}
-                <span className="text-warning font-medium">previews only</span>.
-              </p>
             </CardContent>
           </Card>
         </div>
