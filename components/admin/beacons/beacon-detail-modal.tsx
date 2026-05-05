@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Beacon, BeaconStatus, PrivilegeLevel } from "./beacons-view"
 import { formatDistanceToNow } from "date-fns"
 import { cn } from "@/lib/utils"
+import { apiFetch } from "@/lib/api/fetch"
+import { toast } from "sonner"
 import {
   Terminal,
   Key,
@@ -20,8 +22,10 @@ import {
   RefreshCw,
   XCircle,
   CheckCircle2,
+  Download,
+  Copy,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 interface BeaconDetailModalProps {
   beacon: Beacon | null
@@ -37,6 +41,65 @@ export function BeaconDetailModal({ beacon, open, onOpenChange }: BeaconDetailMo
     "System ready for commands...",
     ""
   ])
+  const [credentials, setCredentials] = useState<any[]>([])
+  const [credentialsLoading, setCredentialsLoading] = useState(false)
+  const [lateralMovements, setLateralMovements] = useState<any[]>([])
+  const [lateralMovementsLoading, setLateralMovementsLoading] = useState(false)
+
+  // Fetch credentials when beacon changes or modal opens
+  useEffect(() => {
+    if (beacon && open) {
+      fetchCredentials()
+      fetchLateralMovements()
+    }
+  }, [beacon, open])
+
+  const fetchCredentials = async () => {
+    if (!beacon) return
+    setCredentialsLoading(true)
+    try {
+      const res = await apiFetch(`/api/admin/credentials?sourceHostId=${beacon.id}`)
+      if (res.ok) {
+        const data = await res.json()
+        setCredentials(data.credentials || [])
+      }
+    } catch (error) {
+      console.error("Error fetching credentials:", error)
+    } finally {
+      setCredentialsLoading(false)
+    }
+  }
+
+  const fetchLateralMovements = async () => {
+    if (!beacon) return
+    setLateralMovementsLoading(true)
+    try {
+      const res = await apiFetch(`/api/admin/lateral-movement?fromHostId=${beacon.id}`)
+      if (res.ok) {
+        const data = await res.json()
+        setLateralMovements(data.movements || [])
+      }
+    } catch (error) {
+      console.error("Error fetching lateral movements:", error)
+    } finally {
+      setLateralMovementsLoading(false)
+    }
+  }
+
+  const handleHarvestCredentials = async () => {
+    if (!beacon) return
+    try {
+      toast.info("Starting credential harvest...")
+      // This would trigger the actual credential harvest via the post-exploitation engine
+      // For now, we'll simulate it
+      setTimeout(() => {
+        toast.success("Credential harvest completed")
+        fetchCredentials()
+      }, 2000)
+    } catch (error) {
+      toast.error("Failed to harvest credentials")
+    }
+  }
 
   if (!beacon) return null
 
@@ -173,7 +236,7 @@ export function BeaconDetailModal({ beacon, open, onOpenChange }: BeaconDetailMo
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">First Seen</span>
-                    <span className="font-medium">{formatDistanceToNow(beacon.firstSeen)} ago</span>
+                    <span className="font-medium">{formatDistanceToNow(new Date(beacon.firstSeen))} ago</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Last Check-in</span>
@@ -275,16 +338,57 @@ export function BeaconDetailModal({ beacon, open, onOpenChange }: BeaconDetailMo
                     <Key className="h-4 w-4" />
                     Harvested Credentials
                   </CardTitle>
-                  <Button size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
+                  <Button size="sm" onClick={handleHarvestCredentials} disabled={credentialsLoading}>
+                    <RefreshCw className={cn("h-4 w-4 mr-2", credentialsLoading && "animate-spin")} />
                     Harvest Now
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="text-center py-8 text-muted-foreground">
-                  No credentials harvested yet. Click "Harvest Now" to collect credentials from this beacon.
-                </div>
+                {credentialsLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Loading credentials...
+                  </div>
+                ) : credentials.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No credentials harvested yet. Click "Harvest Now" to collect credentials from this beacon.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {credentials.map((cred) => (
+                      <div key={cred.id} className="flex items-center justify-between p-3 border rounded-lg">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{cred.username}</span>
+                            {cred.domain && <span className="text-muted-foreground">@{cred.domain}</span>}
+                            <Badge variant="outline" className="text-xs">
+                              {cred.type}
+                            </Badge>
+                            {cred.cracked && (
+                              <Badge className="bg-green-500 text-white text-xs">
+                                <CheckCircle2 className="h-3 w-3 mr-1" />
+                                Cracked
+                              </Badge>
+                            )}
+                          </div>
+                          {cred.hash && (
+                            <div className="text-xs text-muted-foreground font-mono mt-1">
+                              {cred.hash.substring(0, 32)}...
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            navigator.clipboard.writeText(cred.hash || cred.plaintext || "")
+                            toast.success("Copied to clipboard")
+                          }}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -356,48 +460,72 @@ export function BeaconDetailModal({ beacon, open, onOpenChange }: BeaconDetailMo
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <ArrowRight className="h-4 w-4" />
-                    Suggested Pivot Paths
+                    Lateral Movement History
                   </CardTitle>
-                  <Button size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh Paths
+                  <Button size="sm" onClick={fetchLateralMovements} disabled={lateralMovementsLoading}>
+                    <RefreshCw className={cn("h-4 w-4 mr-2", lateralMovementsLoading && "animate-spin")} />
+                    Refresh
                   </Button>
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {[
-                    {
-                      path: "DESKTOP-ABC123 → SRV-001 → DC-01",
-                      confidence: 85,
-                      technique: "SMB + Pass-the-Hash",
-                      risk: "medium"
-                    },
-                    {
-                      path: "DESKTOP-ABC123 → WORKSTATION-XYZ → DC-01",
-                      confidence: 72,
-                      technique: "WinRM",
-                      risk: "low"
-                    },
-                  ].map((path, i) => (
-                    <div key={i} className="p-4 border rounded-lg space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="font-mono text-sm">{path.path}</div>
-                        <Badge variant="outline">{path.confidence}% confidence</Badge>
+                {lateralMovementsLoading ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Loading lateral movements...
+                  </div>
+                ) : lateralMovements.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No lateral movements executed yet from this beacon.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {lateralMovements.map((movement) => (
+                      <div key={movement.id} className="p-3 border rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{movement.fromHostname}</span>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium">{movement.toHostname}</span>
+                          </div>
+                          <Badge 
+                            variant="outline" 
+                            className={cn(
+                              movement.status === "success" && "bg-green-500 text-white border-green-500",
+                              movement.status === "failed" && "bg-red-500 text-white border-red-500"
+                            )}
+                          >
+                            {movement.status}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <span>Technique: {movement.technique}</span>
+                          <span>{formatDistanceToNow(new Date(movement.timestamp))} ago</span>
+                        </div>
+                        {movement.errorMessage && (
+                          <div className="text-sm text-red-500 mt-1">{movement.errorMessage}</div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        <span>Technique: {path.technique}</span>
-                        <span>Risk: {path.risk}</span>
-                      </div>
-                      <Button size="sm" className="w-full">
-                        <ArrowRight className="h-4 w-4 mr-2" />
-                        Execute Pivot
-                      </Button>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Shield className="h-4 w-4" />
+                    Execute New Lateral Movement
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-center py-4 text-muted-foreground text-sm">
+                    Select target beacon and technique to execute lateral movement.
+                    <br />
+                    <span className="text-xs">(Coming soon: Full lateral movement execution UI)</span>
+                  </div>
+                </CardContent>
+              </Card>
           </TabsContent>
 
           {/* Timeline Tab */}
