@@ -5,6 +5,24 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ------------------------------------------------------------------ */
+/*  Unified Animation System                                            */
+/* ------------------------------------------------------------------ */
+
+/* Animation tokens */
+@theme {
+  --animation-duration-instant: 150ms;
+  --animation-duration-fast: 200ms;
+  --animation-duration-normal: 300ms;
+  --animation-duration-slow: 500ms;
+  --animation-duration-slower: 700ms;
+  --animation-easing-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --animation-easing-in: cubic-bezier(0, 0, 0.2, 1);
+  --animation-easing-out: cubic-bezier(0.4, 0, 1, 1);
+  --animation-easing-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --animation-easing-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Design Tokens                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -250,4 +268,181 @@
 
 @utility glow-primary {
   box-shadow: 0 0 8px rgba(45, 212, 191, 0.3);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Base Animations                                                     */
+/* ------------------------------------------------------------------ */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from { 
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideLeft {
+  from { 
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideRight {
+  from { 
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from { 
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to { 
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes scaleOut {
+  from { 
+    opacity: 1;
+    transform: scale(1);
+  }
+  to { 
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Animation Utilities                                                */
+/* ------------------------------------------------------------------ */
+
+@utility animate-fade-in {
+  animation: fadeIn var(--animation-duration-normal) var(--animation-easing-default);
+}
+
+@utility animate-fade-out {
+  animation: fadeOut var(--animation-duration-normal) var(--animation-easing-default);
+}
+
+@utility animate-slide-up {
+  animation: slideUp var(--animation-duration-normal) var(--animation-easing-out);
+}
+
+@utility animate-slide-down {
+  animation: slideDown var(--animation-duration-normal) var(--animation-easing-out);
+}
+
+@utility animate-scale-in {
+  animation: scaleIn var(--animation-duration-normal) var(--animation-easing-bounce);
+}
+
+@utility animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
+}
+
+/* Stagger children animation */
+@utility animate-stagger-children > * {
+  animation: slideUp var(--animation-duration-normal) var(--animation-easing-out);
+  animation-fill-mode: both;
+}
+
+@utility animate-stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+@utility animate-stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+@utility animate-stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+@utility animate-stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+@utility animate-stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+
+/* ------------------------------------------------------------------ */
+/*  Transition Utilities                                                */
+/* ------------------------------------------------------------------ */
+
+@utility transition-all-smooth {
+  transition: all var(--animation-duration-normal) var(--animation-easing-default);
+}
+
+@utility transition-colors-smooth {
+  transition: color var(--animation-duration-fast) var(--animation-easing-default),
+              background-color var(--animation-duration-fast) var(--animation-easing-default),
+              border-color var(--animation-duration-fast) var(--animation-easing-default);
+}
+
+@utility transition-transform-smooth {
+  transition: transform var(--animation-duration-normal) var(--animation-easing-out);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Component Animations                                                 */
+/* ------------------------------------------------------------------ */
+
+@layer components {
+  .button-hover-effect {
+    @apply transition-transform-smooth;
+  }
+  
+  .button-hover-effect:hover {
+    @apply scale-105;
+  }
+  
+  .button-hover-effect:active {
+    @apply scale-95;
+  }
+  
+  .card-hover-effect {
+    @apply transition-all-smooth;
+  }
+  
+  .card-hover-effect:hover {
+    @apply shadow-lg shadow-primary/5 -translate-y-0.5;
+  }
+  
+  .list-item-hover {
+    @apply transition-colors-smooth;
+  }
+  
+  .list-item-hover:hover {
+    @apply bg-muted/50;
+  }
 }
