@@ -1,4 +1,6 @@
 import { openai, createOpenAI } from '@ai-sdk/openai'
+import { anthropic } from '@ai-sdk/anthropic'
+import { google } from '@ai-sdk/google'
 import { generateText } from 'ai'
 import { serverEnv } from '@/lib/env'
 import { validateToolCalls } from './tool-validator'
@@ -129,6 +131,96 @@ class ResponseCache {
 const responseCache = new ResponseCache(1000, 5 * 60 * 1000)
 
 // ============================================================
+// PROVIDER HEALTH MONITORING
+// ============================================================
+
+interface ProviderHealth {
+  provider: string
+  healthy: boolean
+  lastCheck: number
+  consecutiveFailures: number
+  averageLatency: number
+  totalRequests: number
+  failedRequests: number
+}
+
+class ProviderHealthMonitor {
+  private healthMap: Map<string, ProviderHealth> = new Map()
+  private checkInterval: number = 60 * 1000 // 1 minute
+  private maxFailures: number = 3
+
+  recordRequest(provider: string, success: boolean, latency: number): void {
+    const health = this.healthMap.get(provider) || {
+      provider,
+      healthy: true,
+      lastCheck: Date.now(),
+      consecutiveFailures: 0,
+      averageLatency: 0,
+      totalRequests: 0,
+      failedRequests: 0,
+    }
+
+    health.totalRequests++
+    health.lastCheck = Date.now()
+
+    if (success) {
+      health.consecutiveFailures = 0
+      health.healthy = true
+      // Update moving average latency
+      health.averageLatency = (health.averageLatency * 0.9) + (latency * 0.1)
+    } else {
+      health.failedRequests++
+      health.consecutiveFailures++
+      
+      if (health.consecutiveFailures >= this.maxFailures) {
+        health.healthy = false
+        aiWarn(`Provider ${provider} marked as unhealthy after ${health.consecutiveFailures} consecutive failures`)
+      }
+    }
+
+    this.healthMap.set(provider, health)
+  }
+
+  isHealthy(provider: string): boolean {
+    const health = this.healthMap.get(provider)
+    return health ? health.healthy : true // Assume healthy if no data
+  }
+
+  getHealth(provider: string): ProviderHealth | undefined {
+    return this.healthMap.get(provider)
+  }
+
+  getAllHealth(): ProviderHealth[] {
+    return Array.from(this.healthMap.values())
+  }
+
+  getBestProvider(availableProviders: string[]): string | null {
+    const healthyProviders = availableProviders.filter(p => this.isHealthy(p))
+    
+    if (healthyProviders.length === 0) {
+      return availableProviders[0] || null // Return first available if none healthy
+    }
+
+    // Select based on lowest latency
+    return healthyProviders.reduce((best, current) => {
+      const bestHealth = this.healthMap.get(best)
+      const currentHealth = this.healthMap.get(current)
+      
+      if (!bestHealth) return current
+      if (!currentHealth) return best
+      
+      return bestHealth.averageLatency < currentHealth.averageLatency ? best : current
+    })
+  }
+
+  reset(provider: string): void {
+    this.healthMap.delete(provider)
+  }
+}
+
+const providerHealthMonitor = new ProviderHealthMonitor()
+
+// ============================================================
 // TOOL MAPPING HELPER (extracted to avoid duplication)
 // ============================================================
 
@@ -215,6 +307,14 @@ export function getCacheStats() {
   return responseCache.getStats()
 }
 
+export function getProviderHealth() {
+  return providerHealthMonitor.getAllHealth()
+}
+
+export function resetProviderHealth(provider: string) {
+  providerHealthMonitor.reset(provider)
+}
+
 export function clearResponseCache() {
   responseCache.clear()
 }
@@ -256,6 +356,7 @@ export async function chatComplete(options: {
   enableFallback?: boolean
   sessionId?: string
   enableCache?: boolean
+  preferredProvider?: string
 }): Promise<{ 
   content: string | null
   finishReason: string | null
@@ -276,8 +377,9 @@ export async function chatComplete(options: {
   _sessionId?: string
   _cached?: boolean
   _cacheStats?: any
+  _health?: ProviderHealth
 }> {
-  const { messages, temperature = 0.7, model, tools, signal, useShadowGrok = false, enableFallback = false, sessionId, enableCache = true } = options
+  const { messages, temperature = 0.7, model, tools, signal, useShadowGrok = false, enableFallback = false, sessionId, enableCache = true, preferredProvider } = options
   const env = serverEnv()
 
   // Check cache for non-tool calls (tool calls shouldn't be cached as they may have side effects)
@@ -296,9 +398,28 @@ export async function chatComplete(options: {
   // Start debug session if not provided
   const effectiveSessionId = sessionId || 'unknown-session';
   let providerUsed = 'unknown';
+  const requestStartTime = Date.now()
 
   let selectedModel: any
   let selectedModelName: string
+
+  // Build list of available providers
+  const availableProviders: string[] = []
+  if (useShadowGrok && env.SHADOWGROK_ENABLED && env.XAI_API_KEY) availableProviders.push('xai')
+  if (env.ANTHROPIC_API_KEY) availableProviders.push('anthropic')
+  if (env.GOOGLE_API_KEY) availableProviders.push('google')
+  if (env.AZURE_OPENAI_ENDPOINT && env.AZURE_OPENAI_API_KEY) availableProviders.push('azure')
+  if (env.OPENROUTER_API_KEY) availableProviders.push('openrouter')
+  if (env.LLM_PROVIDER_API_KEY) availableProviders.push('legacy')
+  availableProviders.push('openai') // Always available as fallback
+
+  // Select provider based on preference, health, or priority
+  let selectedProvider = preferredProvider
+  if (!selectedProvider || !availableProviders.includes(selectedProvider)) {
+    selectedProvider = providerHealthMonitor.getBestProvider(availableProviders) || availableProviders[0]
+  }
+
+  aiLog(`Selected provider: ${selectedProvider} (available: ${availableProviders.join(', ')})`)
 
   // Use fallback system if enabled
   if (enableFallback) {
@@ -313,7 +434,7 @@ export async function chatComplete(options: {
         maxRetries: 2,
         retryDelay: 500,
         enableFallback: true,
-        fallbackProviders: ['azure', 'openrouter', 'legacy', 'openai'],
+        fallbackProviders: ['azure', 'openrouter', 'legacy', 'openai', 'anthropic', 'google'],
       },
     })
 
@@ -415,6 +536,7 @@ export async function chatComplete(options: {
           totalErrors: validation.totalErrors,
         },
         _sessionId: effectiveSessionId,
+        _health: providerHealthMonitor.getHealth(providerUsed),
       }
 
       // Cache the response if no tools were involved
@@ -447,6 +569,7 @@ export async function chatComplete(options: {
       toolCalls: finalNormalizedCalls,
       _provider: providerUsed,
       _sessionId: effectiveSessionId,
+      _health: providerHealthMonitor.getHealth(providerUsed),
     }
 
     // Cache the response if no tools were involved
@@ -457,46 +580,83 @@ export async function chatComplete(options: {
     return response
   }
 
-  // Original logic without fallback
-  // Priority: ShadowGrok/xAI > Azure OpenAI > OpenRouter > Legacy LLM > Default OpenAI
-  if (useShadowGrok && env.SHADOWGROK_ENABLED && env.XAI_API_KEY) {
-    // Use xAI Grok for ShadowGrok operations
-    const xaiClient = createOpenAI({
-      baseURL: env.XAI_BASE_URL,
-      apiKey: env.XAI_API_KEY,
-    })
-    selectedModel = xaiClient(model || env.XAI_MODEL)
-    selectedModelName = model || env.XAI_MODEL
-    providerUsed = 'xai'
-  } else if (env.AZURE_OPENAI_ENDPOINT && env.AZURE_OPENAI_API_KEY) {
-    // Use Azure OpenAI (highest priority for non-ShadowGrok)
-    const azureClient = createOpenAI({
-      baseURL: `${env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${env.AZURE_OPENAI_DEPLOYMENT}`,
-      apiKey: env.AZURE_OPENAI_API_KEY,
-    })
-    selectedModel = azureClient(env.AZURE_OPENAI_DEPLOYMENT)
-    selectedModelName = env.AZURE_OPENAI_DEPLOYMENT
-    providerUsed = 'azure'
-  } else if (env.OPENROUTER_API_KEY) {
-    // Use OpenRouter (second priority)
-    const openRouterClient = createOpenAI({
-      baseURL: env.OPENROUTER_BASE_URL,
-      apiKey: env.OPENROUTER_API_KEY,
-    })
-    selectedModel = openRouterClient(model || env.OPENROUTER_MODEL)
-    selectedModelName = model || env.OPENROUTER_MODEL
-    providerUsed = 'openrouter'
-  } else if (env.LLM_PROVIDER_API_KEY) {
-    // Use legacy LLM configuration (fallback)
-    const legacyClient = createOpenAI({
-      baseURL: env.LLM_PROVIDER_BASE_URL,
-      apiKey: env.LLM_PROVIDER_API_KEY,
-    })
-    selectedModel = legacyClient(model || env.LLM_MODEL)
-    selectedModelName = model || env.LLM_MODEL
-    providerUsed = 'legacy'
-  } else {
-    // Default to OpenAI
+  // Enhanced provider selection with health monitoring
+  try {
+    switch (selectedProvider) {
+      case 'xai':
+        if (useShadowGrok && env.SHADOWGROK_ENABLED && env.XAI_API_KEY) {
+          const xaiClient = createOpenAI({
+            baseURL: env.XAI_BASE_URL,
+            apiKey: env.XAI_API_KEY,
+          })
+          selectedModel = xaiClient(model || env.XAI_MODEL)
+          selectedModelName = model || env.XAI_MODEL
+          providerUsed = 'xai'
+        }
+        break
+      case 'anthropic':
+        if (env.ANTHROPIC_API_KEY) {
+          selectedModel = anthropic(model || 'claude-3-5-sonnet-20241022')
+          selectedModelName = model || 'claude-3-5-sonnet-20241022'
+          providerUsed = 'anthropic'
+        }
+        break
+      case 'google':
+        if (env.GOOGLE_API_KEY) {
+          selectedModel = google(model || 'gemini-1.5-pro')
+          selectedModelName = model || 'gemini-1.5-pro'
+          providerUsed = 'google'
+        }
+        break
+      case 'azure':
+        if (env.AZURE_OPENAI_ENDPOINT && env.AZURE_OPENAI_API_KEY) {
+          const azureClient = createOpenAI({
+            baseURL: `${env.AZURE_OPENAI_ENDPOINT}/openai/deployments/${env.AZURE_OPENAI_DEPLOYMENT}`,
+            apiKey: env.AZURE_OPENAI_API_KEY,
+          })
+          selectedModel = azureClient(env.AZURE_OPENAI_DEPLOYMENT)
+          selectedModelName = env.AZURE_OPENAI_DEPLOYMENT
+          providerUsed = 'azure'
+        }
+        break
+      case 'openrouter':
+        if (env.OPENROUTER_API_KEY) {
+          const openRouterClient = createOpenAI({
+            baseURL: env.OPENROUTER_BASE_URL,
+            apiKey: env.OPENROUTER_API_KEY,
+          })
+          selectedModel = openRouterClient(model || env.OPENROUTER_MODEL)
+          selectedModelName = model || env.OPENROUTER_MODEL
+          providerUsed = 'openrouter'
+        }
+        break
+      case 'legacy':
+        if (env.LLM_PROVIDER_API_KEY) {
+          const legacyClient = createOpenAI({
+            baseURL: env.LLM_PROVIDER_BASE_URL,
+            apiKey: env.LLM_PROVIDER_API_KEY,
+          })
+          selectedModel = legacyClient(model || env.LLM_MODEL)
+          selectedModelName = model || env.LLM_MODEL
+          providerUsed = 'legacy'
+        }
+        break
+      case 'openai':
+      default:
+        selectedModel = openai(model || 'gpt-4o-mini')
+        selectedModelName = model || 'gpt-4o-mini'
+        providerUsed = 'openai'
+    }
+
+    // Fallback if selected provider not available
+    if (!selectedModel) {
+      aiWarn(`Provider ${selectedProvider} not available, falling back to OpenAI`)
+      selectedModel = openai(model || 'gpt-4o-mini')
+      selectedModelName = model || 'gpt-4o-mini'
+      providerUsed = 'openai'
+    }
+  } catch (error) {
+    aiWarn(`Provider selection failed: ${error}, falling back to OpenAI`)
     selectedModel = openai(model || 'gpt-4o-mini')
     selectedModelName = model || 'gpt-4o-mini'
     providerUsed = 'openai'
@@ -505,6 +665,8 @@ export async function chatComplete(options: {
   try {
     aiLog('Using provider:', providerUsed)
     aiLog('Tools being passed to AI SDK:', JSON.stringify(tools, null, 2))
+
+    const requestStartTime = Date.now()
 
     // Extract system messages for security (use dedicated system option)
     const systemMessages = messages
@@ -605,7 +767,12 @@ export async function chatComplete(options: {
           totalErrors: validation.totalErrors,
         },
         _sessionId: effectiveSessionId,
+        _health: providerHealthMonitor.getHealth(providerUsed),
       }
+
+      // Record successful request
+      const latency = Date.now() - requestStartTime
+      providerHealthMonitor.recordRequest(providerUsed, true, latency)
 
       // Cache the response if no tools were involved
       if (enableCache && !tools) {
@@ -637,7 +804,12 @@ export async function chatComplete(options: {
       toolCalls: finalNormalizedCalls,
       _provider: providerUsed,
       _sessionId: effectiveSessionId,
+      _health: providerHealthMonitor.getHealth(providerUsed),
     }
+
+    // Record successful request
+    const latency = Date.now() - requestStartTime
+    providerHealthMonitor.recordRequest(providerUsed, true, latency)
 
     // Cache the response if no tools were involved
     if (enableCache && !tools) {
@@ -647,6 +819,11 @@ export async function chatComplete(options: {
     return response
   } catch (error) {
     console.error('LLM API error:', error)
+    
+    // Record failed request
+    const latency = Date.now() - requestStartTime
+    providerHealthMonitor.recordRequest(providerUsed, false, latency)
+    
     throw new Error('Failed to complete chat request')
   }
 }

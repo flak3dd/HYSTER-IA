@@ -9,12 +9,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Search, X, Filter } from "lucide-react"
-import { Beacon, BeaconsFilters } from "./beacons-view"
+import { Beacon, type BeaconsFilters as BeaconsFiltersType } from "./beacons-view"
 import { useState } from "react"
 
 interface BeaconsFiltersProps {
-  filters: BeaconsFilters
-  onFiltersChange: (filters: BeaconsFilters) => void
+  filters: BeaconsFiltersType
+  onFiltersChange: (filters: BeaconsFiltersType) => void
   beacons: Beacon[]
 }
 
@@ -22,11 +22,11 @@ export function BeaconsFilters({ filters, onFiltersChange, beacons }: BeaconsFil
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   // Get unique values for dropdowns
-  const uniqueDomains = Array.from(new Set(beacons.map(b => b.domain).filter(Boolean)))
-  const uniqueEgressNodes = Array.from(new Set(beacons.map(b => b.egressNode).filter(Boolean)))
+  const uniqueDomains = Array.from(new Set(beacons.map(b => b.domain).filter((d): d is string => Boolean(d))))
+  const uniqueEgressNodes = Array.from(new Set(beacons.map(b => b.egressNode).filter((e): e is string => Boolean(e))))
   const uniqueOSFamilies = Array.from(new Set(beacons.map(b => b.os)))
 
-  const toggleFilter = (type: keyof BeaconsFilters, value: string) => {
+  const toggleFilter = (type: keyof BeaconsFiltersType, value: string) => {
     const currentArray = filters[type] as string[]
     const newArray = currentArray.includes(value)
       ? currentArray.filter(v => v !== value)
@@ -156,7 +156,7 @@ export function BeaconsFilters({ filters, onFiltersChange, beacons }: BeaconsFil
             <label className="text-sm font-medium">Last Check-in</label>
             <Select
               value={filters.lastCheckin}
-              onValueChange={(value) => onFiltersChange({ ...filters, lastCheckin: value })}
+              onValueChange={(value) => onFiltersChange({ ...filters, lastCheckin: value || "all" })}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -178,7 +178,7 @@ export function BeaconsFilters({ filters, onFiltersChange, beacons }: BeaconsFil
               value={filters.domain[0] || "all"}
               onValueChange={(value) => onFiltersChange({
                 ...filters,
-                domain: value === "all" ? [] : [value]
+                domain: value === "all" ? [] : [value] as string[]
               })}
             >
               <SelectTrigger>
@@ -200,7 +200,7 @@ export function BeaconsFilters({ filters, onFiltersChange, beacons }: BeaconsFil
               value={filters.egressNode[0] || "all"}
               onValueChange={(value) => onFiltersChange({
                 ...filters,
-                egressNode: value === "all" ? [] : [value]
+                egressNode: value === "all" ? [] : [value] as string[]
               })}
             >
               <SelectTrigger>
