@@ -166,6 +166,8 @@ export interface ToolResult {
   requiresApproval?: boolean;
   approvalId?: string;
   executionTimeMs?: number;
+  /** Set when returning a cache hit from executeTool */
+  _cached?: boolean;
 }
 
 export interface ToolContext {
@@ -332,6 +334,10 @@ export async function executeTool(
 
       case "rotate_subscription_token":
         result = await rotateSubscriptionTokenTool(args, context);
+        break;
+
+      case "suggest_next_offensive_steps":
+        result = await suggestNextOffensiveSteps(args, context);
         break;
 
       default:
@@ -1191,8 +1197,15 @@ async function queryHysteriaTrafficStats(args: any): Promise<ToolResult> {
 async function createOrUpdateSubscription(args: any, context: ToolContext): Promise<ToolResult> {
   const { user_id, tags = [], formats = ["hysteria2", "clash", "singbox"], expires_at, auto_rotate = true } = args;
 
+  // Use userId from context if not provided in args
+  const userId = user_id || context.userId;
+
+  if (!userId) {
+    return { success: false, error: 'userId is required for subscription creation' };
+  }
+
   // Check if subscription already exists for this user
-  const existingSubscriptions = await listSubscriptions({ userId: user_id, take: 1 });
+  const existingSubscriptions = await listSubscriptions({ userId, take: 1 });
   let subscription;
 
   if (existingSubscriptions.length > 0) {
@@ -1207,7 +1220,7 @@ async function createOrUpdateSubscription(args: any, context: ToolContext): Prom
   } else {
     // Create new subscription
     subscription = await createSubscription({
-      userId: user_id,
+      userId,
       tags,
       formats,
       expiresAt: expires_at ? new Date(expires_at) : undefined,
@@ -1840,7 +1853,42 @@ async function rotateSubscriptionTokenTool(args: any, context: ToolContext): Pro
     return { success: false, error: 'Subscription not found or token rotation failed' };
   }
 
-  // TODO: Implement user notification if notify_user is true
+  // Implement user notification if notify_user is true
+  if (notify_user) {
+    try {
+      const { createNotification } = await import('@/lib/notifications/notification-system')
+      const subscription = await prisma.subscription.findUnique({
+        where: { id: subscription_id },
+        include: { user: true },
+      })
+
+      if (subscription && subscription.user) {
+        await createNotification({
+          operatorId: context.userId,
+          type: 'success',
+          title: 'Subscription Token Rotated',
+          message: `Token for subscription "${subscription.name || subscription.id}" has been successfully rotated.`,
+          metadata: {
+            subscriptionId: subscription.id,
+            subscriptionName: subscription.name,
+            timestamp: new Date().toISOString(),
+          },
+        })
+
+        // Optionally send email notification if email is available
+        if (subscription.user.email) {
+          const { sendSubscriptionRotationNotification } = await import('@/lib/notifications/email-notifier')
+          await sendSubscriptionRotationNotification(
+            subscription.user.email,
+            subscription.id,
+            subscription.name || subscription.id
+          )
+        }
+      }
+    } catch (error) {
+      log(`Failed to send notification: ${error}`)
+    }
+  }
 
   return {
     success: true,
@@ -1851,4 +1899,292 @@ async function rotateSubscriptionTokenTool(args: any, context: ToolContext): Pro
       notified: notify_user,
     },
   };
+}
+
+async function suggestNextOffensiveSteps(args: any, context: ToolContext): Promise<ToolResult> {
+  const {
+    persona = 'stealth',
+    risk_tolerance = 'medium',
+    focus_area = 'all',
+    include_context = true,
+    max_suggestions = 5
+  } = args;
+
+  console.log(`[ShadowGrok] Generating offensive suggestions with persona: ${persona}, risk: ${risk_tolerance}`);
+
+  // Gather current operational context
+  let operationalContext: any = {};
+  
+  if (include_context) {
+    try {
+      const [implantsResult, nodesResult, recentExecutions] = await Promise.allSettled([
+        listImplants({ take: 50 }),
+        prisma.hysteriaNode.findMany({ take: 20 }),
+        prisma.shadowGrokExecution.findMany({
+          take: 10,
+          orderBy: { createdAt: 'desc' },
+          where: { userId: context.userId }
+        })
+      ]);
+
+      const implants = implantsResult.status === 'fulfilled' ? implantsResult.value : [];
+      const nodes = nodesResult.status === 'fulfilled' ? nodesResult.value : [];
+      const executions = recentExecutions.status === 'fulfilled' ? recentExecutions.value : [];
+
+      operationalContext = {
+        implant_count: implants.length,
+        active_implants: implants.filter((i: any) => i.status === 'active').length,
+        node_count: nodes.length,
+        online_nodes: nodes.filter((n: any) => n.status === 'online').length,
+        recent_operations: executions.length,
+        implant_architectures: implants.reduce((acc: any, i: any) => {
+          const arch = i.architecture || 'unknown';
+          acc[arch] = (acc[arch] || 0) + 1;
+          return acc;
+        }, {}),
+        node_locations: nodes.map((n: any) => n.region || 'unknown'),
+      };
+    } catch (error) {
+      console.error(`[ShadowGrok] Failed to gather operational context:`, error);
+    }
+  }
+
+  // Generate persona-specific suggestions
+  const suggestions = generatePersonaSuggestions(persona, risk_tolerance, focus_area, operationalContext);
+
+  // Prioritize and limit suggestions
+  const prioritizedSuggestions = suggestions
+    .sort((a, b) => b.priority_score - a.priority_score)
+    .slice(0, max_suggestions);
+
+  return {
+    success: true,
+    data: {
+      suggestions: prioritizedSuggestions,
+      operational_context: include_context ? operationalContext : undefined,
+      persona,
+      risk_tolerance,
+      focus_area,
+      generated_at: new Date().toISOString(),
+    },
+  };
+}
+
+function generatePersonaSuggestions(
+  persona: string,
+  riskTolerance: string,
+  focusArea: string,
+  context: any
+): Array<{
+  action: string;
+  reasoning: string;
+  estimated_risk: 'low' | 'medium' | 'high';
+  priority_score: number;
+  tools_required: string[];
+  category: 'implant' | 'infrastructure' | 'operations' | 'recon';
+}> {
+  const suggestions: any[] = [];
+  
+  const baseRiskMultiplier = riskTolerance === 'high' ? 1.5 : riskTolerance === 'low' ? 0.7 : 1.0;
+
+  // Persona-specific suggestion sets
+  const personaSuggestions: Record<string, any[]> = {
+    stealth: [
+      {
+        action: 'Deploy additional stealth implants with Spotify traffic blending to high-value targets',
+        reasoning: 'Low-and-slow approach with CDN masquerade minimizes detection signatures while expanding foothold',
+        estimated_risk: 'low',
+        priority_score: 85 * baseRiskMultiplier,
+        tools_required: ['generate_stealth_implant_config', 'compile_and_deploy_implant'],
+        category: 'implant'
+      },
+      {
+        action: 'Analyze current traffic patterns and suggest new evasion techniques',
+        reasoning: 'Proactive traffic analysis helps identify potential detection vectors before they become issues',
+        estimated_risk: 'low',
+        priority_score: 80 * baseRiskMultiplier,
+        tools_required: ['analyze_traffic_and_suggest_evasion'],
+        category: 'operations'
+      },
+      {
+        action: 'Update implant configurations with increased jitter and anti-analysis features',
+        reasoning: 'Enhancing stealth parameters reduces EDR/AV detection probability for existing assets',
+        estimated_risk: 'low',
+        priority_score: 75 * baseRiskMultiplier,
+        tools_required: ['update_implant_config', 'bulk_implant_operation'],
+        category: 'implant'
+      },
+      {
+        action: 'Conduct OSINT reconnaissance on target domain without direct engagement',
+        reasoning: 'Passive intelligence gathering provides operational context without triggering alerts',
+        estimated_risk: 'low',
+        priority_score: 70 * baseRiskMultiplier,
+        tools_required: ['osint_domain_enum'],
+        category: 'recon'
+      },
+      {
+        action: 'Deploy new C2 nodes in diverse geographic regions for traffic distribution',
+        reasoning: 'Geographic diversity reduces correlation attacks and provides fallback infrastructure',
+        estimated_risk: 'medium',
+        priority_score: 65 * baseRiskMultiplier,
+        tools_required: ['deploy_nodes'],
+        category: 'infrastructure'
+      }
+    ],
+    aggressive: [
+      {
+        action: 'Execute parallel lateral movement tasks across all active implants simultaneously',
+        reasoning: 'Speed-focused approach maximizes coverage before detection response can be mobilized',
+        estimated_risk: 'high',
+        priority_score: 90 * baseRiskMultiplier,
+        tools_required: ['send_c2_task_to_implant', 'bulk_implant_operation'],
+        category: 'operations'
+      },
+      {
+        action: 'Deploy implants to multiple target nodes in parallel using batch deployment',
+        reasoning: 'Rapid infrastructure expansion creates immediate operational capacity',
+        estimated_risk: 'medium',
+        priority_score: 85 * baseRiskMultiplier,
+        tools_required: ['deploy_nodes', 'compile_and_deploy_implant'],
+        category: 'infrastructure'
+      },
+      {
+        action: 'Conduct full operation orchestration for multi-phase campaign execution',
+        reasoning: 'Comprehensive operational planning enables coordinated, time-sensitive actions',
+        estimated_risk: 'high',
+        priority_score: 80 * baseRiskMultiplier,
+        tools_required: ['orchestrate_full_operation'],
+        category: 'operations'
+      },
+      {
+        action: 'Update node configurations for maximum throughput and minimal latency',
+        reasoning: 'Performance optimization supports high-tempo operations',
+        estimated_risk: 'medium',
+        priority_score: 70 * baseRiskMultiplier,
+        tools_required: ['update_node_config'],
+        category: 'infrastructure'
+      },
+      {
+        action: 'Send reconnaissance tasks to all implants to map network topology rapidly',
+        reasoning: 'Aggressive network mapping provides immediate intelligence for follow-on actions',
+        estimated_risk: 'medium',
+        priority_score: 75 * baseRiskMultiplier,
+        tools_required: ['send_c2_task_to_implant', 'bulk_implant_operation'],
+        category: 'recon'
+      }
+    ],
+    exfil: [
+      {
+        action: 'Conduct comprehensive file system reconnaissance on high-value implants',
+        reasoning: 'Data discovery is prerequisite for effective exfiltration operations',
+        estimated_risk: 'low',
+        priority_score: 90 * baseRiskMultiplier,
+        tools_required: ['send_c2_task_to_implant'],
+        category: 'recon'
+      },
+      {
+        action: 'Identify and stage sensitive data (credentials, documents, databases) for exfiltration',
+        reasoning: 'Targeted data staging maximizes value while minimizing transfer volume',
+        estimated_risk: 'medium',
+        priority_score: 85 * baseRiskMultiplier,
+        tools_required: ['send_c2_task_to_implant'],
+        category: 'operations'
+      },
+      {
+        action: 'Configure implants with scheduled, low-bandwidth data transfer during business hours',
+        reasoning: 'Blending exfiltration with normal traffic patterns reduces detection probability',
+        estimated_risk: 'low',
+        priority_score: 80 * baseRiskMultiplier,
+        tools_required: ['update_implant_config'],
+        category: 'implant'
+      },
+      {
+        action: 'Deploy additional implants to database servers and file shares',
+        reasoning: 'Direct access to data repositories improves collection efficiency',
+        estimated_risk: 'medium',
+        priority_score: 75 * baseRiskMultiplier,
+        tools_required: ['generate_stealth_implant_config', 'compile_and_deploy_implant'],
+        category: 'implant'
+      },
+      {
+        action: 'Assess OPSEC risk of current exfiltration channels and suggest alternatives',
+        reasoning: 'Risk assessment ensures sustainable data access without compromise',
+        estimated_risk: 'low',
+        priority_score: 70 * baseRiskMultiplier,
+        tools_required: ['assess_opsec_risk', 'analyze_traffic_and_suggest_evasion'],
+        category: 'operations'
+      }
+    ],
+    destruction: [
+      {
+        action: 'Prepare and validate kill-switch configurations for all implants and nodes',
+        reasoning: 'Validated kill switches ensure clean operational termination when required',
+        estimated_risk: 'high',
+        priority_score: 95 * baseRiskMultiplier,
+        tools_required: ['trigger_kill_switch', 'assess_opsec_risk'],
+        category: 'operations'
+      },
+      {
+        action: 'Orchestrate full operation for systematic persistence removal and backup destruction',
+        reasoning: 'Coordinated destruction maximizes operational impact while maintaining control',
+        estimated_risk: 'high',
+        priority_score: 90 * baseRiskMultiplier,
+        tools_required: ['orchestrate_full_operation'],
+        category: 'operations'
+      },
+      {
+        action: 'Identify and target critical infrastructure nodes for disruption',
+        reasoning: 'Focused disruption on critical systems maximizes operational impact',
+        estimated_risk: 'high',
+        priority_score: 85 * baseRiskMultiplier,
+        tools_required: ['send_c2_task_to_implant', 'trigger_kill_switch'],
+        category: 'operations'
+      },
+      {
+        action: 'Wipe logs and audit trails on compromised systems',
+        reasoning: 'Log destruction eliminates forensic evidence and attribution',
+        estimated_risk: 'high',
+        priority_score: 80 * baseRiskMultiplier,
+        tools_required: ['send_c2_task_to_implant', 'run_panel_command'],
+        category: 'operations'
+      },
+      {
+        action: 'Deploy implants with self-destruct triggers for timed operational termination',
+        reasoning: 'Automated self-destruction ensures clean exit without manual intervention',
+        estimated_risk: 'medium',
+        priority_score: 75 * baseRiskMultiplier,
+        tools_required: ['generate_stealth_implant_config', 'compile_and_deploy_implant'],
+        category: 'implant'
+      }
+    ]
+  };
+
+  // Context-aware adjustments
+  const contextAwareSuggestions = personaSuggestions[persona] || personaSuggestions.stealth;
+
+  contextAwareSuggestions.forEach((suggestion: any) => {
+    // Adjust priority based on operational context
+    if (context.active_implants === 0 && suggestion.category === 'implant') {
+      suggestion.priority_score += 20;
+      suggestion.reasoning += ' (CRITICAL: No active implants - deployment prioritized)';
+    }
+    
+    if (context.online_nodes === 0 && suggestion.category === 'infrastructure') {
+      suggestion.priority_score += 25;
+      suggestion.reasoning += ' (CRITICAL: No online nodes - infrastructure deployment prioritized)';
+    }
+    
+    if (context.implant_count < 5 && suggestion.category === 'implant') {
+      suggestion.priority_score += 15;
+      suggestion.reasoning += ' (Low implant count - expansion recommended)';
+    }
+
+    // Filter by focus area - strictly filter out non-matching categories
+    if (focusArea !== 'all' && suggestion.category !== focusArea) {
+      suggestion.priority_score = 0; // Completely deprioritize non-focus items
+    }
+  });
+
+  // Remove items that were filtered out
+  return contextAwareSuggestions.filter(s => s.priority_score > 0);
 }
