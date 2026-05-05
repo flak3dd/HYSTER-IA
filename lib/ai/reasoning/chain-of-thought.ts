@@ -249,7 +249,7 @@ export class ChainOfThoughtEngine {
 
       // Generate next-level thoughts if depth allows
       if (this.config.maxDepth > 1) {
-        await this.generateSubThoughts(thought, context, tools, 2)
+        await this.generateSubThoughts(thought, context, 2, tools)
       }
     }
   }
@@ -260,8 +260,8 @@ export class ChainOfThoughtEngine {
   private async generateSubThoughts(
     parentThought: Thought,
     context: Record<string, unknown>,
-    tools?: any[],
-    depth: number
+    depth: number,
+    tools?: any[]
   ): Promise<void> {
     if (depth > this.config.maxDepth) {
       return
@@ -290,7 +290,7 @@ export class ChainOfThoughtEngine {
 
       // Recursively generate deeper thoughts
       if (depth < this.config.maxDepth) {
-        await this.generateSubThoughts(thought, context, tools, depth + 1)
+        await this.generateSubThoughts(thought, context, depth + 1, tools)
       }
     }
   }
@@ -718,3 +718,6 @@ GUIDELINES:
 const cotEngine = new ChainOfThoughtEngine()
 
 export { cotEngine }
+
+// Alias for backward compatibility
+export { ChainOfThoughtEngine as ChainOfThoughtReasoning }

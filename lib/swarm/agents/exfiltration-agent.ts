@@ -6,7 +6,7 @@
 import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentCapability, AgentMessage } from '../types';
 import { MessageBus } from '../communication/message-bus';
-import { logger } from '../../logger';
+import logger from '../../logger';
 
 interface ExfiltrationTask {
   type: 'data_staging' | 'covert_channel' | 'data_encryption' | 'bandwidth_optimization' | 'multi_path';

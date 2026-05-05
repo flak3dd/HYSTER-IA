@@ -3,6 +3,7 @@ import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import { runShadowGrokAgent } from "@/lib/grok/agent-runner-enhanced"
 import { prisma } from "@/lib/db"
 import type { Persona } from "@/lib/ai/system-prompt"
+import { reasoningTraceSystem } from "@/lib/ai/reasoning/reasoning-trace"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -44,12 +45,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       operationGoal: body.operationGoal,
     })
 
+    // Get reasoning trace if available
+    let reasoningTrace = null
+    if (result.traceSessionId) {
+      try {
+        reasoningTrace = reasoningTraceSystem.getTrace(result.traceSessionId)
+      } catch (error) {
+        console.error('Failed to get reasoning trace:', error)
+      }
+    }
+
     return NextResponse.json({
       executionId: result.executionId,
       agentTaskId: result.agentTaskId,
       finalResponse: result.finalResponse,
       toolResults: result.toolResults,
       steps: result.steps,
+      reasoningTrace,
     })
 
   } catch (err) {

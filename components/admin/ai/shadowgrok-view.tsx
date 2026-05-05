@@ -110,6 +110,7 @@ const TOOL_META: Record<string, { icon: typeof Wrench; color: string; label: str
   query_hysteria_traffic_stats: { icon: Radio, color: "text-blue-400", label: "Traffic Stats", risk: "low" },
   create_or_update_subscription: { icon: Globe, color: "text-violet-400", label: "Subscription", risk: "low" },
   assess_opsec_risk: { icon: Shield, color: "text-amber-400", label: "OPSEC Risk", risk: "low" },
+  suggest_next_offensive_steps: { icon: Sparkles, color: "text-purple-400", label: "AI Suggestions", risk: "low" },
 }
 
 const RISK_CONFIG: Record<string, { color: string; bg: string }> = {
@@ -151,6 +152,7 @@ const QUICK_ACTION_CATEGORIES = {
     icon: Target,
     color: "text-violet-400",
     actions: [
+      { icon: Sparkles, label: "Get AI Suggestions", prompt: "Suggest next offensive steps with stealth persona and medium risk tolerance", color: "text-purple-400" },
       { icon: Send, label: "Send Recon Task", prompt: "Send recon task to all active implants to gather system information", color: "text-orange-400" },
       { icon: Target, label: "Plan Operation", prompt: "Orchestrate a full operation plan for establishing persistent access with low risk tolerance", color: "text-violet-400" },
       { icon: Terminal, label: "Execute Command", prompt: "Run a panel command to check system status (dry run)", color: "text-red-400" },

@@ -460,11 +460,17 @@ export class ReasoningTraceSystem {
   }
 
   /**
-   * Clear old traces
+   * Clear old traces.
+   * Use maxAge <= 0 to remove all stored traces (same as calling clearAll on the map only).
    */
   clearOldTraces(maxAge: number = 7 * 24 * 60 * 60 * 1000): void {
+    if (maxAge <= 0) {
+      this.traces.clear()
+      return
+    }
+
     const now = Date.now()
-    
+
     for (const [id, trace] of this.traces.entries()) {
       if (now - trace.startTime > maxAge) {
         this.traces.delete(id)

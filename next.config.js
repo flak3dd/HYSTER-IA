@@ -4,6 +4,29 @@ const nextConfig = {
   output: process.env.NODE_ENV === 'production' ? 'standalone' : undefined,
   // Enable compression for production
   compress: true,
+  
+  // Performance optimizations
+  reactStrictMode: true,
+  swcMinify: true,
+  
+  // Image optimization
+  images: {
+    domains: [],
+    formats: ['image/avif', 'image/webp'],
+    deviceSizes: [640, 750, 828, 1080, 1200],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256],
+  },
+  
+  // Bundle optimization
+  experimental: {
+    optimizePackageImports: ['lucide-react', '@radix-ui/react-icons'],
+  },
+  
+  // Compiler optimizations
+  compiler: {
+    removeConsole: process.env.NODE_ENV === 'production',
+  },
+  
   // Security headers
   async headers() {
     return [
@@ -30,6 +53,7 @@ const nextConfig = {
       },
     ];
   },
+  
   // Environment variables
   env: {
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',

@@ -506,6 +506,46 @@ export const SHADOWGROK_TOOLS: ToolDefinition[] = [
         required: ["subscription_id"]
       }
     }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "suggest_next_offensive_steps",
+      description: "Analyze current operational state (implants, nodes, recent activity) and provide intelligent, context-aware suggestions for next offensive actions. Takes into account persona (stealth/aggressive/exfil/destruction), risk tolerance, and current infrastructure status to recommend prioritized next steps with reasoning.",
+      parameters: {
+        type: "object",
+        properties: {
+          persona: { 
+            type: "string", 
+            enum: ["stealth", "aggressive", "exfil", "destruction"], 
+            description: "Operational persona to shape suggestion priorities" 
+          },
+          risk_tolerance: { 
+            type: "string", 
+            enum: ["low", "medium", "high"], 
+            default: "medium",
+            description: "Risk tolerance level for suggested actions" 
+          },
+          focus_area: { 
+            type: "string", 
+            enum: ["implants", "infrastructure", "operations", "all"], 
+            default: "all",
+            description: "Focus area for suggestions" 
+          },
+          include_context: { 
+            type: "boolean", 
+            default: true, 
+            description: "Include current operational context in analysis" 
+          },
+          max_suggestions: { 
+            type: "number", 
+            default: 5, 
+            description: "Maximum number of suggestions to return" 
+          }
+        }
+      }
+    }
   }
 ];
 

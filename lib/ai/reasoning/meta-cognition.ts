@@ -424,7 +424,7 @@ export class MetaCognitionEngine {
 
     return {
       sampleSize: this.calibrationHistory.length,
-      averageBias,
+      averageBias: avgBias,
       calibrationScore,
       confidenceAccuracy: accuracy,
     }
@@ -608,3 +608,6 @@ GUIDELINES:
 const metaCognitionEngine = new MetaCognitionEngine()
 
 export { metaCognitionEngine }
+
+// Alias for backward compatibility
+export { MetaCognitionEngine as MetaCognition }

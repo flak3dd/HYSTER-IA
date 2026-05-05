@@ -1,13 +1,13 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any */
-import { ImplantGenerator } from "./lib/implants/generator"
-import { RedTeamPlanner } from "./lib/redteam/planner"
-import { TrafficBlender } from "./lib/traffic/blending"
-import { MultiTransportFallback } from "./lib/transports/fallback"
-import { GlobalKillSwitch } from "./lib/security/killswitch"
-import { ImplantCompilationService } from "./lib/implants/compilation-service"
-import { TaskOrchestrationEngine, ImplantTaskExecutor } from "./lib/orchestration/engine"
-import { TransportAdapterManager, TransportAdapterFactory } from "./lib/transports/adapters"
-import { SecurityControls } from "./lib/security/controls"
+import { ImplantGenerator } from "@/lib/implants/generator"
+import { RedTeamPlanner } from "@/lib/redteam/planner"
+import { TrafficBlender } from "@/lib/traffic/blending"
+import { MultiTransportFallback } from "@/lib/transports/fallback"
+import { GlobalKillSwitch } from "@/lib/security/killswitch"
+import { ImplantCompilationService } from "@/lib/implants/compilation-service"
+import { TaskOrchestrationEngine, ImplantTaskExecutor } from "@/lib/orchestration/engine"
+import { TransportAdapterManager, TransportAdapterFactory } from "@/lib/transports/adapters"
+import { SecurityControls } from "@/lib/security/controls"
 
 /**
  * Comprehensive test suite for advanced C2 capabilities

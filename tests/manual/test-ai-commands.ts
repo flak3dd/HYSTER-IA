@@ -9,8 +9,8 @@
  * 5. "Create a new subscription for user 'testuser' with tags 'stealth' and 'eu'."
  */
 
-import { createConversation } from './lib/ai/conversations'
-import { runChat } from './lib/ai/chat'
+import { createConversation } from '@/lib/ai/conversations'
+import { runChat } from '@/lib/ai/chat'
 
 interface CommandTest {
   command: string

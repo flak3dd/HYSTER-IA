@@ -6,7 +6,7 @@
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { AgentConfig, AgentState, AgentType, AgentStatus, AgentCapability, SwarmHealth } from './types';
-import { logger } from '../logger';
+import logger from '../logger';
 
 export class AgentRegistry extends EventEmitter {
   private agents: Map<string, AgentState>;

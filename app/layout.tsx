@@ -5,6 +5,13 @@ import { Toaster } from "@/components/ui/sonner"
 import { ThemeProvider } from "@/components/theme-provider"
 import "./globals.css"
 
+// Initialize AI systems on server-side startup
+if (typeof window === 'undefined' && process.env.AUTO_INIT_AI !== 'false') {
+  import('@/lib/ai/startup').then(({ initializeAISystems }) => {
+    initializeAISystems().catch(console.error)
+  }).catch(console.error)
+}
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],

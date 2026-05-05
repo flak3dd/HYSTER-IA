@@ -6,7 +6,7 @@
 import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentCapability, AgentMessage } from '../types';
 import { MessageBus } from '../communication/message-bus';
-import { logger } from '../../logger';
+import logger from '../../logger';
 
 interface ReconTask {
   type: 'osint' | 'network_scan' | 'vulnerability_scan' | 'asset_inventory' | 'threat_analysis';

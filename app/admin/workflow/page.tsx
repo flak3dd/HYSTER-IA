@@ -1,4 +1,6 @@
 import { WorkflowChat } from '@/components/admin/workflow/workflow-chat'
+import { WorkflowScheduler } from '@/components/admin/workflow/workflow-scheduler'
+import { WorkflowAnalytics } from '@/components/admin/workflow/workflow-analytics'
 
 export default function WorkflowPage() {
   return (
@@ -9,7 +11,16 @@ export default function WorkflowPage() {
           Natural language workflow orchestration — describe complex operations and the AI handles execution.
         </p>
       </div>
-      <WorkflowChat />
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <WorkflowChat />
+        </div>
+        <div className="space-y-6">
+          <WorkflowScheduler />
+          <WorkflowAnalytics />
+        </div>
+      </div>
     </div>
   )
 }

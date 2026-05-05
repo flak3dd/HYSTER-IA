@@ -3,7 +3,7 @@
  * Run with: npx tsx test-mysmtp-integration.ts
  */
 
-import { sendMySmtpEmail, validateMySmtpApiKey } from './lib/mailer/mysmtp'
+import { sendMySmtpEmail, validateMySmtpApiKey } from '@/lib/mailer/mysmtp'
 
 async function testMySmtpIntegration() {
   console.log('Testing my.smtp.com integration...\n')

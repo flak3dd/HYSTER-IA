@@ -12,7 +12,7 @@ import {
   AgentPerformance,
   SharedReasoningTrace
 } from '../types';
-import { logger } from '../../logger';
+import logger from '../../logger';
 import { cotEngine } from '../../ai/reasoning/chain-of-thought';
 import { metaCognitionEngine } from '../../ai/reasoning/meta-cognition';
 
@@ -226,8 +226,9 @@ export class SwarmIntelligence extends EventEmitter {
       if (filters.reasoningType) {
         traces = traces.filter(t => t.reasoningType === filters.reasoningType);
       }
-      if (filters.minEffectiveness) {
-        traces = traces.filter(t => t.effectiveness >= filters.minEffectiveness);
+      if (filters.minEffectiveness !== undefined) {
+        const minEff = filters.minEffectiveness
+        traces = traces.filter(t => t.effectiveness >= minEff)
       }
       if (filters.agentId) {
         traces = traces.filter(t => t.sourceAgent === filters.agentId);
@@ -287,7 +288,7 @@ export class SwarmIntelligence extends EventEmitter {
         this.emit('reasoning_pattern_discovered', { patternId, trace });
       }
     } catch (error) {
-      logger.error('Error analyzing reasoning for patterns', error);
+      logger.error({ err: error }, 'Error analyzing reasoning for patterns');
     }
   }
 
@@ -584,30 +585,6 @@ export class SwarmIntelligence extends EventEmitter {
   private async initializePatternRecognition(): Promise<void> {
     // Would initialize ML models
     logger.info('Pattern recognition initialized');
-  }
-
-  private async deriveKnowledgeFromExperience(experience: ExperienceRecord): Promise<void> {
-    // Would use LLM to extract knowledge from experience
-    if (experience.outcome === 'success') {
-      const knowledge: Omit<KnowledgeBaseEntry, 'id' | 'createdAt'> = {
-        type: 'technique',
-        title: `Successful ${experience.taskType}`,
-        content: {
-          approach: experience.approach,
-          duration: experience.duration,
-          resourceUsage: experience.resourceUsage,
-        },
-        tags: ['successful', experience.taskType],
-        sourceAgent: experience.agentId,
-        operationId: experience.operationId,
-        successRate: 1.0,
-        usageCount: 0,
-        lastUsed: new Date(),
-        confidence: experience.confidence,
-      };
-
-      await this.addKnowledge(knowledge);
-    }
   }
 
   private startLearningLoop(): void {

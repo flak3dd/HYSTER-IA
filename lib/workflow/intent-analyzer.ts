@@ -1,6 +1,6 @@
 import type { IntentAnalysis } from './types'
 import type { ChatMessage } from '../ai/llm'
-import { cotEngine } from '../ai/reasoning/chain-of-thought'
+import { cotEngine, type ReasoningStep } from '../ai/reasoning/chain-of-thought'
 import { metaCognitionEngine } from '../ai/reasoning/meta-cognition'
 import { reasoningTraceSystem } from '../ai/reasoning/reasoning-trace'
 
@@ -545,7 +545,7 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
 
     // Determine if multi-step
     const suggestedChaining = cotResult.reasoningSteps.length > 3 
-      ? cotResult.reasoningSteps.slice(0, 3).map(s => s.thought.type)
+      ? cotResult.reasoningSteps.slice(0, 3).map((s: ReasoningStep) => s.thought.type)
       : undefined
 
     return {

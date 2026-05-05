@@ -1,0 +1,56 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { verifyAdmin } from '@/lib/auth/verify-admin'
+import {
+  markNotificationAsRead,
+  deleteNotification,
+} from '@/lib/notifications/notification-system'
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { notificationId: string } }
+) {
+  const auth = await verifyAdmin(request)
+  if (!auth.success) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    const success = await markNotificationAsRead(params.notificationId)
+    if (success) {
+      return NextResponse.json({ success: true })
+    } else {
+      return NextResponse.json({ error: 'Failed to mark notification as read' }, { status: 500 })
+    }
+  } catch (error) {
+    console.error('Failed to update notification:', error)
+    return NextResponse.json(
+      { error: 'Failed to update notification', message: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: { notificationId: string } }
+) {
+  const auth = await verifyAdmin(request)
+  if (!auth.success) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    const success = await deleteNotification(params.notificationId)
+    if (success) {
+      return NextResponse.json({ success: true })
+    } else {
+      return NextResponse.json({ error: 'Failed to delete notification' }, { status: 500 })
+    }
+  } catch (error) {
+    console.error('Failed to delete notification:', error)
+    return NextResponse.json(
+      { error: 'Failed to delete notification', message: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    )
+  }
+}

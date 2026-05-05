@@ -6,6 +6,7 @@ import { selfOptimizingConfig } from '@/lib/ai/self-optimizing-config'
 import { predictiveCaching } from '@/lib/ai/predictive-caching'
 import { threatCorrelationEngine } from '@/lib/ai/threat-correlation'
 import { anomalyDetectionEngine } from '@/lib/ai/anomaly-detection'
+import { aiInitializer } from '@/lib/ai/ai-initializer'
 
 // POST /api/admin/ai/autonomous/task - Create autonomous task
 export async function POST(request: NextRequest) {
@@ -31,6 +32,12 @@ export async function POST(request: NextRequest) {
         return await handleCorrelateThreats()
       case 'detect_anomalies':
         return await handleDetectAnomalies()
+      case 'initialize':
+        return await handleInitializeAI(parameters)
+      case 'shutdown':
+        return await handleShutdownAI()
+      case 'reconfigure':
+        return await handleReconfigureAI(parameters)
       default:
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
     }
@@ -70,6 +77,8 @@ export async function GET(request: NextRequest) {
         return await handleThreatStatus()
       case 'anomalies':
         return await handleAnomalyStatus()
+      case 'initializer':
+        return await handleInitializerStatus()
       default:
         return NextResponse.json({ error: 'Unknown status type' }, { status: 400 })
     }
@@ -266,6 +275,51 @@ async function handleAnomalyStatus(): Promise<NextResponse> {
     anomalies: anomalies.slice(0, 50), // Limit to 50 for performance
     statistics,
     config,
+    timestamp: Date.now(),
+  })
+}
+
+async function handleInitializerStatus(): Promise<NextResponse> {
+  const status = await aiInitializer.getStatus()
+  const config = aiInitializer.getConfig()
+
+  return NextResponse.json({
+    success: true,
+    initialized: status.initialized,
+    systems: status.systems,
+    config,
+    timestamp: Date.now(),
+  })
+}
+
+async function handleInitializeAI(parameters: Record<string, unknown> = {}): Promise<NextResponse> {
+  const result = await aiInitializer.initialize(parameters)
+
+  return NextResponse.json({
+    success: result.success,
+    systems: result.systems,
+    timestamp: result.timestamp,
+  })
+}
+
+async function handleShutdownAI(): Promise<NextResponse> {
+  const result = await aiInitializer.shutdown()
+
+  return NextResponse.json({
+    success: result.success,
+    message: result.message,
+  })
+}
+
+async function handleReconfigureAI(parameters: Record<string, unknown> = {}): Promise<NextResponse> {
+  await aiInitializer.reconfigure(parameters)
+  const status = await aiInitializer.getStatus()
+
+  return NextResponse.json({
+    success: true,
+    initialized: status.initialized,
+    systems: status.systems,
+    config: status.config,
     timestamp: Date.now(),
   })
 }

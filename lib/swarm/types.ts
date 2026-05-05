@@ -258,7 +258,7 @@ export interface ConflictResolution {
   initiatedBy: string;
   timestamp: Date;
   resolution: any;
-  outcome: 'resolved' | 'escalated' | 'deferred';
+  outcome: 'pending' | 'resolved' | 'escalated' | 'deferred';
   reasoning?: string;
 }
 

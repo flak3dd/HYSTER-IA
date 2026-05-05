@@ -13,6 +13,11 @@ import type {
 import { ResponseGenerator } from './response-generator'
 import { getProactiveIntelligence } from './proactive-intelligence'
 import { reasoningTraceSystem } from '../ai/reasoning/reasoning-trace'
+import { predictiveCaching } from '../ai/predictive-caching'
+import { anomalyDetectionEngine } from '../ai/anomaly-detection'
+import { intelligentScheduler } from '../ai/intelligent-scheduler'
+import { selfOptimizingConfig } from '../ai/self-optimizing-config'
+import { threatCorrelationEngine } from '../ai/threat-correlation'
 
 const prisma = new PrismaClient()
 const responseGenerator = new ResponseGenerator()
@@ -342,6 +347,73 @@ export class WorkflowEngine {
     }
 
     try {
+      // Check cache for existing results
+      const cacheKey = `workflow:${step.functionToExecute}:${JSON.stringify(step.functionParameters)}`
+      const cachedResult = await predictiveCaching.get(cacheKey)
+
+      if (cachedResult) {
+        console.log(`[Workflow] Cache hit for ${step.functionToExecute}`)
+        // Update the step with the cached result
+        await prisma.workflowStep.update({
+          where: { id: stepId },
+          data: {
+            executionResult: JSON.parse(JSON.stringify(cachedResult)),
+            completed: true,
+          },
+        })
+
+        // Create a result display step with cached result
+        await this.createStep(sessionId, session.currentStepOrder + 1, 'result_display', {
+          content: responseGenerator.generateResponse(
+            {
+              intent: `Execute ${step.functionToExecute}`,
+              confidence: 1.0,
+              extractedParameters: step.functionParameters as Record<string, unknown> || {},
+              suggestedFunction: step.functionToExecute || undefined,
+              requiresClarification: false,
+              clarificationQuestions: [],
+            },
+            session.context as Record<string, unknown>,
+            cachedResult
+          ) + '\n\n*(Result served from cache)*',
+        })
+
+        // Mark session as completed
+        await prisma.workflowSession.update({
+          where: { id: sessionId },
+          data: {
+            status: 'completed',
+            currentStepOrder: session.currentStepOrder + 1,
+            completedAt: new Date(),
+          },
+        })
+
+        const updatedSession = await prisma.workflowSession.findUnique({
+          where: { id: sessionId },
+          include: { steps: true },
+        })
+
+        return {
+          session: this.mapDbSessionToWorkflowSession(updatedSession!),
+          nextAction: 'completed',
+          message: '🎉 ' + responseGenerator.generateResponse(
+            {
+              intent: `Execute ${step.functionToExecute}`,
+              confidence: 1.0,
+              extractedParameters: step.functionParameters as Record<string, unknown> || {},
+              suggestedFunction: step.functionToExecute || undefined,
+              requiresClarification: false,
+              clarificationQuestions: [],
+            },
+            session.context as Record<string, unknown>,
+            cachedResult
+          ).split('\n')[0] + ' (cached)',
+          currentStep: this.mapDbStepToWorkflowStep(
+            updatedSession!.steps.find(s => s.order === session.currentStepOrder + 1)!
+          ),
+        }
+      }
+
       // Execute the function (this will be implemented in the function registry)
       const { FunctionRegistry } = await import('./function-registry')
       const registry = new FunctionRegistry()
@@ -349,6 +421,24 @@ export class WorkflowEngine {
         step.functionToExecute!,
         step.functionParameters as Record<string, unknown>
       )
+
+      // Cache the result for future use
+      await predictiveCaching.set(cacheKey, result, { ttl: 3600000 }) // Cache for 1 hour
+      console.log(`[Workflow] Cached result for ${step.functionToExecute}`)
+
+      // Detect anomalies in workflow patterns
+      try {
+        await anomalyDetectionEngine.analyzeMetric('workflow_execution', {
+          function: step.functionToExecute,
+          parameters: step.functionParameters,
+          timestamp: Date.now(),
+          sessionId,
+          success: true,
+        })
+      } catch (error) {
+        console.error('[Workflow] Anomaly detection error:', error)
+        // Don't fail the workflow if anomaly detection fails
+      }
 
       // Generate enhanced result message
       const enhancedResult = responseGenerator.generateResponse(
@@ -402,6 +492,20 @@ export class WorkflowEngine {
         ),
       }
     } catch (error) {
+      // Detect anomalies in workflow errors
+      try {
+        await anomalyDetectionEngine.analyzeMetric('workflow_execution', {
+          function: step.functionToExecute,
+          parameters: step.functionParameters,
+          timestamp: Date.now(),
+          sessionId,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      } catch (anomalyError) {
+        console.error('[Workflow] Anomaly detection error:', anomalyError)
+      }
+
       // Enhanced error handling
       const errorRecovery = responseGenerator.generateErrorRecovery(
         error instanceof Error ? error : new Error(String(error)),
