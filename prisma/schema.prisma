@@ -27,6 +27,7 @@ model Operator {
   scheduledReports ScheduledReport[]
   createdOperations Operation[] @relation("CreatedBy")
   assignedTasks    Task[]         @relation("TaskAssignee")
+  notifications   Notification[]
 
   @@map("operators")
 }
@@ -421,6 +422,13 @@ model HysteriaNode {
   provider        String?
   profileId       String?
   lastHeartbeatAt DateTime?
+  // Proxy configuration for dynamic proxy management
+  socksProxyUrl   String?   // SOCKS5 proxy URL (e.g., socks5://127.0.0.1:1080)
+  httpProxyUrl    String?   // HTTP/HTTPS proxy URL (e.g., http://127.0.0.1:8080)
+  proxyHealthStatus String? @default("unknown") // unknown, healthy, unhealthy, checking
+  lastHealthCheck  DateTime? // Timestamp of last health check
+  proxyPriority   Int       @default(0) // Lower value = higher priority for failover
+  proxyResponseTimeMs Int?  // Average response time in milliseconds
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   implants        Implant[]
@@ -945,4 +953,20 @@ model SwarmEvent {
   @@index([type, timestamp])
   @@index([source])
   @@map("swarm_events")
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  operatorId  String
+  operator    Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  type        String   // info, warning, error, success
+  title       String
+  message     String
+  metadata    Json?    @default("{}")
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([operatorId, read])
+  @@index([createdAt])
+  @@map("notifications")
 }

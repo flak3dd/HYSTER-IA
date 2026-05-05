@@ -6,7 +6,7 @@
 import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentCapability, AgentMessage } from '../types';
 import { MessageBus } from '../communication/message-bus';
-import { logger } from '../../logger';
+import logger from '../../logger';
 
 interface PersistenceTask {
   type: 'mechanism_deployment' | 'redundant_channels' | 'self_healing' | 'credential_harvesting' | 'scheduled_tasks';

@@ -41,6 +41,8 @@ const customJestConfig = {
   // DB integration tests share a database; running with 1 worker avoids data races
   // from parallel suites deleting each other's records or hitting unique constraints
   maxWorkers: 1,
+  // Ignore .next directory to prevent Haste module naming collisions
+  modulePathIgnorePatterns: ['<rootDir>/.next/'],
 }
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

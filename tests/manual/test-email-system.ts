@@ -12,14 +12,14 @@
  * - Resend integration
  */
 
-import { loadMailAccounts } from "./lib/mail/accounts"
-import { testConnection } from "./lib/mail/client"
-import { runAllAccountTests, getAutoTestState, enableAutoTest, disableAutoTest } from "./lib/mail/auto-test"
-import { configureQueue, getQueueStats, addToQueue, getQueuedEmails, updateEmailStatus } from "./lib/mailer/queue"
-import { sendEnhancedEmail } from "./lib/mail/sender"
-import { generateTrackingId, createTrackingEvent, recordTrackingEvent } from "./lib/mailer/tracking"
-import { sendResendEmail } from "./lib/mailer/resend"
-import type { SmtpConfig } from "./lib/mail/types"
+import { loadMailAccounts } from "@/lib/mail/accounts"
+import { testConnection } from "@/lib/mail/client"
+import { runAllAccountTests, getAutoTestState, enableAutoTest, disableAutoTest } from "@/lib/mail/auto-test"
+import { configureQueue, getQueueStats, addToQueue, getQueuedEmails, updateEmailStatus } from "@/lib/mailer/queue"
+import { sendEnhancedEmail } from "@/lib/mail/sender"
+import { generateTrackingId, createTrackingEvent, recordTrackingEvent } from "@/lib/mailer/tracking"
+import { sendResendEmail } from "@/lib/mailer/resend"
+import type { SmtpConfig } from "@/lib/mail/types"
 
 interface TestResult {
   passed: boolean

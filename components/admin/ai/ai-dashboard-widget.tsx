@@ -19,6 +19,11 @@ import {
   Wrench,
   TrendingUp,
   RefreshCw,
+  Cpu,
+  CheckCircle2,
+  XCircle,
+  Power,
+  PowerOff,
 } from "lucide-react"
 
 type AIStats = {
@@ -38,6 +43,25 @@ type RecentActivity = {
 type AIStatsResponse = {
   stats: AIStats
   recentActivity: RecentActivity[]
+}
+
+type AISystemStatus = {
+  initialized: boolean
+  systems: {
+    scheduler: boolean
+    selfOptimization: boolean
+    predictiveCaching: boolean
+    threatCorrelation: boolean
+    anomalyDetection: boolean
+  }
+  config: {
+    enableTaskScheduling: boolean
+    enableSelfOptimization: boolean
+    enablePredictiveCaching: boolean
+    enableThreatCorrelation: boolean
+    enableAnomalyDetection: boolean
+    optimizationInterval: number
+  }
 }
 
 const QUICK_ACTIONS = [
@@ -75,6 +99,8 @@ export function AIDashboardWidget() {
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [aiSystemStatus, setAiSystemStatus] = useState<AISystemStatus | null>(null)
+  const [aiSystemLoading, setAiSystemLoading] = useState(true)
 
   const fetchStats = async () => {
     try {
@@ -92,16 +118,72 @@ export function AIDashboardWidget() {
     }
   }
 
+  const fetchAISystemStatus = async () => {
+    try {
+      const res = await apiFetch("/api/admin/ai/autonomous?type=initializer")
+      if (res.ok) {
+        const data = await res.json()
+        setAiSystemStatus(data)
+      }
+    } catch (error) {
+      console.error("Failed to fetch AI system status:", error)
+    } finally {
+      setAiSystemLoading(false)
+    }
+  }
+
   useEffect(() => {
     fetchStats()
+    fetchAISystemStatus()
     // Refresh stats every 30 seconds
     const interval = setInterval(fetchStats, 30000)
-    return () => clearInterval(interval)
+    const aiInterval = setInterval(fetchAISystemStatus, 60000) // Refresh AI status every minute
+    return () => {
+      clearInterval(interval)
+      clearInterval(aiInterval)
+    }
   }, [])
 
   const handleRefresh = () => {
     setRefreshing(true)
     fetchStats()
+    fetchAISystemStatus()
+  }
+
+  const handleInitializeAI = async () => {
+    try {
+      setAiSystemLoading(true)
+      const res = await apiFetch("/api/admin/ai/autonomous", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "initialize" }),
+      })
+      if (res.ok) {
+        await fetchAISystemStatus()
+      }
+    } catch (error) {
+      console.error("Failed to initialize AI systems:", error)
+    } finally {
+      setAiSystemLoading(false)
+    }
+  }
+
+  const handleShutdownAI = async () => {
+    try {
+      setAiSystemLoading(true)
+      const res = await apiFetch("/api/admin/ai/autonomous", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "shutdown" }),
+      })
+      if (res.ok) {
+        await fetchAISystemStatus()
+      }
+    } catch (error) {
+      console.error("Failed to shutdown AI systems:", error)
+    } finally {
+      setAiSystemLoading(false)
+    }
   }
 
   return (
@@ -138,8 +220,94 @@ export function AIDashboardWidget() {
           </div>
         </div>
       </CardHeader>
-      
+
       <CardContent className="p-4 space-y-4">
+        {/* AI System Status */}
+        <div className="rounded-lg bg-background/50 border border-border/50 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-label text-muted-foreground">
+              <Cpu className="h-3 w-3" />
+              <span>AI Systems</span>
+            </div>
+            {aiSystemLoading ? (
+              <Skeleton className="h-5 w-16" />
+            ) : aiSystemStatus ? (
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "h-5 px-1.5 text-micro",
+                    aiSystemStatus.initialized
+                      ? "border-success/30 bg-success/10 text-success"
+                      : "border-warning/30 bg-warning/10 text-warning"
+                  )}
+                >
+                  {aiSystemStatus.initialized ? (
+                    <>
+                      <CheckCircle2 className="h-2.5 w-2.5 mr-1" />
+                      Active
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="h-2.5 w-2.5 mr-1" />
+                      Inactive
+                    </>
+                  )}
+                </Badge>
+                {aiSystemStatus.initialized ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={handleShutdownAI}
+                    disabled={aiSystemLoading}
+                    title="Shutdown AI systems"
+                  >
+                    <PowerOff className="h-3 w-3 text-destructive" />
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={handleInitializeAI}
+                    disabled={aiSystemLoading}
+                    title="Initialize AI systems"
+                  >
+                    <Power className="h-3 w-3 text-success" />
+                  </Button>
+                )}
+              </div>
+            ) : null}
+          </div>
+          {aiSystemLoading ? (
+            <div className="flex gap-1">
+              <Skeleton className="h-4 flex-1" />
+              <Skeleton className="h-4 flex-1" />
+              <Skeleton className="h-4 flex-1" />
+            </div>
+          ) : aiSystemStatus ? (
+            <div className="flex gap-1 flex-wrap">
+              {Object.entries(aiSystemStatus.systems).map(([key, enabled]) => (
+                <Badge
+                  key={key}
+                  variant="outline"
+                  className={cn(
+                    "h-5 px-1.5 text-micro",
+                    enabled
+                      ? "border-success/30 bg-success/10 text-success"
+                      : "border-muted/30 bg-muted/10 text-muted-foreground"
+                  )}
+                >
+                  {key === 'scheduler' && 'Scheduler'}
+                  {key === 'selfOptimization' && 'Optimization'}
+                  {key === 'predictiveCaching' && 'Caching'}
+                  {key === 'threatCorrelation' && 'Threats'}
+                  {key === 'anomalyDetection' && 'Anomalies'}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-3">
           {loading ? (

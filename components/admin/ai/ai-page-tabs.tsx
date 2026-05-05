@@ -3,7 +3,8 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AiChatView } from "./ai-chat-view"
 import { ShadowGrokView } from "./shadowgrok-view"
-import { Bot, ShieldAlert, Sparkles, Zap, Activity } from "lucide-react"
+import { ReasoningTraceView } from "./reasoning-trace-view"
+import { Bot, ShieldAlert, Sparkles, Zap, Activity, Brain } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
@@ -97,12 +98,25 @@ export function AiPageTabs() {
               12
             </Badge>
           </TabsTrigger>
+          <TabsTrigger
+            value="reasoning"
+            className="gap-2 text-body-sm data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:shadow-primary/5 data-[state=active]:border-primary/30 px-5 py-2.5 transition-all"
+          >
+            <Brain className="h-3.5 w-3.5" />
+            Reasoning
+            <Badge variant="outline" className="ml-1 h-5 px-1.5 text-micro border-info/30 bg-info/10 text-info">
+              Active
+            </Badge>
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="chat" className="mt-4">
           <AiChatView hideHeader />
         </TabsContent>
         <TabsContent value="shadowgrok" className="mt-4">
           <ShadowGrokView />
+        </TabsContent>
+        <TabsContent value="reasoning" className="mt-4">
+          <ReasoningTraceView trace={null} />
         </TabsContent>
       </Tabs>
     </div>

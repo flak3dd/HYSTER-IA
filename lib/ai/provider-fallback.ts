@@ -157,14 +157,24 @@ export async function executeWithFallback(
       console.log(`[ProviderFallback] Attempt ${attempt}/${fallbackConfig.maxRetries} with provider: ${provider.name}`);
 
       try {
+        // Extract system messages for security (use dedicated system option)
+        const systemMessages = messages
+          .filter(m => m.role === 'system')
+          .map(m => m.content)
+          .join('\n\n')
+
+        // Filter out tool and system messages, keep only user/assistant
+        const filteredMessages = messages
+          .filter(m => m.role !== 'tool' && m.role !== 'system')
+          .map(m => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          }))
+
         const result = await generateText({
           model: provider.client(provider.model),
-          messages: messages
-            .filter(m => m.role !== 'tool')
-            .map(m => ({
-              role: m.role as 'system' | 'user' | 'assistant',
-              content: m.content,
-            })),
+          system: systemMessages || undefined,
+          messages: filteredMessages,
           temperature,
           tools: tools as any,
           abortSignal: signal,

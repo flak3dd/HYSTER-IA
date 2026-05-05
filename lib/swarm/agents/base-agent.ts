@@ -8,8 +8,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { AgentConfig, AgentState, AgentStatus, AgentMessage, AgentCapability, SharedReasoningTrace, CollaborativeReasoningSession } from '../types';
 import { MessageBus } from '../communication/message-bus';
 import { MessageBuilder, MessageFactory } from '../communication/message-builder';
-import { logger } from '../../logger';
-import { cotEngine } from '../../ai/reasoning/chain-of-thought';
+import logger from '../../logger';
+import { cotEngine, type CoTResult } from '../../ai/reasoning/chain-of-thought';
 import { metaCognitionEngine } from '../../ai/reasoning/meta-cognition';
 import { reasoningTraceSystem } from '../../ai/reasoning/reasoning-trace';
 
@@ -63,6 +63,30 @@ export abstract class BaseAgent extends EventEmitter {
       this.enableCollaborativeReasoning = config.reasoningConfig.enableCollaborativeReasoning;
       this.enableReasoningSharing = config.reasoningConfig.enableReasoningSharing;
     }
+  }
+
+  /** Tool descriptors passed to chain-of-thought (override in subclasses). */
+  protected getAgentTools(): any[] {
+    return []
+  }
+
+  /** Whether chain-of-thought is warranted for this task */
+  protected isComplexTask(task: {
+    type?: string
+    description?: string
+    priority?: number
+  }): boolean {
+    const desc = `${task.type ?? ''} ${task.description ?? ''}`.toLowerCase()
+    if ((task.priority ?? 0) >= 8) return true
+    if (
+      desc.includes('multi') ||
+      desc.includes('orchestrat') ||
+      desc.includes('deploy') ||
+      desc.includes('exfil')
+    ) {
+      return true
+    }
+    return desc.length > 120
   }
 
   /**
@@ -150,7 +174,7 @@ export abstract class BaseAgent extends EventEmitter {
         logger.warn(`No handler for message type: ${message.payload.type}`);
       }
     } catch (error) {
-      logger.error(`Error handling message from ${message.fromAgent}`, error);
+      logger.error({ err: error }, `Error handling message from ${message.fromAgent}`);
       await this.sendErrorResponse(message, error as Error);
     }
   }
@@ -324,7 +348,7 @@ export abstract class BaseAgent extends EventEmitter {
       // Send error response
       await this.sendErrorResponse(message, error as Error);
 
-      logger.error(`Agent ${this.config.id} failed task ${taskId}`, error);
+      logger.error({ err: error }, `Agent ${this.config.id} failed task ${taskId}`);
     }
   }
 
@@ -731,6 +755,11 @@ export abstract class BaseAgent extends EventEmitter {
   /**
    * Abstract method: Execute task (to be implemented by subclasses)
    */
+  /** Override to incorporate CoT output; default runs the normal task path. */
+  protected async executeTaskWithReasoning(task: any, _cotResult: CoTResult): Promise<any> {
+    return this.executeTask(task)
+  }
+
   protected abstract executeTask(task: any): Promise<any>;
 
   /**

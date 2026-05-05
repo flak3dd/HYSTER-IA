@@ -16,10 +16,10 @@ import { reasoningTraceSystem } from '@/lib/ai/reasoning/reasoning-trace'
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { traceId: string } }
+  context: { params: Promise<{ traceId: string }> }
 ) {
   try {
-    const { traceId } = params
+    const { traceId } = await context.params
     const searchParams = request.nextUrl.searchParams
     const format = searchParams.get('format') // 'json' or 'dot'
 

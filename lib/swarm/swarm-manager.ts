@@ -16,15 +16,16 @@ import { EvasionAgent } from './agents/evasion-agent';
 import { ExfiltrationAgent } from './agents/exfiltration-agent';
 import { PersistenceAgent } from './agents/persistence-agent';
 import { AgentConfig, AgentType } from './types';
-import { logger } from '../../logger';
+import logger from '../logger';
 
 export class SwarmManager {
   private config: SwarmConfig;
-  private messageBus: MessageBus;
-  private registry: AgentRegistry;
-  private coordinator: SwarmCoordinator;
-  private negotiationEngine: NegotiationEngine;
-  private intelligence: SwarmIntelligence;
+  /** Set in {@link SwarmManager.initialize} */
+  private messageBus!: MessageBus;
+  private registry!: AgentRegistry;
+  private coordinator!: SwarmCoordinator;
+  private negotiationEngine!: NegotiationEngine;
+  private intelligence!: SwarmIntelligence;
   private agents: Map<string, any>; // Agent instances
   private isInitialized: boolean;
 

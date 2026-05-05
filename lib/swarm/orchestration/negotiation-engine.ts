@@ -16,7 +16,7 @@ import {
 import { AgentRegistry } from '../agent-registry';
 import { MessageBus } from '../communication/message-bus';
 import { MessageFactory } from '../communication/message-builder';
-import { logger } from '../../logger';
+import logger from '../../logger';
 import { cotEngine } from '../../ai/reasoning/chain-of-thought';
 import { metaCognitionEngine } from '../../ai/reasoning/meta-cognition';
 
@@ -113,7 +113,7 @@ export class NegotiationEngine extends EventEmitter {
   async handleNegotiationResponse(negotiationId: string, response: NegotiationResponse): Promise<void> {
     const negotiation = this.activeNegotiations.get(negotiationId);
     if (!negotiation) {
-      logger.warn(`Negotiation ${negiationId} not found`);
+      logger.warn(`Negotiation ${negotiationId} not found`);
       return;
     }
 
@@ -488,7 +488,7 @@ export class NegotiationEngine extends EventEmitter {
 
       return assessment.confidence;
     } catch (error) {
-      logger.error('Error estimating proposal confidence, using default', error);
+      logger.error({ err: error }, 'Error estimating proposal confidence, using default');
       return 0.8;
     }
   }
@@ -518,7 +518,7 @@ export class NegotiationEngine extends EventEmitter {
 
       logger.info(`Negotiation ${negotiation.id} concluded with reasoning-based decision: ${decision}`);
     } catch (error) {
-      logger.error('Reasoning-based conclusion failed, falling back to standard logic', error);
+      logger.error({ err: error }, 'Reasoning-based conclusion failed, falling back to standard logic');
       
       // Fallback to standard logic
       const acceptCount = negotiation.responses.filter(r => r.response === 'accept').length;

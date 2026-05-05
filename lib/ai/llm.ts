@@ -506,14 +506,24 @@ export async function chatComplete(options: {
     aiLog('Using provider:', providerUsed)
     aiLog('Tools being passed to AI SDK:', JSON.stringify(tools, null, 2))
 
+    // Extract system messages for security (use dedicated system option)
+    const systemMessages = messages
+      .filter(m => m.role === 'system')
+      .map(m => m.content)
+      .join('\n\n')
+
+    // Filter out tool and system messages, keep only user/assistant
+    const filteredMessages = messages
+      .filter(m => m.role !== 'tool' && m.role !== 'system')
+      .map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }))
+
     const result = await generateText({
       model: selectedModel,
-      messages: messages
-        .filter(m => m.role !== 'tool') // Filter out tool messages for simple implementation
-        .map(m => ({
-        role: m.role as 'system' | 'user' | 'assistant',
-        content: m.content,
-      })),
+      system: systemMessages || undefined,
+      messages: filteredMessages,
       temperature,
       tools,
       abortSignal: signal,

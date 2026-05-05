@@ -19,7 +19,7 @@ import {
 import { AgentRegistry } from '../agent-registry';
 import { MessageBus } from '../communication/message-bus';
 import { MessageFactory } from '../communication/message-builder';
-import { logger } from '../../logger';
+import logger from '../../logger';
 import { cotEngine } from '../../ai/reasoning/chain-of-thought';
 import { metaCognitionEngine } from '../../ai/reasoning/meta-cognition';
 
@@ -153,7 +153,7 @@ export class SwarmCoordinator extends EventEmitter {
   /**
    * Decompose objectives into tasks
    */
-  private async decomObjectives(objectives: string[], constraints: any): Promise<SwarmTask[]> {
+  private async decomposeObjectives(objectives: string[], constraints: any): Promise<SwarmTask[]> {
     const tasks: SwarmTask[] = [];
 
     for (const objective of objectives) {
@@ -194,7 +194,7 @@ export class SwarmCoordinator extends EventEmitter {
       logger.info(`Reasoning-based decomposition completed for operation ${operation.id}`);
       return tasks;
     } catch (error) {
-      logger.error(`Reasoning-based decomposition failed for operation ${operation.id}, falling back to standard decomposition`, error);
+      logger.error({ err: error }, `Reasoning-based decomposition failed for operation ${operation.id}, falling back to standard decomposition`);
       return this.decomposeObjectives(operation.objectives, operation.constraints);
     }
   }
@@ -232,7 +232,7 @@ export class SwarmCoordinator extends EventEmitter {
         tasks.push(task);
       }
     } catch (error) {
-      logger.error('Error extracting tasks from reasoning', error);
+      logger.error({ err: error }, 'Error extracting tasks from reasoning');
     }
     
     return tasks;
@@ -528,7 +528,7 @@ export class SwarmCoordinator extends EventEmitter {
       // Otherwise, use standard selection with confidence weighting
       return this.selectAgentWithConfidence(availableAgents, assessment.confidence);
     } catch (error) {
-      logger.error('Reasoning-based agent selection failed, falling back to standard selection', error);
+      logger.error({ err: error }, 'Reasoning-based agent selection failed, falling back to standard selection');
       return this.selectAgentForTask(task, operation.constraints);
     }
   }

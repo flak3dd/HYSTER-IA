@@ -11,18 +11,18 @@
  * 7. Caching mechanism
  */
 
-import { aiToolDefinitions, runAiTool } from './lib/ai/tools'
-import { chatComplete } from './lib/ai/llm'
-import { runChat } from './lib/ai/chat'
-import { 
-  createConversation, 
-  getConversation, 
-  listConversations, 
+import { aiToolDefinitions, runAiTool } from '@/lib/ai/tools'
+import { chatComplete } from '@/lib/ai/llm'
+import { runChat } from '@/lib/ai/chat'
+import {
+  createConversation,
+  getConversation,
+  listConversations,
   appendMessages,
-  deleteConversation 
-} from './lib/ai/conversations'
-import { buildSystemPrompt, Role } from './lib/ai/system-prompt'
-import { serverEnv } from './lib/env'
+  deleteConversation,
+} from '@/lib/ai/conversations'
+import { buildSystemPrompt, Role } from '@/lib/ai/system-prompt'
+import { serverEnv } from '@/lib/env'
 
 interface TestResult {
   name: string

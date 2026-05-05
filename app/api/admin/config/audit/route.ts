@@ -1,24 +1,51 @@
-import { NextResponse, type NextRequest } from "next/server"
-import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
-import { getServerConfig } from "@/lib/db/server-config"
-import { auditServerConfig } from "@/lib/config-audit/analyzer"
+import { NextRequest, NextResponse } from 'next/server'
+import { verifyAdmin } from '@/lib/auth/verify-admin'
+import {
+  checkPasswordStrength,
+  validateTLSConfig,
+  scoreObfuscationEffectiveness,
+  runSecurityChecklist,
+} from '@/lib/config/audit'
 
-export const runtime = "nodejs"
-export const dynamic = "force-dynamic"
+export async function POST(request: NextRequest) {
+  const auth = await verifyAdmin(request)
+  if (!auth.success) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    await verifyAdmin(req)
-    const cfg = await getServerConfig()
-    if (!cfg) {
-      return NextResponse.json(
-        { error: "no_config", message: "No server configuration found. Configure the server first." },
-        { status: 404 },
-      )
+    const body = await request.json()
+    const { type, config } = body
+
+    let result
+
+    switch (type) {
+      case 'password':
+        result = checkPasswordStrength(config.password)
+        break
+
+      case 'tls':
+        result = validateTLSConfig(config)
+        break
+
+      case 'obfuscation':
+        result = scoreObfuscationEffectiveness(config)
+        break
+
+      case 'security-checklist':
+        result = runSecurityChecklist(config)
+        break
+
+      default:
+        return NextResponse.json({ error: 'Invalid audit type' }, { status: 400 })
     }
-    const result = auditServerConfig(cfg)
-    return NextResponse.json(result)
-  } catch (err) {
-    return toErrorResponse(err)
+
+    return NextResponse.json({ success: true, result })
+  } catch (error) {
+    console.error('Config audit error:', error)
+    return NextResponse.json(
+      { error: 'Audit failed', message: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    )
   }
 }

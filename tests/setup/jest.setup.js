@@ -1,5 +1,22 @@
 // Jest setup file
 import '@testing-library/jest-dom'
+import { TextDecoder, TextEncoder } from 'util'
+import { TransformStream, ReadableStream, WritableStream } from 'node:stream/web'
+
+// jsdom omits TextDecoder on global in some Jest setups; undici/encoding expects it
+globalThis.TextDecoder = TextDecoder
+globalThis.TextEncoder = TextEncoder
+
+// Web Streams API (required by AI SDK / eventsource-parser under jsdom)
+if (typeof globalThis.TransformStream === 'undefined') {
+  globalThis.TransformStream = TransformStream
+}
+if (typeof globalThis.ReadableStream === 'undefined') {
+  globalThis.ReadableStream = ReadableStream
+}
+if (typeof globalThis.WritableStream === 'undefined') {
+  globalThis.WritableStream = WritableStream
+}
 
 // Mock environment variables
 process.env.NODE_ENV = 'test'
@@ -76,20 +93,64 @@ if (typeof window !== 'undefined') {
 
 // Suppress console errors in tests (optional, can be removed for debugging)
 const originalError = console.error
+const originalWarn = console.warn
+const originalLog = console.log
+
+// Patterns to suppress in tests (expected warnings/errors)
+const suppressPatterns = [
+  'Warning: ReactDOM.render',
+  'localstorage-file',
+  'Not implemented: HTMLFormElement.prototype.submit',
+  'Not implemented: window.scrollTo',
+  'Not implemented: HTMLDialogElement.prototype.showModal',
+]
+
 beforeAll(() => {
   console.error = (...args) => {
-    if (
-      typeof args[0] === 'string' &&
-      args[0].includes('Warning: ReactDOM.render')
-    ) {
-      return
+    const message = typeof args[0] === 'string' ? args[0] : JSON.stringify(args[0])
+    const shouldSuppress = suppressPatterns.some(pattern => message.includes(pattern))
+
+    if (!shouldSuppress) {
+      originalError.call(console, ...args)
     }
-    originalError.call(console, ...args)
+  }
+
+  console.warn = (...args) => {
+    const message = typeof args[0] === 'string' ? args[0] : JSON.stringify(args[0])
+    const shouldSuppress = suppressPatterns.some(pattern => message.includes(pattern))
+
+    if (!shouldSuppress) {
+      originalWarn.call(console, ...args)
+    }
+  }
+
+  // Reduce log noise in tests while keeping important info
+  console.log = (...args) => {
+    const message = typeof args[0] === 'string' ? args[0] : JSON.stringify(args[0])
+
+    // Keep important log messages, filter noise
+    const shouldKeep = [
+      '✅',
+      '❌',
+      'Test',
+      'PASS',
+      'FAIL',
+      'Error:',
+      'Warning:',
+      '[ShadowGrok]',
+      '[AI]',
+    ].some(pattern => message.includes(pattern))
+
+    if (shouldKeep) {
+      originalLog.call(console, ...args)
+    }
   }
 })
 
 afterAll(() => {
   console.error = originalError
+  console.warn = originalWarn
+  console.log = originalLog
 })
 
 // Global test timeout

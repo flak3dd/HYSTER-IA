@@ -6,7 +6,7 @@
 import { AgentMessage, MessageAck, MessageType, MessagePriority, CommunicationBusConfig } from '../types';
 import { EventEmitter } from 'events';
 import Redis from 'ioredis';
-import { logger } from '../../logger';
+import logger from '../../logger';
 
 export class MessageBus extends EventEmitter {
   private config: CommunicationBusConfig;
@@ -46,7 +46,7 @@ export class MessageBus extends EventEmitter {
       this.isInitialized = true;
       logger.info('Message bus initialized successfully');
     } catch (error) {
-      logger.error('Failed to initialize message bus', error);
+      logger.error({ err: error }, 'Failed to initialize message bus');
       throw error;
     }
   }
@@ -71,7 +71,7 @@ export class MessageBus extends EventEmitter {
     });
 
     this.redis.on('error', (error) => {
-      logger.error('Redis connection error', error);
+      logger.error({ err: error }, 'Redis connection error');
     });
 
     this.redis.on('connect', () => {
@@ -88,7 +88,7 @@ export class MessageBus extends EventEmitter {
           const agentMessage: AgentMessage = JSON.parse(message);
           this.handleIncomingMessage(agentMessage);
         } catch (error) {
-          logger.error('Failed to parse incoming message', error);
+          logger.error({ err: error }, 'Failed to parse incoming message');
         }
       }
     });
@@ -135,7 +135,7 @@ export class MessageBus extends EventEmitter {
       this.emit('message_sent', message);
       logger.debug(`Message sent from ${message.fromAgent} to ${Array.isArray(message.toAgent) ? message.toAgent.join(',') : message.toAgent}`);
     } catch (error) {
-      logger.error('Failed to send message', error);
+      logger.error({ err: error }, 'Failed to send message');
       throw error;
     }
   }
@@ -224,7 +224,7 @@ export class MessageBus extends EventEmitter {
 
       this.emit('message_received', message);
     } catch (error) {
-      logger.error('Failed to handle incoming message', error);
+      logger.error({ err: error }, 'Failed to handle incoming message');
     }
   }
 
@@ -287,7 +287,7 @@ export class MessageBus extends EventEmitter {
       this.pendingAcks.set(message.id, timeout);
 
       // Listen for acknowledgment
-      const handler = (ackMessage: AgentMessage) => {
+      const handler = async (ackMessage: AgentMessage): Promise<void> => {
         if (ackMessage.payload.type === 'ack' && 
             ackMessage.payload.data.messageId === message.id) {
           clearTimeout(timeout);

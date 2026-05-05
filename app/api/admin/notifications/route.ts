@@ -1,0 +1,60 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { verifyAdmin } from '@/lib/auth/verify-admin'
+import {
+  getNotifications,
+  markAllAsRead,
+  getUnreadCount,
+} from '@/lib/notifications/notification-system'
+
+export async function GET(request: NextRequest) {
+  const auth = await verifyAdmin(request)
+  if (!auth.success) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    const { searchParams } = new URL(request.url)
+    const unreadOnly = searchParams.get('unreadOnly') === 'true'
+    const limit = parseInt(searchParams.get('limit') || '50')
+    const offset = parseInt(searchParams.get('offset') || '0')
+
+    const result = await getNotifications(auth.userId, {
+      unreadOnly,
+      limit,
+      offset,
+    })
+
+    return NextResponse.json({ success: true, ...result })
+  } catch (error) {
+    console.error('Failed to get notifications:', error)
+    return NextResponse.json(
+      { error: 'Failed to get notifications', message: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  const auth = await verifyAdmin(request)
+  if (!auth.success) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    const body = await request.json()
+    const { action } = body
+
+    if (action === 'markAllAsRead') {
+      const count = await markAllAsRead(auth.userId)
+      return NextResponse.json({ success: true, marked: count })
+    }
+
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
+  } catch (error) {
+    console.error('Failed to update notifications:', error)
+    return NextResponse.json(
+      { error: 'Failed to update notifications', message: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    )
+  }
+}

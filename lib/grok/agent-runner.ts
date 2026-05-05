@@ -71,8 +71,8 @@ export async function runShadowGrokWithTools(
 
   const systemPrompt = buildSystemPrompt(Role.ShadowGrok, { persona, extraContext });
 
-  // Build message history
-  const messages: ChatMessage[] = [
+  // Build message history (let: trimmed in-place when optimizing context window)
+  let messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userMessage },
   ];

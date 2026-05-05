@@ -6,7 +6,7 @@
 import { BaseAgent } from './base-agent';
 import { AgentConfig, AgentCapability, AgentMessage } from '../types';
 import { MessageBus } from '../communication/message-bus';
-import { logger } from '../../logger';
+import logger from '../../logger';
 
 interface EvasionTask {
   type: 'technique_selection' | 'traffic_mimicry' | 'anti_edr' | 'lotl_automation' | 'anti_forensics';

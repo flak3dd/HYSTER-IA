@@ -29,6 +29,7 @@ import {
   ChevronDown,
   ChevronRight,
   Zap,
+  Activity,
 } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -84,6 +85,7 @@ const WORKFLOW_STAGES: WorkflowStage[] = [
       { href: "/admin/transport", label: "Protocols", shortDesc: "Transport config", icon: Radio },
       { href: "/admin/configs", label: "Configs", shortDesc: "Client configs", icon: FileCode },
       { href: "/admin/infrastructure", label: "Deployment", shortDesc: "Infra management", icon: Rocket },
+      { href: "/admin/infrastructure/traffic", label: "Traffic", shortDesc: "Routing & failover", icon: ArrowRightLeft },
       { href: "/admin/config-audit", label: "Config Audit", shortDesc: "Strength testing", icon: ShieldAlert },
     ],
   },
@@ -132,6 +134,7 @@ const WORKFLOW_STAGES: WorkflowStage[] = [
     dotClass: "bg-violet-400",
     modules: [
       { href: "/admin/analytics", label: "Analytics", shortDesc: "Behavioral analysis", icon: BarChart3 },
+      { href: "/admin/workflow/analytics", label: "Workflow Analytics", shortDesc: "Workflow metrics", icon: Activity },
       { href: "/admin/reports", label: "Reports", shortDesc: "Auto-generated", icon: FileText },
     ],
   },
