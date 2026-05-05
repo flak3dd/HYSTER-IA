@@ -43,6 +43,23 @@ A Next.js-based administrative panel for managing [Hysteria 2](https://v2.hyster
 - **Agents** — background LLM task runner that routes all outbound HTTP through the managed Hysteria2 node's SOCKS5/HTTP proxy.
 - **Sonner toasts** — real-time notifications for server lifecycle, node status changes, client connect/disconnect, and task updates.
 - **Operator auth** — admin gating via the app's Prisma-backed operator accounts and session cookies.
+- **UI Optimization** — buttery smooth experience with:
+  - Unified animation system with smooth transitions
+  - Page transitions with fade effects
+  - Component-level animations (AnimatedCard, AnimatedBadge, LoadingDots)
+  - Micro-interactions for buttons, cards, and list items
+  - Zustand unified state management
+  - SSE real-time updates with auto-reconnect
+  - Optimistic UI updates for instant feedback
+  - Performance utilities (memoization, debouncing, throttling)
+  - Request optimization with caching and deduplication
+  - Virtual scrolling for large lists
+  - Comprehensive skeleton screens
+  - Error boundaries with reload functionality
+  - Enhanced loading states (LoadingOverlay, InlineLoading, ButtonLoading)
+  - Enhanced toast notifications (success, error, warning, info, loading)
+  - Keyboard shortcuts system
+  - Progressive image loading with fallback
 
 ## Requirements
 
