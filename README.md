@@ -1,6 +1,6 @@
 # Hysteria 2 Admin Panel
 
-A Next.js-based administrative panel for managing [Hysteria 2](https://v2.hysteria.network/) proxy infrastructure. Provides real-time dashboards, multi-format client config generation, node inventory management, subscription endpoints, and optional LLM-assisted server config generation.
+A Next.js-based administrative panel for managing [Hysteria 2](https://v2.hysteria.network/) proxy infrastructure with advanced C2 and post-exploitation capabilities. Provides real-time dashboards, multi-format client config generation, node inventory management, subscription endpoints, autonomous operations, and optional LLM-assisted server config generation.
 
 ## Features
 
@@ -29,6 +29,46 @@ A Next.js-based administrative panel for managing [Hysteria 2](https://v2.hyster
   - OPSEC risk assessment before sensitive actions
   - Multi-phase operation planning with automatic tool chaining
   - Danger Mode support for development/testing environments
+- **Enhanced Implant Packing** — advanced binary packing with:
+  - Multiple packing methods (UPX, custom scripts, none)
+  - Compression algorithm selection (LZMA, UCL, NRV, auto)
+  - Intelligent caching system with SHA256-based keys
+  - Configurable compression levels (1-9)
+  - Retry logic with exponential backoff
+  - Comprehensive statistics and metrics collection
+  - Compression ratio thresholds with warnings
+  - Backup/restore mechanism for safety
+  - Platform-specific optimization flags
+  - Full backward compatibility
+- **Post-Exploitation Framework** — comprehensive offensive security toolkit with:
+  - Post-exploitation engine with swarm integration
+  - Specialized autonomous agents (AD reconnaissance, credential harvester, lateral movement, privilege escalation)
+  - OPSEC scorer for operational safety assessment
+  - Pathfinder for attack path analysis
+  - Credential vault for secure credential storage
+  - Bloodhound integration for graph analysis
+  - Multiple attack techniques (AS-REP roasting, DCOM, Kerberoasting, PtH, SMB, WinRM, WMI)
+- **Beacons Management** — full-featured implant management system with:
+  - Comprehensive beacons management page
+  - Beacon detail modal with full information display
+  - Beacons data table with filtering and sorting
+  - Beacons summary cards for quick overview
+  - Advanced beacons filters for search
+  - Integration with post-exploitation framework
+- **Bloodhound Integration** — complete graph analysis support:
+  - Bloodhound analyzer for relationship mapping
+  - Data importer for Bloodhound JSON format
+  - Data exporter for Bloodhound compatibility
+  - Storage layer for Bloodhound graph data
+  - Attack path visualization
+- **Attack Techniques** — implementation of common offensive techniques:
+  - AS-REP roasting for Kerberos attacks
+  - DCOM remote execution
+  - Kerberoasting with Kerberos utilities
+  - Pass-the-Hash authentication
+  - SMB file transfer and execution
+  - WinRM remote management
+  - WMI execution capabilities
 - **OSINT Module** — comprehensive domain enumeration and intelligence gathering:
   - Certificate Transparency (crt.sh) subdomain discovery
   - Complete DNS enumeration (A, AAAA, MX, NS, TXT, CNAME, SOA)
@@ -224,6 +264,7 @@ app/
     workflow/           — AI Workflow Assistant with orchestration
     osint/              — OSINT domain enumeration and intelligence gathering
     threat/             — threat intelligence multi-source analysis
+    beacons/            — beacons management interface
   api/
     admin/              — admin CRUD + hysteria lifecycle
     hysteria/           — auth + traffic endpoints called by hysteria itself
@@ -232,7 +273,7 @@ app/
     osint/              — OSINT API endpoints (domain enumeration)
     threatintel/        — threat intelligence API endpoints
 components/
-  admin/                — dashboard, configs, nodes, ai, agents, workflow, osint, threat UIs
+  admin/                — dashboard, configs, nodes, ai, agents, workflow, osint, threat, beacons UIs
   ui/                   — shadcn-style primitives (Button, Card, Sonner, Dialog)
 lib/
   agents/               — LLM client, agent runner, tool registry
@@ -243,19 +284,32 @@ lib/
   workflow/             — workflow engine, intent analyzer, function registry
   osint/                — domain enumeration, DNS queries, WHOIS lookups
   threatintel/          — VirusTotal, Abuse.ch, AlienVault OTX integrations
+  implants/             — implant compilation service with enhanced packing
+  post-exploitation/    — post-exploitation framework with agents and techniques
+    agents/             — autonomous post-exploitation agents
+    bloodhound/         — Bloodhound graph analysis integration
+    techniques/         — attack technique implementations
   infrastructure/       — rate limiting, caching, proxy agent, HTTP client
+  notifications/        — notification system with email support
+  config/               — configuration audit and management
   net/                  — proxy-aware undici dispatcher
 ```
 
 ## Architecture Notes
 
-- **Database**: PostgreSQL via Prisma ORM. All data (operators, nodes, users, profiles, AI conversations, agent tasks, usage records, workflow sessions, scheduled workflows, OSINT tasks) lives in PostgreSQL tables.
+- **Database**: PostgreSQL via Prisma ORM. All data (operators, nodes, users, profiles, AI conversations, agent tasks, usage records, workflow sessions, scheduled workflows, OSINT tasks, beacons, credentials, attack paths) lives in PostgreSQL tables.
 - **AI Integration**: OpenRouter-powered LLM integration supporting multiple AI models (Claude, GPT-4, Gemini, etc.) for AI chat, workflow orchestration, and autonomous operations.
 - **Realtime**: Supabase Realtime (optional) provides instant dashboard updates for node status via `postgres_changes` on the `nodes` table. Falls back to 5-second REST polling when Supabase env vars are not configured.
 - **Auth**: Operator accounts in PostgreSQL, JWT tokens via `jose`, session cookies.
 - **Workflow System**: AI-powered orchestration engine with intent analysis, function registry, and response generation. Supports session persistence, template-based workflows, progress tracking, and scheduled execution.
 - **OSINT Module**: Domain enumeration and intelligence gathering with certificate transparency integration, DNS enumeration, WHOIS lookups, and optional DNS brute force. Includes rate limiting, caching, and proxy routing for operational security.
 - **Threat Intelligence**: Multi-source IOC analysis with VirusTotal, Abuse.ch feeds, and AlienVault OTX integration. Features detection percentages, reputation scoring, and comprehensive threat analysis.
+- **Implant Compilation**: Advanced compilation service with enhanced binary packing using UPX, custom scripts, intelligent caching, and comprehensive statistics. Supports multiple compression algorithms and platform-specific optimizations.
+- **Post-Exploitation Framework**: Comprehensive offensive security toolkit with autonomous agents, Bloodhound integration, credential vault, and attack technique implementations. Features OPSEC scoring, attack path analysis, and swarm integration.
+- **Beacons Management**: Full-featured implant management system with real-time status tracking, filtering, detailed information display, and integration with post-exploitation capabilities.
+- **Bloodhound Integration**: Complete graph analysis support with data import/export, relationship mapping, and attack path visualization for Active Directory environments.
+- **Attack Techniques**: Implementation of common offensive security techniques including AS-REP roasting, DCOM, Kerberoasting, Pass-the-Hash, SMB, WinRM, and WMI for post-exploitation activities.
+- **Notification System**: Comprehensive notification system with email support, unread count tracking, and real-time alerts for operational events.
 - **Infrastructure**: Rate limiting with Redis/memory backend, in-memory caching with TTL, and Hysteria2 proxy routing for all external HTTP requests.
 - All outbound HTTP from the panel (LLM API calls, web fetches from agents, OSINT/threat intel API calls) is routed through the Hysteria 2 node's SOCKS5/HTTP port using `undici.ProxyAgent`.
 - The panel acts as an HTTP Auth backend for Hysteria 2 (`/api/hysteria/auth`) — Hysteria calls it to validate client tokens against the panel's local user store.
@@ -326,6 +380,79 @@ ShadowGrok autonomously:
 - High-risk tools (kill switches, panel commands) require approval even when auto-approve is enabled.
 - Review the `shadowgrok_approvals` table regularly for pending approvals.
 - Keep xAI API keys secure and rotate them regularly.
+
+## Post-Exploitation Framework
+
+The post-exploitation framework provides comprehensive offensive security capabilities with autonomous agents, Bloodhound integration, and attack technique implementations.
+
+### Core Components
+
+- **Post-Exploitation Engine**: Central orchestration system that manages agent execution, coordinates between different components, and handles task distribution.
+- **Autonomous Agents**: Specialized agents for different post-exploitation activities:
+  - **AD Reconnaissance Agent**: Active Directory reconnaissance and enumeration
+  - **Credential Harvester Agent**: Automated credential collection and extraction
+  - **Lateral Movement Agent**: Horizontal movement and network traversal
+  - **Privilege Escalation Agent**: Escalation of privileges within compromised environments
+- **Bloodhound Integration**: Complete graph analysis for Active Directory environments:
+  - Import Bloodhound JSON data for analysis
+  - Export data in Bloodhound-compatible formats
+  - Analyze attack paths and relationships
+  - Store graph data for persistent analysis
+- **Credential Vault**: Secure storage for collected credentials with encryption and access controls.
+- **OPSEC Scorer**: Operational security assessment tool that evaluates the risk level of planned operations.
+- **Pathfinder**: Attack path analysis tool that identifies optimal routes for lateral movement and privilege escalation.
+
+### Attack Techniques
+
+The framework includes implementations of common offensive security techniques:
+
+- **AS-REP Roasting**: Kerberos attack technique targeting accounts without pre-authentication
+- **DCOM**: Distributed Component Object Model for remote execution
+- **Kerberoasting**: Kerberos service ticket cracking for service account credentials
+- **Pass-the-Hash**: Authentication using NTLM hashes instead of plaintext passwords
+- **SMB**: Server Message Block for file transfer and remote execution
+- **WinRM**: Windows Remote Management for system administration
+- **WMI**: Windows Management Instrumentation for system management and monitoring
+
+### Swarm Integration
+
+The post-exploitation framework integrates with the multi-agent swarm architecture for coordinated operations:
+
+- Agent coordination and task distribution
+- Shared intelligence and credential vault access
+- Synchronized execution across multiple compromised systems
+- Centralized logging and audit trail
+
+### Configuration
+
+The post-exploitation framework uses the existing database schema and integrates with the notification system for operational updates.
+
+## Beacons Management
+
+The beacons management system provides comprehensive implant monitoring and control capabilities.
+
+### Features
+
+- **Real-time Status Tracking**: Live monitoring of implant status, health, and activity
+- **Advanced Filtering**: Search and filter beacons by multiple criteria (status, architecture, last seen, etc.)
+- **Detailed Information**: Comprehensive beacon details including configuration, transport info, and operational status
+- **Summary Cards**: Quick overview of beacon statistics and health metrics
+- **Data Table**: Sortable, filterable table with all beacon information
+- **Integration**: Seamless integration with post-exploitation framework for advanced operations
+
+### Beacon Lifecycle Management
+
+- **Deployment**: Deploy beacons through various methods and monitor deployment status
+- **Health Monitoring**: Continuous health checks and status updates
+- **Task Execution**: Execute commands and tasks on beacons with real-time feedback
+- **Termination**: Clean beacon termination and cleanup
+
+### Security Features
+
+- **Authentication**: All beacon communications are authenticated and encrypted
+- **Authorization**: Role-based access control for beacon operations
+- **Audit Logging**: Complete audit trail of all beacon operations
+- **OPSEC Integration**: OPSEC scoring for beacon-related operations
 
 ## Supabase Realtime Setup (Optional)
 
