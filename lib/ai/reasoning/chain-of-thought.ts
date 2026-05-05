@@ -28,6 +28,10 @@ export const ThoughtType = z.enum([
   'synthesis',
   'planning',
   'evaluation',
+  'abstraction',
+  'analogy',
+  'counterfactual',
+  'multi_perspective',
 ])
 export type ThoughtType = z.infer<typeof ThoughtType>
 
@@ -270,9 +274,10 @@ export class ChainOfThoughtEngine {
     const branching = Math.min(this.config.maxBranching, 3)
     
     for (let i = 0; i < branching; i++) {
+      const thoughtType = this.selectThoughtType(depth, this.config.maxDepth)
       const thought: Thought = {
         id: randomUUID(),
-        type: depth === this.config.maxDepth ? 'evaluation' : 'inference',
+        type: thoughtType,
         content: `Sub-thought ${i + 1} for: ${parentThought.content}`,
         status: 'pending',
         confidence: 0.5,
@@ -293,6 +298,166 @@ export class ChainOfThoughtEngine {
         await this.generateSubThoughts(thought, context, depth + 1, tools)
       }
     }
+  }
+
+  /**
+   * Select appropriate thought type based on depth
+   */
+  private selectThoughtType(depth: number, maxDepth: number): ThoughtType {
+    if (depth === maxDepth) {
+      return 'evaluation'
+    } else if (depth === maxDepth - 1) {
+      return Math.random() > 0.5 ? 'verification' : 'synthesis'
+    } else if (depth === 1) {
+      return Math.random() > 0.7 ? 'abstraction' : 'analysis'
+    } else {
+      const types: ThoughtType[] = ['inference', 'analogy', 'counterfactual', 'multi_perspective']
+      return types[Math.floor(Math.random() * types.length)]
+    }
+  }
+
+  /**
+   * Generate analogy-based reasoning
+   */
+  async generateAnalogy(
+    problem: string,
+    context: Record<string, unknown> = {}
+  ): Promise<Thought> {
+    const thought: Thought = {
+      id: randomUUID(),
+      type: 'analogy',
+      content: `Generating analogy for: ${problem}`,
+      status: 'in_progress',
+      confidence: 0.6,
+      dependencies: [],
+      dependents: [],
+      metadata: {
+        timestamp: Date.now(),
+        reasoningDepth: 1,
+        importance: 0.8,
+      },
+    }
+
+    try {
+      const prompt = `Problem: ${problem}\n\nContext: ${JSON.stringify(context)}\n\nGenerate a helpful analogy to understand this problem. Explain the analogy and how it maps to the original problem. Return JSON: { "analogy": "description", "mapping": "explanation", "confidence": 0.0-1.0 }`
+      
+      const response = await chatComplete({
+        messages: [
+          { role: 'system', content: this.getSystemPrompt() },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.4,
+      })
+
+      const result = this.parseThoughtResponse(response.content || '')
+      thought.result = result
+      thought.status = 'completed'
+      thought.confidence = result.confidence || 0.6
+      thought.metadata.executionTime = Date.now() - thought.metadata.timestamp
+    } catch (error) {
+      thought.status = 'failed'
+      thought.error = error instanceof Error ? error.message : String(error)
+      thought.confidence = 0.1
+    }
+
+    this.thoughts.set(thought.id, thought)
+    return thought
+  }
+
+  /**
+   * Generate counterfactual reasoning
+   */
+  async generateCounterfactual(
+    problem: string,
+    context: Record<string, unknown> = {}
+  ): Promise<Thought> {
+    const thought: Thought = {
+      id: randomUUID(),
+      type: 'counterfactual',
+      content: `Exploring counterfactuals for: ${problem}`,
+      status: 'in_progress',
+      confidence: 0.5,
+      dependencies: [],
+      dependents: [],
+      metadata: {
+        timestamp: Date.now(),
+        reasoningDepth: 1,
+        importance: 0.7,
+      },
+    }
+
+    try {
+      const prompt = `Problem: ${problem}\n\nContext: ${JSON.stringify(context)}\n\nExplore "what if" scenarios by changing key assumptions. Identify which factors would change the outcome. Return JSON: { "scenarios": [{"assumption": "changed assumption", "impact": "expected impact"}], "confidence": 0.0-1.0 }`
+      
+      const response = await chatComplete({
+        messages: [
+          { role: 'system', content: this.getSystemPrompt() },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.5,
+      })
+
+      const result = this.parseThoughtResponse(response.content || '')
+      thought.result = result
+      thought.status = 'completed'
+      thought.confidence = result.confidence || 0.5
+      thought.metadata.executionTime = Date.now() - thought.metadata.timestamp
+    } catch (error) {
+      thought.status = 'failed'
+      thought.error = error instanceof Error ? error.message : String(error)
+      thought.confidence = 0.1
+    }
+
+    this.thoughts.set(thought.id, thought)
+    return thought
+  }
+
+  /**
+   * Generate multi-perspective reasoning
+   */
+  async generateMultiPerspective(
+    problem: string,
+    context: Record<string, unknown> = {}
+  ): Promise<Thought> {
+    const thought: Thought = {
+      id: randomUUID(),
+      type: 'multi_perspective',
+      content: `Analyzing from multiple perspectives: ${problem}`,
+      status: 'in_progress',
+      confidence: 0.7,
+      dependencies: [],
+      dependents: [],
+      metadata: {
+        timestamp: Date.now(),
+        reasoningDepth: 1,
+        importance: 0.9,
+      },
+    }
+
+    try {
+      const prompt = `Problem: ${problem}\n\nContext: ${JSON.stringify(context)}\n\nAnalyze this problem from at least 3 different perspectives (e.g., technical, business, user, security, operational). For each perspective, identify key concerns and recommendations. Return JSON: { "perspectives": [{"name": "perspective name", "analysis": "analysis", "recommendations": ["rec1", "rec2"]}], "confidence": 0.0-1.0 }`
+      
+      const response = await chatComplete({
+        messages: [
+          { role: 'system', content: this.getSystemPrompt() },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.3,
+      })
+
+      const result = this.parseThoughtResponse(response.content || '')
+      thought.result = result
+      thought.status = 'completed'
+      thought.confidence = result.confidence || 0.7
+      thought.metadata.executionTime = Date.now() - thought.metadata.timestamp
+    } catch (error) {
+      thought.status = 'failed'
+      thought.error = error instanceof Error ? error.message : String(error)
+      thought.confidence = 0.1
+    }
+
+    this.thoughts.set(thought.id, thought)
+    return thought
   }
 
   /**

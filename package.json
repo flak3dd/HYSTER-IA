@@ -20,6 +20,8 @@
     "test:verbose": "jest --verbose"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.75",
+    "@ai-sdk/google": "^3.0.67",
     "@ai-sdk/openai": "^3.0.54",
     "@base-ui/react": "^1.4.0",
     "@prisma/client": "^6.19.3",

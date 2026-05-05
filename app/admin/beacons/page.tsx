@@ -1,4 +1,4 @@
-import { BeaconsView } from "@/components/admin/beacons/beacons-view"
+import BeaconsView from "@/components/admin/beacons/beacons-view"
 
 export const dynamic = "force-dynamic"
 

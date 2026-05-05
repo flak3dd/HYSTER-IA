@@ -108,8 +108,14 @@ export function BeaconsDataTable({
       const aValue = a[sortColumn as keyof Beacon]
       const bValue = b[sortColumn as keyof Beacon]
 
-      if (aValue < bValue) comparison = -1
-      if (aValue > bValue) comparison = 1
+      if (aValue !== undefined && bValue !== undefined) {
+        if (aValue < bValue) comparison = -1
+        if (aValue > bValue) comparison = 1
+      } else if (aValue !== undefined) {
+        comparison = -1
+      } else if (bValue !== undefined) {
+        comparison = 1
+      }
 
       return sortDirection === "asc" ? comparison : -comparison
     })
@@ -206,7 +212,7 @@ export function BeaconsDataTable({
               {selectedBeacons.length} beacons selected
             </span>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+              <DropdownMenuTrigger>
                 <Button variant="outline" size="sm">
                   Bulk Actions
                 </Button>
@@ -365,7 +371,7 @@ export function BeaconsDataTable({
                   </td>
                   <td className="p-4" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                      <DropdownMenuTrigger>
                         <Button variant="ghost" size="sm">
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>

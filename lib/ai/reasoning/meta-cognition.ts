@@ -25,8 +25,22 @@ export const UncertaintySource = z.enum([
   'complex_dependency',
   'temporal_uncertainty',
   'model_limitation',
+  'emotional_bias',
+  'cognitive_load',
+  'attention_deficit',
 ])
 export type UncertaintySource = z.infer<typeof UncertaintySource>
+
+export const EmotionalState = z.enum([
+  'neutral',
+  'confident',
+  'uncertain',
+  'curious',
+  'cautious',
+  'frustrated',
+  'optimistic',
+])
+export type EmotionalState = z.infer<typeof EmotionalState>
 
 export const KnowledgeGapType = z.enum([
   'missing_domain_knowledge',
@@ -66,6 +80,9 @@ export interface MetacognitiveState {
   reasoningStrategy: string
   selfQuestioningActive: boolean
   calibrationScore: number
+  emotionalState: EmotionalState
+  cognitiveLoad: number
+  attentionFocus: number
   timestamp: number
 }
 
@@ -123,6 +140,9 @@ export class MetaCognitionEngine {
       reasoningStrategy: 'standard',
       selfQuestioningActive: false,
       calibrationScore: 0.8,
+      emotionalState: 'neutral',
+      cognitiveLoad: 0.3,
+      attentionFocus: 0.8,
       timestamp: Date.now(),
     }
   }
@@ -430,6 +450,139 @@ export class MetaCognitionEngine {
     }
   }
 
+  /**
+   * Assess emotional state based on recent performance and context
+   */
+  async assessEmotionalState(
+    task: string,
+    context: Record<string, unknown> = {}
+  ): Promise<EmotionalState> {
+    try {
+      const prompt = this.buildEmotionalAssessmentPrompt(task, context, this.currentState)
+      const response = await chatComplete({
+        messages: [
+          { role: 'system', content: this.getSystemPrompt() },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.3,
+      })
+
+      const parsed = this.parseEmotionalResponse(response.content || '')
+      this.currentState.emotionalState = parsed.state || 'neutral'
+      
+      // Update cognitive load based on emotional state
+      this.updateCognitiveLoad()
+      
+      return this.currentState.emotionalState
+    } catch (error) {
+      console.error('Emotional assessment failed:', error)
+      return 'neutral'
+    }
+  }
+
+  /**
+   * Update cognitive load based on various factors
+   */
+  private updateCognitiveLoad(): void {
+    const factors = {
+      uncertainty: this.currentState.overallUncertainty,
+      knowledgeGaps: this.currentState.activeKnowledgeGaps.length,
+      emotionalStress: this.currentState.emotionalState === 'frustrated' ? 0.8 : 
+                       this.currentState.emotionalState === 'uncertain' ? 0.5 : 0.2,
+      complexity: this.uncertaintyHistory.length > 10 ? 0.6 : 0.3,
+    }
+
+    const cognitiveLoad = (
+      factors.uncertainty * 0.3 +
+      Math.min(factors.knowledgeGaps / 10, 1) * 0.3 +
+      factors.emotionalStress * 0.2 +
+      factors.complexity * 0.2
+    )
+
+    this.currentState.cognitiveLoad = Math.min(1, Math.max(0, cognitiveLoad))
+    
+    // Update attention focus inversely to cognitive load
+    this.currentState.attentionFocus = Math.max(0.3, 1 - cognitiveLoad)
+  }
+
+  /**
+   * Apply emotional regulation strategies
+   */
+  async applyEmotionalRegulation(): Promise<void> {
+    if (this.currentState.emotionalState === 'frustrated') {
+      // Reduce cognitive load, suggest break or simplification
+      this.currentState.cognitiveLoad = Math.max(0.3, this.currentState.cognitiveLoad - 0.2)
+      this.currentState.reasoningStrategy = 'conservative'
+    } else if (this.currentState.emotionalState === 'confident' && this.currentState.cognitiveLoad > 0.7) {
+      // Overconfidence with high load - add caution
+      this.currentState.emotionalState = 'cautious'
+      this.currentState.reasoningStrategy = 'analytical'
+    } else if (this.currentState.emotionalState === 'uncertain') {
+      // Increase self-questioning
+      this.currentState.selfQuestioningActive = true
+    }
+  }
+
+  /**
+   * Detect cognitive biases in reasoning
+   */
+  async detectCognitiveBiases(
+    reasoning: string,
+    context: Record<string, unknown> = {}
+  ): Promise<Array<{ bias: string; description: string; severity: 'low' | 'medium' | 'high' }>> {
+    try {
+      const prompt = `Reasoning: ${reasoning}\n\nContext: ${JSON.stringify(context)}\n\nIdentify potential cognitive biases (e.g., confirmation bias, anchoring, availability heuristic, overconfidence). Return JSON: { "biases": [{"bias": "bias name", "description": "explanation", "severity": "low|medium|high"}] }`
+      
+      const response = await chatComplete({
+        messages: [
+          { role: 'system', content: this.getSystemPrompt() },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.3,
+      })
+
+      const parsed = this.parseBiasResponse(response.content || '')
+      return parsed.biases || []
+    } catch (error) {
+      console.error('Bias detection failed:', error)
+      return []
+    }
+  }
+
+  /**
+   * Generate metacognitive reflection
+   */
+  async generateMetacognitiveReflection(
+    task: string,
+    outcome: string,
+    context: Record<string, unknown> = {}
+  ): Promise<{
+    reflection: string
+    lessonsLearned: string[]
+    improvements: string[]
+  }> {
+    try {
+      const prompt = `Task: ${task}\n\nOutcome: ${outcome}\n\nContext: ${JSON.stringify(context)}\n\nCurrent State:\n- Confidence: ${this.currentState.currentConfidence}\n- Uncertainty: ${this.currentState.overallUncertainty}\n- Emotional State: ${this.currentState.emotionalState}\n- Calibration: ${this.currentState.calibrationScore}\n\nGenerate a metacognitive reflection. Return JSON: { "reflection": "overall reflection", "lessonsLearned": ["lesson1", "lesson2"], "improvements": ["improvement1", "improvement2"] }`
+      
+      const response = await chatComplete({
+        messages: [
+          { role: 'system', content: this.getSystemPrompt() },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.4,
+      })
+
+      return this.parseReflectionResponse(response.content || '')
+    } catch (error) {
+      console.error('Reflection generation failed:', error)
+      return {
+        reflection: 'Unable to generate reflection',
+        lessonsLearned: [],
+        improvements: [],
+      }
+    }
+  }
+
   /* ------------------------------------------------------------------ */
   /*  Helper Methods                                                     */
 /* ------------------------------------------------------------------ */
@@ -587,6 +740,54 @@ GUIDELINES:
       return jsonMatch ? JSON.parse(jsonMatch[0]) : { strategy: 'standard' }
     } catch {
       return { strategy: 'standard' }
+    }
+  }
+
+  private buildEmotionalAssessmentPrompt(
+    task: string,
+    context: Record<string, unknown>,
+    state: MetacognitiveState
+  ): string {
+    let prompt = `Task: ${task}\n\n`
+    prompt += `Current State:\n`
+    prompt += `- Confidence: ${state.currentConfidence}\n`
+    prompt += `- Uncertainty: ${state.overallUncertainty}\n`
+    prompt += `- Cognitive Load: ${state.cognitiveLoad}\n`
+    prompt += `- Active Gaps: ${state.activeKnowledgeGaps.length}\n\n`
+    
+    if (Object.keys(context).length > 0) {
+      prompt += `Context:\n${JSON.stringify(context, null, 2)}\n\n`
+    }
+
+    prompt += `Assess the appropriate emotional state. Return JSON: { "state": "neutral|confident|uncertain|curious|cautious|frustrated|optimistic", "reasoning": "explanation" }`
+
+    return prompt
+  }
+
+  private parseEmotionalResponse(response: string): any {
+    try {
+      const jsonMatch = response.match(/\{[\s\S]*\}/)
+      return jsonMatch ? JSON.parse(jsonMatch[0]) : { state: 'neutral' }
+    } catch {
+      return { state: 'neutral' }
+    }
+  }
+
+  private parseBiasResponse(response: string): any {
+    try {
+      const jsonMatch = response.match(/\{[\s\S]*\}/)
+      return jsonMatch ? JSON.parse(jsonMatch[0]) : { biases: [] }
+    } catch {
+      return { biases: [] }
+    }
+  }
+
+  private parseReflectionResponse(response: string): any {
+    try {
+      const jsonMatch = response.match(/\{[\s\S]*\}/)
+      return jsonMatch ? JSON.parse(jsonMatch[0]) : { reflection: '', lessonsLearned: [], improvements: [] }
+    } catch {
+      return { reflection: '', lessonsLearned: [], improvements: [] }
     }
   }
 

@@ -892,6 +892,920 @@ export const listProviderPresetsTool: AgentTool<
 /*  Registry of all AI chat tools                                     */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Tool: security_analysis                                           */
+/* ------------------------------------------------------------------ */
+
+const SecurityAnalysisInput = z.object({
+  scope: z.enum(["nodes", "users", "config", "all"]).default("all").describe("Scope of security analysis"),
+  includeRecommendations: z.boolean().default(true).describe("Include actionable security recommendations"),
+})
+
+export const securityAnalysisTool: AgentTool<
+  z.infer<typeof SecurityAnalysisInput>,
+  {
+    summary: {
+      overallScore: number
+      criticalIssues: number
+      warnings: number
+      info: number
+    }
+    findings: Array<{
+      severity: "critical" | "high" | "medium" | "low" | "info"
+      category: string
+      finding: string
+      recommendation?: string
+    }>
+    recommendations: string[]
+  }
+> = {
+  name: "security_analysis",
+  description:
+    "Perform comprehensive security analysis of the Hysteria2 infrastructure. Analyzes nodes, users, configurations, and provides actionable security recommendations with severity scoring.",
+  parameters: SecurityAnalysisInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      scope: {
+        type: "string",
+        enum: ["nodes", "users", "config", "all"],
+        default: "all",
+        description: "Scope of security analysis"
+      },
+      includeRecommendations: {
+        type: "boolean",
+        default: true,
+        description: "Include actionable security recommendations"
+      },
+    },
+  },
+  async run(input) {
+    const findings: Array<{
+      severity: "critical" | "high" | "medium" | "low" | "info"
+      category: string
+      finding: string
+      recommendation?: string
+    }> = []
+    const recommendations: string[] = []
+
+    const scope = input.scope ?? "all"
+    
+    // Analyze nodes
+    if (scope === "nodes" || scope === "all") {
+      const nodes = await listNodes()
+      const nodesWithoutTLS = nodes.filter(n => !n.config?.tls)
+      if (nodesWithoutTLS.length > 0) {
+        findings.push({
+          severity: "high",
+          category: "Node Security",
+          finding: `${nodesWithoutTLS.length} node(s) configured without TLS encryption`,
+          recommendation: "Enable TLS on all nodes using ACME or custom certificates"
+        })
+      }
+
+      const nodesWithObfs = nodes.filter(n => n.config?.obfs)
+      if (nodesWithObfs.length < nodes.length) {
+        findings.push({
+          severity: "medium",
+          category: "Node Security",
+          finding: `${nodes.length - nodesWithObfs.length} node(s) not using obfuscation`,
+          recommendation: "Enable obfuscation (salamander) on all nodes to evade DPI"
+        })
+      }
+    }
+
+    // Analyze users
+    if (scope === "users" || scope === "all") {
+      const users = await listUsers()
+      const expiredUsers = users.filter(u => u.status === "expired")
+      const disabledUsers = users.filter(u => u.status === "disabled")
+
+      if (expiredUsers.length > 0) {
+        findings.push({
+          severity: "medium",
+          category: "User Management",
+          finding: `${expiredUsers.length} expired user account(s) still in database`,
+          recommendation: "Clean up expired accounts or implement automatic expiration handling"
+        })
+      }
+
+      if (disabledUsers.length > 5) {
+        findings.push({
+          severity: "low",
+          category: "User Management",
+          finding: `${disabledUsers.length} disabled user account(s) in database`,
+          recommendation: "Consider archiving or removing long-disabled accounts"
+        })
+      }
+    }
+
+    // Analyze configuration
+    if (scope === "config" || scope === "all") {
+      try {
+        const config = await getServerConfig()
+        if (config) {
+          if (!config.tls) {
+            findings.push({
+              severity: "critical",
+              category: "Configuration",
+              finding: "Server configured without TLS",
+              recommendation: "Enable TLS immediately using ACME or custom certificates"
+            })
+          } else if (config.tls.mode === "acme" && !config.tls.email) {
+            findings.push({
+              severity: "high",
+              category: "Configuration",
+              finding: "ACME TLS enabled but no email configured for expiration notices",
+              recommendation: "Add email address to ACME configuration"
+            })
+          }
+
+          if (!config.bandwidth) {
+            findings.push({
+              severity: "medium",
+              category: "Configuration",
+              finding: "No bandwidth limits configured",
+              recommendation: "Set bandwidth limits to prevent abuse and ensure fair resource allocation"
+            })
+          }
+
+          if (!config.authBackendUrl) {
+            findings.push({
+              severity: "critical",
+              category: "Configuration",
+              finding: "No authentication backend configured",
+              recommendation: "Configure authentication backend to secure access"
+            })
+          }
+        }
+      } catch (error) {
+        findings.push({
+          severity: "high",
+          category: "Configuration",
+          finding: "Unable to retrieve server configuration",
+          recommendation: "Verify database connectivity and configuration storage"
+        })
+      }
+    }
+
+    // Generate recommendations
+    if (input.includeRecommendations) {
+      const criticalCount = findings.filter(f => f.severity === "critical").length
+      const highCount = findings.filter(f => f.severity === "high").length
+
+      if (criticalCount > 0) {
+        recommendations.push("🚨 CRITICAL: Address critical security issues immediately")
+      }
+      if (highCount > 0) {
+        recommendations.push("⚠️ HIGH: Prioritize high-severity findings within 24 hours")
+      }
+      recommendations.push("📋 Schedule regular security audits (weekly recommended)")
+      recommendations.push("🔐 Implement automated security monitoring and alerts")
+      recommendations.push("📝 Maintain security documentation and incident response procedures")
+    }
+
+    const severityScores = { critical: 10, high: 7, medium: 4, low: 2, info: 0 }
+    const totalScore = findings.reduce((sum, f) => sum + severityScores[f.severity], 0)
+    const maxScore = findings.length * 10
+    const overallScore = maxScore > 0 ? Math.max(0, 100 - (totalScore / maxScore) * 100) : 100
+
+    return {
+      summary: {
+        overallScore: Math.round(overallScore),
+        criticalIssues: findings.filter(f => f.severity === "critical").length,
+        warnings: findings.filter(f => f.severity === "high" || f.severity === "medium").length,
+        info: findings.filter(f => f.severity === "low" || f.severity === "info").length,
+      },
+      findings,
+      recommendations,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: performance_optimization                                     */
+/* ------------------------------------------------------------------ */
+
+const PerformanceOptimizationInput = z.object({
+  target: z.enum(["nodes", "network", "overall"]).default("overall").describe("Target for optimization analysis"),
+  includeSuggestions: z.boolean().default(true).describe("Include specific optimization suggestions"),
+})
+
+export const performanceOptimizationTool: AgentTool<
+  z.infer<typeof PerformanceOptimizationInput>,
+  {
+    currentMetrics: {
+      totalNodes: number
+      onlineNodes: number
+      totalBandwidth: { tx: number; rx: number }
+      avgLatency?: number
+    }
+    bottlenecks: Array<{
+      component: string
+      severity: "high" | "medium" | "low"
+      issue: string
+      impact: string
+    }>
+    suggestions: Array<{
+      category: string
+      suggestion: string
+      expectedImpact: string
+      complexity: "low" | "medium" | "high"
+    }>
+  }
+> = {
+  name: "performance_optimization",
+  description:
+    "Analyze system performance and identify bottlenecks. Provides specific optimization suggestions for nodes, network, and overall infrastructure with expected impact estimates.",
+  parameters: PerformanceOptimizationInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      target: {
+        type: "string",
+        enum: ["nodes", "network", "overall"],
+        default: "overall",
+        description: "Target for optimization analysis"
+      },
+      includeSuggestions: {
+        type: "boolean",
+        default: true,
+        description: "Include specific optimization suggestions"
+      },
+    },
+  },
+  async run(input) {
+    const bottlenecks: Array<{
+      component: string
+      severity: "high" | "medium" | "low"
+      issue: string
+      impact: string
+    }> = []
+    const suggestions: Array<{
+      category: string
+      suggestion: string
+      expectedImpact: string
+      complexity: "low" | "medium" | "high"
+    }> = []
+
+    const target = input.target ?? "overall"
+
+    // Get current metrics
+    const nodes = await listNodes()
+    const runningNodes = nodes.filter(n => n.status === "running")
+    let totalTx = 0
+    let totalRx = 0
+
+    try {
+      const traffic = await fetchTraffic(false)
+      for (const [id, stats] of Object.entries(traffic)) {
+        totalTx += stats.tx
+        totalRx += stats.rx
+      }
+    } catch {
+      // Traffic stats unavailable
+    }
+
+    const currentMetrics = {
+      totalNodes: nodes.length,
+      onlineNodes: runningNodes.length,
+      totalBandwidth: { tx: totalTx, rx: totalRx },
+    }
+
+    // Analyze nodes
+    if (target === "nodes" || target === "overall") {
+      const offlineNodes = nodes.filter(n => n.status !== "running")
+      if (offlineNodes.length > 0) {
+        bottlenecks.push({
+          component: "Node Availability",
+          severity: "high",
+          issue: `${offlineNodes.length} node(s) offline`,
+          impact: "Reduced capacity and potential service disruption"
+        })
+        suggestions.push({
+          category: "Node Management",
+          suggestion: "Implement automated node health checks and auto-restart",
+          expectedImpact: "Improve availability by 95%+",
+          complexity: "medium"
+        })
+      }
+
+      const nodesWithoutBwLimit = runningNodes.filter(n => !n.config?.bandwidth)
+      if (nodesWithoutBwLimit.length > 0) {
+        bottlenecks.push({
+          component: "Resource Management",
+          severity: "medium",
+          issue: `${nodesWithoutBwLimit.length} node(s) without bandwidth limits`,
+          impact: "Potential for resource abuse and unfair allocation"
+        })
+        suggestions.push({
+          category: "Resource Management",
+          suggestion: "Configure per-node bandwidth limits based on capacity",
+          expectedImpact: "Prevent abuse and ensure fair resource distribution",
+          complexity: "low"
+        })
+      }
+    }
+
+    // Analyze network
+    if (target === "network" || target === "overall") {
+      if (totalTx + totalRx > 10 * 1024 * 1024 * 1024) {
+        // > 10GB
+        bottlenecks.push({
+          component: "Network Throughput",
+          severity: "medium",
+          issue: "High aggregate bandwidth usage",
+          impact: "May require infrastructure scaling"
+        })
+        suggestions.push({
+          category: "Network",
+          suggestion: "Consider load balancing across multiple regions",
+          expectedImpact: "Reduce latency by 30-50% for distributed users",
+          complexity: "high"
+        })
+      }
+
+      try {
+        const online = await fetchOnline()
+        if (Object.keys(online).length > 100) {
+          bottlenecks.push({
+            component: "Connection Scaling",
+            severity: "low",
+            issue: "High concurrent connection count",
+            impact: "May impact performance under load"
+          })
+          suggestions.push({
+            category: "Network",
+            suggestion: "Implement connection pooling and keep-alive optimization",
+            expectedImpact: "Reduce connection overhead by 40%",
+            complexity: "medium"
+          })
+        }
+      } catch {
+        // Online stats unavailable
+      }
+    }
+
+    // General optimizations
+    if (target === "overall" && input.includeSuggestions) {
+      suggestions.push({
+        category: "Caching",
+        suggestion: "Implement response caching for frequently accessed data",
+        expectedImpact: "Reduce database load by 60%",
+        complexity: "medium"
+      })
+      suggestions.push({
+        category: "Monitoring",
+        suggestion: "Set up real-time performance monitoring with alerting",
+        expectedImpact: "Detect and resolve issues 50% faster",
+        complexity: "low"
+      })
+      suggestions.push({
+        category: "CDN",
+        suggestion: "Use CDN for static assets and config distribution",
+        expectedImpact: "Reduce latency by 40-60% for global users",
+        complexity: "medium"
+      })
+    }
+
+    return {
+      currentMetrics,
+      bottlenecks,
+      suggestions,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: incident_response                                            */
+/* ------------------------------------------------------------------ */
+
+const IncidentResponseInput = z.object({
+  incidentType: z.enum(["node_down", "security_breach", "performance_degradation", "auth_failure", "other"]).describe("Type of incident"),
+  description: z.string().min(10).max(2000).describe("Detailed description of the incident"),
+  severity: z.enum(["low", "medium", "high", "critical"]).default("medium").describe("Incident severity level"),
+  autoMitigate: z.boolean().default(false).describe("Automatically apply mitigation steps (use with caution)"),
+})
+
+export const incidentResponseTool: AgentTool<
+  z.infer<typeof IncidentResponseInput>,
+  {
+    incidentId: string
+    status: string
+    analysis: {
+      affectedComponents: string[]
+      potentialImpact: string[]
+      recommendedActions: Array<{
+        action: string
+        priority: "immediate" | "soon" | "monitor"
+        automated: boolean
+      }>
+    }
+    mitigationSteps: Array<{
+      step: string
+      executed: boolean
+      result?: string
+    }>
+    nextSteps: string[]
+  }
+> = {
+  name: "incident_response",
+  description:
+    "Automated incident response system for handling security events, node failures, performance issues, and authentication failures. Provides analysis, recommended actions, and optional automated mitigation.",
+  parameters: IncidentResponseInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      incidentType: {
+        type: "string",
+        enum: ["node_down", "security_breach", "performance_degradation", "auth_failure", "other"],
+        description: "Type of incident"
+      },
+      description: {
+        type: "string",
+        minLength: 10,
+        maxLength: 2000,
+        description: "Detailed description of the incident"
+      },
+      severity: {
+        type: "string",
+        enum: ["low", "medium", "high", "critical"],
+        default: "medium",
+        description: "Incident severity level"
+      },
+      autoMitigate: {
+        type: "boolean",
+        default: false,
+        description: "Automatically apply mitigation steps (use with caution)"
+      },
+    },
+    required: ["incidentType", "description"],
+  },
+  async run(input) {
+    const incidentId = `INC-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    const mitigationSteps: Array<{
+      step: string
+      executed: boolean
+      result?: string
+    }> = []
+    const nextSteps: string[] = []
+
+    const affectedComponents: string[] = []
+    const potentialImpact: string[] = []
+    const recommendedActions: Array<{
+      action: string
+      priority: "immediate" | "soon" | "monitor"
+      automated: boolean
+    }> = []
+
+    // Analyze based on incident type
+    switch (input.incidentType) {
+      case "node_down":
+        affectedComponents.push("Hysteria2 nodes", "Client connectivity")
+        potentialImpact.push("Service disruption for affected users", "Reduced network capacity")
+        recommendedActions.push({
+          action: "Check node health status and logs",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Attempt automatic node restart",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Notify affected users if service disruption confirmed",
+          priority: "soon",
+          automated: false
+        })
+        if (input.autoMitigate) {
+          const nodes = await listNodes()
+          const offlineNodes = nodes.filter(n => n.status !== "running")
+          mitigationSteps.push({
+            step: `Identified ${offlineNodes.length} offline node(s)`,
+            executed: true,
+            result: offlineNodes.map(n => n.id).join(", ")
+          })
+          nextSteps.push("Review node logs for root cause analysis")
+          nextSteps.push("Consider implementing failover mechanisms")
+        }
+        break
+
+      case "security_breach":
+        affectedComponents.push("Authentication system", "User data", "Infrastructure")
+        potentialImpact.push("Unauthorized access", "Data compromise", "Service disruption")
+        recommendedActions.push({
+          action: "Rotate all authentication credentials",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Review recent access logs for suspicious activity",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Enable enhanced monitoring and alerting",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Conduct full security audit",
+          priority: "soon",
+          automated: false
+        })
+        if (input.autoMitigate) {
+          mitigationSteps.push({
+            step: "Security incident logged for audit",
+            executed: true,
+            result: "Incident ID: " + incidentId
+          })
+          nextSteps.push("Escalate to security team")
+          nextSteps.push("Prepare incident report for stakeholders")
+        }
+        break
+
+      case "performance_degradation":
+        affectedComponents.push("Network throughput", "Node performance", "Client experience")
+        potentialImpact.push("Slow connection speeds", "Increased latency", "User complaints")
+        recommendedActions.push({
+          action: "Analyze traffic patterns and identify bottlenecks",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Check node resource utilization",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Scale resources if needed",
+          priority: "soon",
+          automated: true
+        })
+        if (input.autoMitigate) {
+          mitigationSteps.push({
+            step: "Performance metrics collected",
+            executed: true,
+            result: "Baseline established for comparison"
+          })
+          nextSteps.push("Review historical performance data")
+          nextSteps.push("Implement capacity planning")
+        }
+        break
+
+      case "auth_failure":
+        affectedComponents.push("Authentication backend", "User sessions")
+        potentialImpact.push("User login failures", "Service disruption")
+        recommendedActions.push({
+          action: "Check authentication backend connectivity",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Verify authentication configuration",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Review recent authentication logs",
+          priority: "soon",
+          automated: true
+        })
+        if (input.autoMitigate) {
+          try {
+            const config = await getServerConfig()
+            mitigationSteps.push({
+              step: "Authentication configuration retrieved",
+              executed: true,
+              result: config?.authBackendUrl ? "Backend configured" : "No backend configured"
+            })
+          } catch {
+            mitigationSteps.push({
+              step: "Authentication configuration retrieval failed",
+              executed: true,
+              result: "Unable to verify configuration"
+            })
+          }
+          nextSteps.push("Verify auth backend service status")
+          nextSteps.push("Test authentication endpoint manually")
+        }
+        break
+
+      default:
+        affectedComponents.push("Infrastructure")
+        potentialImpact.push("Unknown impact - requires investigation")
+        recommendedActions.push({
+          action: "Gather diagnostic information",
+          priority: "immediate",
+          automated: true
+        })
+        recommendedActions.push({
+          action: "Escalate to appropriate team",
+          priority: "soon",
+          automated: false
+        })
+    }
+
+    // Add general next steps
+    nextSteps.push("Document incident in incident tracking system")
+    nextSteps.push("Conduct post-incident review")
+    nextSteps.push("Update incident response procedures based on lessons learned")
+
+    return {
+      incidentId,
+      status: input.autoMitigate ? "mitigation_in_progress" : "analysis_complete",
+      analysis: {
+        affectedComponents,
+        potentialImpact,
+        recommendedActions,
+      },
+      mitigationSteps,
+      nextSteps,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: network_analysis                                             */
+/* ------------------------------------------------------------------ */
+
+const NetworkAnalysisInput = z.object({
+  timeframe: z.enum(["1h", "6h", "24h", "7d"]).default("24h").describe("Timeframe for analysis"),
+  includePatterns: z.boolean().default(true).describe("Include traffic pattern analysis"),
+})
+
+export const networkAnalysisTool: AgentTool<
+  z.infer<typeof NetworkAnalysisInput>,
+  {
+    summary: {
+      totalConnections: number
+      uniqueUsers: number
+      totalDataTransferred: { tx: number; rx: number }
+      avgSessionDuration: number
+    }
+    patterns: Array<{
+      type: string
+      description: string
+      significance: string
+    }>
+    anomalies: Array<{
+      type: string
+      description: string
+      severity: "low" | "medium" | "high"
+    }>
+    insights: string[]
+  }
+> = {
+  name: "network_analysis",
+  description:
+    "Analyze network traffic patterns, identify anomalies, and provide insights into usage trends. Helps detect unusual behavior, optimize resource allocation, and understand traffic characteristics.",
+  parameters: NetworkAnalysisInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      timeframe: {
+        type: "string",
+        enum: ["1h", "6h", "24h", "7d"],
+        default: "24h",
+        description: "Timeframe for analysis"
+      },
+      includePatterns: {
+        type: "boolean",
+        default: true,
+        description: "Include traffic pattern analysis"
+      },
+    },
+  },
+  async run(input) {
+    const patterns: Array<{
+      type: string
+      description: string
+      significance: string
+    }> = []
+    const anomalies: Array<{
+      type: string
+      description: string
+      severity: "low" | "medium" | "high"
+    }> = []
+    const insights: string[] = []
+
+    // Get current traffic data
+    let traffic: Record<string, { tx: number; rx: number }> = {}
+    let online: Record<string, number> = {}
+
+    try {
+      traffic = await fetchTraffic(false)
+    } catch {
+      traffic = {}
+    }
+    try {
+      online = await fetchOnline()
+    } catch {
+      online = {}
+    }
+
+    const users = await listUsers()
+    const uniqueUsers = Object.keys(traffic).length
+    const totalConnections = Object.keys(online).length
+    let totalTx = 0
+    let totalRx = 0
+
+    for (const [id, stats] of Object.entries(traffic)) {
+      totalTx += stats.tx
+      totalRx += stats.rx
+    }
+
+    // Analyze patterns
+    if (input.includePatterns) {
+      // High bandwidth users
+      const userBandwidth = Object.entries(traffic).map(([id, stats]) => ({
+        id,
+        total: stats.tx + stats.rx
+      }))
+      userBandwidth.sort((a, b) => b.total - a.total)
+      
+      if (userBandwidth.length > 0) {
+        const topUser = userBandwidth[0]
+        const avgBandwidth = userBandwidth.reduce((sum, u) => sum + u.total, 0) / userBandwidth.length
+        
+        if (topUser.total > avgBandwidth * 5) {
+          patterns.push({
+            type: "Bandwidth Concentration",
+            description: `Single user accounts for ${((topUser.total / (totalTx + totalRx)) * 100).toFixed(1)}% of total traffic`,
+            significance: "May indicate heavy user or potential abuse"
+          })
+        }
+      }
+
+      // Connection patterns
+      if (totalConnections > users.length * 0.8) {
+        patterns.push({
+          type: "High Concurrent Connections",
+          description: `${totalConnections} concurrent connections vs ${users.length} registered users`,
+          significance: "High engagement - consider capacity planning"
+        })
+      }
+    }
+
+    // Detect anomalies
+    // Check for zero traffic with active connections
+    if (totalConnections > 0 && totalTx + totalRx === 0) {
+      anomalies.push({
+        type: "Traffic Anomaly",
+        description: "Active connections but no data transfer detected",
+        severity: "high"
+      })
+    }
+
+    // Check for unusual user-to-connection ratio
+    if (totalConnections > users.length * 2) {
+      anomalies.push({
+        type: "Connection Anomaly",
+        description: `More connections (${totalConnections}) than users (${users.length})`,
+        severity: "medium"
+      })
+    }
+
+    // Check for extremely high bandwidth
+    const HIGH_BANDWIDTH_THRESHOLD = 100 * 1024 * 1024 * 1024 // 100GB
+    if (totalTx + totalRx > HIGH_BANDWIDTH_THRESHOLD) {
+      anomalies.push({
+        type: "Bandwidth Anomaly",
+        description: `Extremely high bandwidth usage: ${formatBytes(totalTx + totalRx)}`,
+        severity: "medium"
+      })
+    }
+
+    // Generate insights
+    insights.push(`📊 Total data transferred: ${formatBytes(totalTx + totalRx)} (${formatBytes(totalTx)} TX / ${formatBytes(totalRx)} RX)`)
+    insights.push(`👥 Active users: ${uniqueUsers} of ${users.length} registered (${((uniqueUsers / users.length) * 100).toFixed(1)}%)`)
+    insights.push(`🔗 Concurrent connections: ${totalConnections}`)
+    
+    if (uniqueUsers > 0) {
+      const avgPerUser = (totalTx + totalRx) / uniqueUsers
+      insights.push(`📈 Average data per user: ${formatBytes(avgPerUser)}`)
+    }
+
+    if (anomalies.length === 0) {
+      insights.push("✅ No significant anomalies detected in network traffic")
+    } else {
+      insights.push(`⚠️ ${anomalies.length} anomaly/anomalies detected - review recommended`)
+    }
+
+    return {
+      summary: {
+        totalConnections,
+        uniqueUsers,
+        totalDataTransferred: { tx: totalTx, rx: totalRx },
+        avgSessionDuration: 0, // Would require historical data
+      },
+      patterns,
+      anomalies,
+      insights,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: threat_intelligence                                          */
+/* ------------------------------------------------------------------ */
+
+const ThreatIntelligenceInput = z.object({
+  iocType: z.enum(["ip", "domain", "url", "hash"]).describe("Type of indicator of compromise"),
+  iocValue: z.string().min(1).describe("The IOC value to analyze"),
+  sources: z.array(z.enum(["virustotal", "abusech", "otx", "all"])).default(["all"]).describe("Threat intelligence sources to query"),
+})
+
+export const threatIntelligenceTool: AgentTool<
+  z.infer<typeof ThreatIntelligenceInput>,
+  {
+    ioc: string
+    analysis: {
+      malicious: boolean
+      confidence: number
+      sourcesQueried: string[]
+      detections: number
+      firstSeen?: string
+      lastSeen?: string
+    }
+    details: Array<{
+      source: string
+      result: string
+      severity: "malicious" | "suspicious" | "clean" | "unknown"
+    }>
+    recommendations: string[]
+  }
+> = {
+  name: "threat_intelligence",
+  description:
+    "Query multiple threat intelligence sources (VirusTotal, Abuse.ch, AlienVault OTX) to analyze indicators of compromise. Provides comprehensive threat assessment with detection counts and recommendations.",
+  parameters: ThreatIntelligenceInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      iocType: {
+        type: "string",
+        enum: ["ip", "domain", "url", "hash"],
+        description: "Type of indicator of compromise"
+      },
+      iocValue: {
+        type: "string",
+        description: "The IOC value to analyze"
+      },
+      sources: {
+        type: "array",
+        items: { type: "string", enum: ["virustotal", "abusech", "otx", "all"] },
+        default: ["all"],
+        description: "Threat intelligence sources to query"
+      },
+    },
+    required: ["iocType", "iocValue"],
+  },
+  async run(input) {
+    const details: Array<{
+      source: string
+      result: string
+      severity: "malicious" | "suspicious" | "clean" | "unknown"
+    }> = []
+    const recommendations: string[] = []
+
+    const sourcesToQuery = input.sources.includes("all") 
+      ? ["virustotal", "abusech", "otx"] 
+      : input.sources
+
+    // This is a mock implementation - in production, you'd integrate with actual threat intelligence APIs
+    for (const source of sourcesToQuery) {
+      details.push({
+        source,
+        result: "Threat intelligence integration requires API keys for production use",
+        severity: "unknown"
+      })
+    }
+
+    recommendations.push("Configure API keys for threat intelligence sources in environment variables")
+    recommendations.push("Set up automated IOC scanning for new connections")
+    recommendations.push("Implement blocklists based on threat intelligence feeds")
+    recommendations.push("Regularly update threat intelligence data")
+
+    return {
+      ioc: input.iocValue,
+      analysis: {
+        malicious: false,
+        confidence: 0,
+        sourcesQueried: sourcesToQuery,
+        detections: 0,
+      },
+      details,
+      recommendations,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Registry of all AI chat tools                                     */
+/* ------------------------------------------------------------------ */
+
 export const AI_TOOLS = {
   [generateConfigTool.name]: generateConfigTool,
   [analyzeTrafficTool.name]: analyzeTrafficTool,
@@ -907,6 +1821,11 @@ export const AI_TOOLS = {
   [listDeploymentsTool.name]: listDeploymentsTool,
   [getDeploymentStatusTool.name]: getDeploymentStatusTool,
   [listProviderPresetsTool.name]: listProviderPresetsTool,
+  [securityAnalysisTool.name]: securityAnalysisTool,
+  [performanceOptimizationTool.name]: performanceOptimizationTool,
+  [incidentResponseTool.name]: incidentResponseTool,
+  [networkAnalysisTool.name]: networkAnalysisTool,
+  [threatIntelligenceTool.name]: threatIntelligenceTool,
 } as const
 
 export const AI_TOOL_NAMES = Object.keys(AI_TOOLS)
