@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyAdmin } from '@/lib/auth/verify-admin'
+import { verifyAdmin } from '@/lib/auth/admin'
 import { getTrafficStatsCollector } from '@/lib/infrastructure/traffic-stats'
 import { listUsers } from '@/lib/db/users'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
-  const auth = await verifyAdmin(request)
-  if (!auth.success) {
+  try {
+    await verifyAdmin(request)
+  } catch (error) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -51,8 +52,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const auth = await verifyAdmin(request)
-  if (!auth.success) {
+  try {
+    await verifyAdmin(request)
+  } catch (error) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

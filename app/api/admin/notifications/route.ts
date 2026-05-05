@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyAdmin } from '@/lib/auth/verify-admin'
+import { verifyAdmin } from '@/lib/auth/admin'
 import {
   getNotifications,
   markAllAsRead,
@@ -7,8 +7,10 @@ import {
 } from '@/lib/notifications/notification-system'
 
 export async function GET(request: NextRequest) {
-  const auth = await verifyAdmin(request)
-  if (!auth.success) {
+  let auth
+  try {
+    auth = await verifyAdmin(request)
+  } catch (error) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -18,7 +20,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50')
     const offset = parseInt(searchParams.get('offset') || '0')
 
-    const result = await getNotifications(auth.userId, {
+    const result = await getNotifications(auth.id, {
       unreadOnly,
       limit,
       offset,
@@ -35,8 +37,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await verifyAdmin(request)
-  if (!auth.success) {
+  let auth
+  try {
+    auth = await verifyAdmin(request)
+  } catch (error) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -45,7 +49,7 @@ export async function PATCH(request: NextRequest) {
     const { action } = body
 
     if (action === 'markAllAsRead') {
-      const count = await markAllAsRead(auth.userId)
+      const count = await markAllAsRead(auth.id)
       return NextResponse.json({ success: true, marked: count })
     }
 

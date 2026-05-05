@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db"
-import { Logger } from "@/lib/logger"
+import logger from "@/lib/logger"
 
-const logger = new Logger('notifications')
+const notificationLogger = logger.child({ component: 'notifications' })
 
 export type NotificationType = 'info' | 'warning' | 'error' | 'success'
 
@@ -39,7 +39,7 @@ export async function createNotification(input: NotificationCreate): Promise<Not
       },
     })
 
-    logger.info(`Created notification for operator ${input.operatorId}: ${input.title}`)
+    notificationLogger.info(`Created notification for operator ${input.operatorId}: ${input.title}`)
 
     return {
       id: notification.id,
@@ -52,7 +52,7 @@ export async function createNotification(input: NotificationCreate): Promise<Not
       createdAt: notification.createdAt,
     }
   } catch (error) {
-    logger.error(`Failed to create notification: ${error}`)
+    notificationLogger.error(`Failed to create notification: ${error}`)
     throw error
   }
 }
@@ -109,7 +109,7 @@ export async function markNotificationAsRead(notificationId: string): Promise<bo
     })
     return true
   } catch (error) {
-    logger.error(`Failed to mark notification as read: ${error}`)
+    notificationLogger.error(`Failed to mark notification as read: ${error}`)
     return false
   }
 }
@@ -128,7 +128,7 @@ export async function markAllAsRead(operatorId: string): Promise<number> {
     })
     return result.count
   } catch (error) {
-    logger.error(`Failed to mark all notifications as read: ${error}`)
+    notificationLogger.error(`Failed to mark all notifications as read: ${error}`)
     return 0
   }
 }
@@ -143,7 +143,7 @@ export async function deleteNotification(notificationId: string): Promise<boolea
     })
     return true
   } catch (error) {
-    logger.error(`Failed to delete notification: ${error}`)
+    notificationLogger.error(`Failed to delete notification: ${error}`)
     return false
   }
 }
@@ -160,7 +160,7 @@ export async function getUnreadCount(operatorId: string): Promise<number> {
       },
     })
   } catch (error) {
-    logger.error(`Failed to get unread count: ${error}`)
+    notificationLogger.error(`Failed to get unread count: ${error}`)
     return 0
   }
 }
@@ -189,9 +189,9 @@ export async function createSystemNotification(
       })
     }
 
-    logger.info(`Created system notification for ${operators.length} operators: ${title}`)
+    notificationLogger.info(`Created system notification for ${operators.length} operators: ${title}`)
   } catch (error) {
-    logger.error(`Failed to create system notification: ${error}`)
+    notificationLogger.error(`Failed to create system notification: ${error}`)
     throw error
   }
 }
@@ -213,10 +213,10 @@ export async function cleanupOldNotifications(daysOld: number = 30): Promise<num
       },
     })
 
-    logger.info(`Cleaned up ${result.count} old notifications`)
+    notificationLogger.info(`Cleaned up ${result.count} old notifications`)
     return result.count
   } catch (error) {
-    logger.error(`Failed to cleanup old notifications: ${error}`)
+    notificationLogger.error(`Failed to cleanup old notifications: ${error}`)
     return 0
   }
 }

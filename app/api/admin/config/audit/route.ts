@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyAdmin } from '@/lib/auth/verify-admin'
+import { verifyAdmin } from '@/lib/auth/admin'
 import {
   checkPasswordStrength,
   validateTLSConfig,
@@ -8,8 +8,9 @@ import {
 } from '@/lib/config/audit'
 
 export async function POST(request: NextRequest) {
-  const auth = await verifyAdmin(request)
-  if (!auth.success) {
+  try {
+    await verifyAdmin(request)
+  } catch (error) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
