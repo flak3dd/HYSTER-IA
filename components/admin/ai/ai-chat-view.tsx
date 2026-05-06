@@ -3,7 +3,7 @@ import { apiFetch } from "@/lib/api/fetch"
 
 import { useCallback, useEffect, useRef, useState, useMemo } from "react"
 import { toast } from "sonner"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -11,7 +11,12 @@ import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -20,7 +25,6 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  Clipboard,
   Copy,
   MessageSquarePlus,
   Plus,
@@ -36,13 +40,17 @@ import {
   Terminal,
   Info,
   MessageSquare,
-  Activity,
   Search,
-  Filter,
   X,
   Download,
   XCircle,
   Keyboard,
+  PanelLeft,
+  PanelRight,
+  Tag,
+  Clipboard,
+  BarChart3,
+  History,
 } from "lucide-react"
 
 /* ------------------------------------------------------------------ */
@@ -99,12 +107,12 @@ type Template = {
 /*  Constants                                                         */
 /* ------------------------------------------------------------------ */
 
-const CATEGORY_CONFIG: Record<string, { color: string; label: string }> = {
-  config: { color: "border-blue-500/30 bg-blue-500/10 text-blue-400", label: "Config" },
-  traffic: { color: "border-emerald-500/30 bg-emerald-500/10 text-emerald-400", label: "Traffic" },
-  troubleshoot: { color: "border-amber-500/30 bg-amber-500/10 text-amber-400", label: "Troubleshoot" },
-  management: { color: "border-violet-500/30 bg-violet-500/10 text-violet-400", label: "Management" },
-  payload: { color: "border-red-500/30 bg-red-500/10 text-red-400", label: "Payload" },
+const CATEGORY_CONFIG: Record<string, { color: string; label: string; ring: string }> = {
+  config: { color: "text-blue-400", label: "Config", ring: "ring-blue-500/30 bg-blue-500/10" },
+  traffic: { color: "text-emerald-400", label: "Traffic", ring: "ring-emerald-500/30 bg-emerald-500/10" },
+  troubleshoot: { color: "text-amber-400", label: "Troubleshoot", ring: "ring-amber-500/30 bg-amber-500/10" },
+  management: { color: "text-violet-400", label: "Management", ring: "ring-violet-500/30 bg-violet-500/10" },
+  payload: { color: "text-red-400", label: "Payload", ring: "ring-red-500/30 bg-red-500/10" },
 }
 
 const TOOLS_LIST = [
@@ -119,6 +127,46 @@ const TOOLS_LIST = [
   { name: "get_payload_status", desc: "Check build status", icon: CheckCircle2 },
   { name: "delete_payload", desc: "Delete payload artifacts", icon: Trash2 },
 ]
+
+/* Relative time formatter for conversation list grouping. */
+function relativeTime(ts: number) {
+  const diff = Date.now() - ts
+  const min = Math.floor(diff / 60_000)
+  if (min < 1) return "just now"
+  if (min < 60) return `${min}m`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h`
+  const day = Math.floor(hr / 24)
+  if (day < 7) return `${day}d`
+  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
+function dateBucket(ts: number): "today" | "yesterday" | "week" | "older" {
+  const now = new Date()
+  const d = new Date(ts)
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const startYesterday = startToday - 86_400_000
+  const startWeek = startToday - 6 * 86_400_000
+  if (d.getTime() >= startToday) return "today"
+  if (d.getTime() >= startYesterday) return "yesterday"
+  if (d.getTime() >= startWeek) return "week"
+  return "older"
+}
+
+const BUCKET_LABELS: Record<"today" | "yesterday" | "week" | "older", string> = {
+  today: "Today",
+  yesterday: "Yesterday",
+  week: "Last 7 days",
+  older: "Older",
+}
+
+/* Last assistant message snippet for conversation preview. */
+function previewSnippet(conv: Conversation): string {
+  const last = [...conv.messages].reverse().find((m) => (m.content ?? "").trim().length > 0)
+  if (!last?.content) return "No messages yet"
+  const text = last.content.replace(/\s+/g, " ").trim()
+  return text.length > 80 ? text.slice(0, 80) + "…" : text
+}
 
 /* ------------------------------------------------------------------ */
 /*  Main view                                                         */
@@ -138,6 +186,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const [editingTagsForId, setEditingTagsForId] = useState<string | null>(null)
   const [newTag, setNewTag] = useState("")
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showConversations, setShowConversations] = useState(true)
+  const [showResources, setShowResources] = useState(false)
   const [messagesPage, setMessagesPage] = useState(1)
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
   const [currentProgressIndex, setCurrentProgressIndex] = useState(0)
@@ -151,40 +201,52 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   }, [])
 
   /* ---- Filter conversations ---- */
-  const filteredConversations = conversations.filter(conv => {
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      const matchesTitle = conv.title.toLowerCase().includes(query)
-      const matchesMessages = conv.messages.some(msg => 
-        msg.content?.toLowerCase().includes(query)
-      )
-      if (!matchesTitle && !matchesMessages) return false
+  const filteredConversations = conversations
+    .filter((conv) => {
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase()
+        const matchesTitle = conv.title.toLowerCase().includes(query)
+        const matchesMessages = conv.messages.some((msg) =>
+          msg.content?.toLowerCase().includes(query),
+        )
+        if (!matchesTitle && !matchesMessages) return false
+      }
+      if (filterType === "recent") {
+        const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+        if (conv.updatedAt < oneWeekAgo) return false
+      } else if (filterType === "with-tools") {
+        const hasTools = conv.messages.some((msg) => msg.toolCalls && msg.toolCalls.length > 0)
+        if (!hasTools) return false
+      } else if (filterType === "tag" && selectedTag) {
+        if (!conv.tags.includes(selectedTag)) return false
+      }
+      return true
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+
+  /* ---- Group conversations by date bucket ---- */
+  const groupedConversations = useMemo(() => {
+    const groups: Record<"today" | "yesterday" | "week" | "older", Conversation[]> = {
+      today: [],
+      yesterday: [],
+      week: [],
+      older: [],
     }
-    
-    // Type filter
-    if (filterType === "recent") {
-      const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-      if (conv.updatedAt < oneWeekAgo) return false
-    } else if (filterType === "with-tools") {
-      const hasTools = conv.messages.some(msg => msg.toolCalls && msg.toolCalls.length > 0)
-      if (!hasTools) return false
-    } else if (filterType === "tag" && selectedTag) {
-      if (!conv.tags.includes(selectedTag)) return false
+    for (const conv of filteredConversations) {
+      groups[dateBucket(conv.updatedAt)].push(conv)
     }
-    
-    return true
-  }).sort((a, b) => b.updatedAt - a.updatedAt)
+    return groups
+  }, [filteredConversations])
 
   /* ---- Get all unique tags ---- */
-  const allTags = [...new Set(conversations.flatMap(c => c.tags))].sort()
+  const allTags = [...new Set(conversations.flatMap((c) => c.tags))].sort()
 
   /* ---- Add tag to conversation ---- */
   const addTag = async (conversationId: string, tag: string) => {
     if (!tag.trim()) return
-    const conv = conversations.find(c => c.id === conversationId)
+    const conv = conversations.find((c) => c.id === conversationId)
     if (!conv) return
-    
+
     const updatedTags = [...new Set([...conv.tags, tag.trim()])]
     try {
       const res = await apiFetch("/api/admin/ai/conversations", {
@@ -193,10 +255,10 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         body: JSON.stringify({ conversationId, tags: updatedTags }),
       })
       if (res.ok) {
-        const data = await res.json()
-        setConversations(prev => prev.map(c => 
-          c.id === conversationId ? { ...c, tags: updatedTags } : c
-        ))
+        await res.json()
+        setConversations((prev) =>
+          prev.map((c) => (c.id === conversationId ? { ...c, tags: updatedTags } : c)),
+        )
         toast.success("Tag added")
       }
     } catch {
@@ -206,10 +268,10 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
 
   /* ---- Remove tag from conversation ---- */
   const removeTag = async (conversationId: string, tag: string) => {
-    const conv = conversations.find(c => c.id === conversationId)
+    const conv = conversations.find((c) => c.id === conversationId)
     if (!conv) return
-    
-    const updatedTags = conv.tags.filter(t => t !== tag)
+
+    const updatedTags = conv.tags.filter((t) => t !== tag)
     try {
       const res = await apiFetch("/api/admin/ai/conversations", {
         method: "PATCH",
@@ -217,9 +279,9 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         body: JSON.stringify({ conversationId, tags: updatedTags }),
       })
       if (res.ok) {
-        setConversations(prev => prev.map(c => 
-          c.id === conversationId ? { ...c, tags: updatedTags } : c
-        ))
+        setConversations((prev) =>
+          prev.map((c) => (c.id === conversationId ? { ...c, tags: updatedTags } : c)),
+        )
         toast.success("Tag removed")
       }
     } catch {
@@ -285,7 +347,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const hasMoreMessages = messages.length > paginatedMessages.length
 
   const loadMoreMessages = () => {
-    setMessagesPage(prev => prev + 1)
+    setMessagesPage((prev) => prev + 1)
   }
 
   /* ---- Create new conversation ---- */
@@ -333,7 +395,6 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     async (prompt: string) => {
       if (!prompt.trim() || loading) return
 
-      // Reset progress state
       setProgressEvents([])
       setCurrentProgressIndex(0)
 
@@ -375,7 +436,6 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         const newMsgs = (data.messages as ChatMessage[]) ?? []
         const progress = (data.progress as ProgressEvent[]) ?? []
 
-        // Set progress events for animation
         setProgressEvents(progress)
 
         setMessages((prev) => {
@@ -423,8 +483,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   /* ---- Export conversation ---- */
   const exportConversation = (format: "json" | "markdown" | "txt") => {
     if (!activeId) return
-    
-    const conv = conversations.find(c => c.id === activeId)
+
+    const conv = conversations.find((c) => c.id === activeId)
     if (!conv) return
 
     let content: string
@@ -440,11 +500,18 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
       content += `**Created:** ${new Date(conv.createdAt).toLocaleString()}\n`
       content += `**Updated:** ${new Date(conv.updatedAt).toLocaleString()}\n`
       content += `**Tags:** ${conv.tags.join(", ") || "None"}\n\n---\n\n`
-      
+
       for (const msg of conv.messages) {
-        const role = msg.role === "user" ? "👤 User" : msg.role === "assistant" ? "🤖 Assistant" : msg.role === "tool" ? "🔧 Tool" : "⚙️ System"
+        const role =
+          msg.role === "user"
+            ? "User"
+            : msg.role === "assistant"
+              ? "Assistant"
+              : msg.role === "tool"
+                ? "Tool"
+                : "System"
         content += `### ${role}\n\n${msg.content || "No content"}\n\n`
-        
+
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           content += "**Tool Calls:**\n"
           for (const tc of msg.toolCalls) {
@@ -453,7 +520,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           content += "\n"
         }
       }
-      
+
       filename = `conversation-${conv.id}.md`
       mimeType = "text/markdown"
     } else {
@@ -463,12 +530,19 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
       content += `Updated: ${new Date(conv.updatedAt).toLocaleString()}\n`
       content += `Tags: ${conv.tags.join(", ") || "None"}\n\n`
       content += `${"=".repeat(50)}\n\n`
-      
+
       for (const msg of conv.messages) {
-        const role = msg.role === "user" ? "USER" : msg.role === "assistant" ? "ASSISTANT" : msg.role === "tool" ? "TOOL" : "SYSTEM"
+        const role =
+          msg.role === "user"
+            ? "USER"
+            : msg.role === "assistant"
+              ? "ASSISTANT"
+              : msg.role === "tool"
+                ? "TOOL"
+                : "SYSTEM"
         content += `[${role}]\n${msg.content || "No content"}\n\n`
       }
-      
+
       filename = `conversation-${conv.id}.txt`
       mimeType = "text/plain"
     }
@@ -482,12 +556,30 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-    
+
     toast.success(`Exported as ${format.toUpperCase()}`)
   }
 
-  /* ---- Template categories ---- */
+  /* ---- Template categories & pinned suggestions ---- */
   const categories = [...new Set(templates.map((t) => t.category))]
+  const pinnedSuggestions = useMemo(() => {
+    /* Surface 6 prompts: one per category, plus filler. */
+    const seen = new Set<string>()
+    const result: Template[] = []
+    for (const t of templates) {
+      if (!seen.has(t.category)) {
+        seen.add(t.category)
+        result.push(t)
+        if (result.length >= 6) break
+      }
+    }
+    let i = 0
+    while (result.length < 6 && i < templates.length) {
+      if (!result.includes(templates[i])) result.push(templates[i])
+      i++
+    }
+    return result
+  }, [templates])
 
   /* ---- Tool usage analytics ---- */
   const toolUsageStats = useMemo(() => {
@@ -495,15 +587,15 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     let totalToolCalls = 0
     let successfulToolCalls = 0
 
-    conversations.forEach(conv => {
-      conv.messages.forEach(msg => {
+    conversations.forEach((conv) => {
+      conv.messages.forEach((msg) => {
         if (msg.toolCalls) {
-          msg.toolCalls.forEach(tc => {
+          msg.toolCalls.forEach((tc) => {
             toolCounts[tc.name] = (toolCounts[tc.name] || 0) + 1
             totalToolCalls++
           })
         }
-        if (msg.role === 'tool' && msg.toolResult) {
+        if (msg.role === "tool" && msg.toolResult) {
           successfulToolCalls++
         }
       })
@@ -517,7 +609,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     return {
       totalToolCalls,
       successfulToolCalls,
-      successRate: totalToolCalls > 0 ? Math.round((successfulToolCalls / totalToolCalls) * 100) : 100,
+      successRate:
+        totalToolCalls > 0 ? Math.round((successfulToolCalls / totalToolCalls) * 100) : 100,
       topTools: sortedTools,
     }
   }, [conversations])
@@ -526,44 +619,31 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   useEffect(() => {
     if (progressEvents.length > 0 && currentProgressIndex < progressEvents.length) {
       const timer = setTimeout(() => {
-        setCurrentProgressIndex(prev => prev + 1)
-      }, 800) // Show each step for 800ms
+        setCurrentProgressIndex((prev) => prev + 1)
+      }, 800)
       return () => clearTimeout(timer)
     }
   }, [progressEvents, currentProgressIndex])
 
-/* ---- Keyboard shortcuts ---- */
+  /* ---- Keyboard shortcuts ---- */
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl/Cmd + K: Focus search
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
         e.preventDefault()
         searchInputRef.current?.focus()
       }
-      
-      // Ctrl/Cmd + N: New conversation
       if ((e.ctrlKey || e.metaKey) && e.key === "n") {
         e.preventDefault()
         createConversation()
       }
-      
-      // Ctrl/Cmd + /: Show shortcuts
       if ((e.ctrlKey || e.metaKey) && e.key === "/") {
         e.preventDefault()
-        setShowShortcuts(prev => !prev)
+        setShowShortcuts((prev) => !prev)
       }
-      
-      // Escape: Close shortcuts or deselect
       if (e.key === "Escape") {
-        if (showShortcuts) {
-          setShowShortcuts(false)
-        }
-        if (editingTagsForId) {
-          setEditingTagsForId(null)
-        }
-        if (activeId) {
-          textareaRef.current?.focus()
-        }
+        if (showShortcuts) setShowShortcuts(false)
+        if (editingTagsForId) setEditingTagsForId(null)
+        if (activeId) textareaRef.current?.focus()
       }
     }
 
@@ -571,15 +651,17 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [showShortcuts, editingTagsForId, activeId, createConversation])
 
+  const activeConv = activeId ? conversations.find((c) => c.id === activeId) : null
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {!hideHeader && (
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-heading-xl">AI Assistant</h1>
             <p className="mt-1 text-body-sm text-muted-foreground">
-              Multi-tool agent for config generation, traffic analysis, troubleshooting,
-              payload creation, and infrastructure management.
+              Multi-tool agent for config generation, traffic analysis, troubleshooting, payload
+              creation, and infrastructure management.
             </p>
           </div>
           <Button
@@ -594,303 +676,185 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[260px_1fr_280px] md:grid-cols-[240px_1fr] grid-cols-1" style={{ minHeight: hideHeader ? "calc(100vh - 200px)" : "calc(100vh - 160px)" }}>
-        {/* ---- Left: Conversations ---- */}
-        <div className="flex flex-col gap-3">
-          <Button 
-            onClick={createConversation} 
-            className="w-full gap-2 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20" 
-            size="sm"
-          >
-            <MessageSquarePlus className="h-3.5 w-3.5" />
-            New Conversation
-          </Button>
+      <div
+        className={cn(
+          "grid gap-4 transition-all",
+          showConversations && showResources && "lg:grid-cols-[280px_1fr_300px]",
+          showConversations && !showResources && "lg:grid-cols-[280px_1fr]",
+          !showConversations && showResources && "lg:grid-cols-[1fr_300px]",
+          !showConversations && !showResources && "grid-cols-1",
+        )}
+        style={{ minHeight: hideHeader ? "calc(100vh - 220px)" : "calc(100vh - 180px)" }}
+      >
+        {/* ---- Left rail: Conversations ---- */}
+        {showConversations && (
+          <ConversationsRail
+            sidebarLoading={sidebarLoading}
+            createConversation={createConversation}
+            searchInputRef={searchInputRef}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            filterType={filterType}
+            setFilterType={setFilterType}
+            allTags={allTags}
+            selectedTag={selectedTag}
+            setSelectedTag={setSelectedTag}
+            groupedConversations={groupedConversations}
+            activeId={activeId}
+            selectConversation={selectConversation}
+            deleteConversation={deleteConversation}
+            editingTagsForId={editingTagsForId}
+            setEditingTagsForId={setEditingTagsForId}
+            newTag={newTag}
+            setNewTag={setNewTag}
+            addTag={addTag}
+            removeTag={removeTag}
+            totalCount={conversations.length}
+          />
+        )}
 
-          {/* Search and Filter */}
-          <div className="space-y-2">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder="Search conversations..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-8 py-2 text-body-sm rounded-lg border border-border/50 bg-background/50 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 placeholder:text-muted-foreground/60"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+        {/* ---- Center: Chat surface ---- */}
+        <Card className="flex flex-col overflow-hidden border-border/60 shadow-sm">
+          {/* Sub-header with conversation context + rail toggles */}
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-gradient-to-b from-muted/40 to-transparent px-4 py-2.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "h-8 w-8 shrink-0",
+                        showConversations && "bg-primary/10 text-primary",
+                      )}
+                      onClick={() => setShowConversations((v) => !v)}
+                    />
+                  }
                 >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-            
-            <div className="flex items-center gap-1">
-              <Button
-                variant={filterType === "all" ? "secondary" : "ghost"}
-                size="sm"
-                className="flex-1 text-micro h-7"
-                onClick={() => setFilterType("all")}
-              >
-                All
-              </Button>
-              <Button
-                variant={filterType === "recent" ? "secondary" : "ghost"}
-                size="sm"
-                className="flex-1 text-micro h-7"
-                onClick={() => setFilterType("recent")}
-              >
-                Recent
-              </Button>
-              <Button
-                variant={filterType === "with-tools" ? "secondary" : "ghost"}
-                size="sm"
-                className="flex-1 text-micro h-7"
-                onClick={() => setFilterType("with-tools")}
-              >
-                Tools
-              </Button>
-              <Button
-                variant={filterType === "tag" ? "secondary" : "ghost"}
-                size="sm"
-                className="flex-1 text-micro h-7"
-                onClick={() => setFilterType("tag")}
-              >
-                Tags
-              </Button>
-            </div>
-            
-            {filterType === "tag" && allTags.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {allTags.map(tag => (
-                  <button
-                    key={tag}
-                    onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
-                    className={cn(
-                      "px-2 py-0.5 rounded-full text-micro transition-colors",
-                      selectedTag === tag
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    )}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+                  <PanelLeft className="h-4 w-4" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Toggle conversations</TooltipContent>
+              </Tooltip>
 
-          <div className="relative flex-1 rounded-xl border border-border/50 bg-card/50 overflow-hidden">
-            <ScrollArea className="flex-1 h-full">
-              <div className="space-y-0.5 p-2">
-                {sidebarLoading ? (
-                  <div className="space-y-2 py-2">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Skeleton key={i} className="h-10 w-full rounded-lg" />
-                    ))}
-                  </div>
-                ) : filteredConversations.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 py-12 text-center">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted/50">
-                      <MessageSquare className="h-6 w-6 text-muted-foreground/40" />
-                    </div>
-                    <p className="text-caption text-muted-foreground">
-                      {searchQuery ? "No conversations found" : "No conversations yet"}
-                    </p>
-                    <p className="text-micro text-muted-foreground/60">
-                      {searchQuery ? "Try a different search term" : "Start a new conversation to begin"}
-                    </p>
+              <div className="hidden h-5 w-px bg-border/60 sm:block" />
+
+              <div className="min-w-0 flex-1">
+                {activeConv ? (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Bot className="h-4 w-4 shrink-0 text-primary" />
+                    <span className="truncate text-body-sm font-medium text-foreground">
+                      {activeConv.title}
+                    </span>
+                    {activeConv.tags.length > 0 && (
+                      <div className="ml-1 hidden items-center gap-1 sm:flex">
+                        {activeConv.tags.slice(0, 2).map((tag) => (
+                          <span
+                            key={tag}
+                            className="rounded-full bg-muted px-1.5 py-0.5 text-micro text-muted-foreground"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                        {activeConv.tags.length > 2 && (
+                          <span className="text-micro text-muted-foreground/60">
+                            +{activeConv.tags.length - 2}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  filteredConversations.map((conv) => (
-                    <div
-                      key={conv.id}
-                      className={cn(
-                        "group flex flex-col gap-1.5 rounded-lg px-3 py-2.5 cursor-pointer transition-all",
-                        activeId === conv.id
-                          ? "bg-primary/10 text-primary ring-1 ring-primary/20 shadow-sm"
-                          : "hover:bg-muted/50 text-foreground border border-transparent hover:border-border/30",
-                      )}
-                      onClick={() => selectConversation(conv.id)}
-                    >
-                      <div className="flex items-center gap-2">
-                        <Bot className={cn("h-3.5 w-3.5 shrink-0", activeId === conv.id ? "text-primary" : "opacity-50")} />
-                        <span className="flex-1 truncate text-body-sm">{conv.title}</span>
-                        <div className="flex items-center gap-1">
-                          {editingTagsForId === conv.id ? (
-                            <button
-                              onClick={(e: React.MouseEvent) => {
-                                e.stopPropagation()
-                                setEditingTagsForId(null)
-                              }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5 text-muted-foreground hover:text-foreground"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={(e: React.MouseEvent) => {
-                                e.stopPropagation()
-                                setEditingTagsForId(conv.id)
-                              }}
-                              className={cn(
-                                "opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5",
-                                "text-muted-foreground hover:text-primary hover:bg-primary/10",
-                              )}
-                            >
-                              <Filter className="h-3 w-3" />
-                            </button>
-                          )}
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <button
-                                  onClick={(e: React.MouseEvent) => {
-                                    e.stopPropagation()
-                                    deleteConversation(conv.id)
-                                  }}
-                                  className={cn(
-                                    "opacity-0 group-hover:opacity-100 transition-opacity rounded p-0.5",
-                                    "text-muted-foreground hover:text-destructive hover:bg-destructive/10",
-                                  )}
-                                />
-                              }
-                            >
-                          <Trash2 className="h-3 w-3" />
-                        </TooltipTrigger>
-                        <TooltipContent side="right">Delete</TooltipContent>
-                      </Tooltip>
-                        </div>
-                      </div>
-                      
-                      {/* Tags display */}
-                      {editingTagsForId === conv.id ? (
-                        <div className="flex items-center gap-1 ml-5.5">
-                          <input
-                            type="text"
-                            placeholder="Add tag..."
-                            value={newTag}
-                            onChange={(e) => setNewTag(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && newTag.trim()) {
-                                e.preventDefault()
-                                addTag(conv.id, newTag)
-                                setNewTag("")
-                              }
-                            }}
-                            className="flex-1 px-2 py-1 text-micro rounded border border-border/50 bg-background/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          {conv.tags.map(tag => (
-                            <div
-                              key={tag}
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-micro"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {tag}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  removeTag(conv.id, tag)
-                                }}
-                                className="hover:text-destructive"
-                              >
-                                <X className="h-2.5 w-2.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : conv.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 ml-5.5">
-                          {conv.tags.map(tag => (
-                            <span
-                              key={tag}
-                              className="px-1.5 py-0.5 rounded-full bg-muted/50 text-muted-foreground text-micro"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))
+                  <span className="text-body-sm text-muted-foreground">
+                    No conversation selected
+                  </span>
                 )}
               </div>
-            </ScrollArea>
-          </div>
-        </div>
+            </div>
 
-        {/* ---- Center: Chat panel ---- */}
-        <Card className="flex flex-col overflow-hidden shadow-lg shadow-primary/5 border-primary/20">
-          {activeId && (
-            <CardHeader className="flex flex-row items-center justify-between py-3 px-4 border-b border-border/50 bg-gradient-to-b from-primary/5 to-transparent">
-              <div className="flex items-center gap-2">
-                <Bot className="h-4 w-4 text-primary" />
-                <span className="text-body-sm font-medium text-foreground">
-                  {conversations.find(c => c.id === activeId)?.title || "Conversation"}
-                </span>
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger
+            <div className="flex shrink-0 items-center gap-1">
+              {activeConv && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="hidden gap-1 px-2 text-micro text-muted-foreground hover:text-foreground sm:inline-flex"
+                      >
+                        <Download className="h-3 w-3" />
+                        Export
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => exportConversation("json")}>
+                      Export as JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => exportConversation("markdown")}>
+                      Export as Markdown
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => exportConversation("txt")}>
+                      Export as Text
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              <Tooltip>
+                <TooltipTrigger
                   render={
-                    <Button variant="ghost" size="sm" className="gap-1 text-micro text-muted-foreground hover:text-foreground">
-                      <Download className="h-3 w-3" />
-                      Export
-                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "h-8 w-8",
+                        showResources && "bg-primary/10 text-primary",
+                      )}
+                      onClick={() => setShowResources((v) => !v)}
+                    />
                   }
-                />
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => exportConversation("json")}>
-                    Export as JSON
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => exportConversation("markdown")}>
-                    Export as Markdown
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => exportConversation("txt")}>
-                    Export as Text
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </CardHeader>
-          )}
-          {/* Messages area */}
-          <ScrollArea className="flex-1">
-            <div className="p-5 space-y-4">
-              {!activeId ? (
-                <div className="flex flex-col items-center justify-center min-h-[400px] text-center">
-                  <div className="relative mb-6">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 ring-1 ring-primary/30">
-                      <Sparkles className="h-10 w-10 text-primary glow-primary" />
-                    </div>
-                    <div className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-success ring-2 ring-background">
-                      <Activity className="h-3.5 w-3.5 text-success-foreground" />
-                    </div>
-                  </div>
-                  <h3 className="text-heading-lg mb-2">AI Operations Assistant</h3>
-                  <p className="text-body-sm text-muted-foreground max-w-md">
-                    Select a conversation or start a new one. Use templates on the right for common tasks.
-                  </p>
-                  <Button 
-                    onClick={createConversation}
-                    className="mt-6 gap-2 bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20"
+                >
+                  <PanelRight className="h-4 w-4" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Toggle templates &amp; tools</TooltipContent>
+              </Tooltip>
+              {hideHeader && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setShowShortcuts(true)}
+                      />
+                    }
                   >
-                    <MessageSquarePlus className="h-4 w-4" />
-                    Start New Conversation
-                  </Button>
-                </div>
+                    <Keyboard className="h-4 w-4" />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Keyboard shortcuts</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+
+          {/* Messages */}
+          <ScrollArea className="flex-1">
+            <div className="space-y-4 px-4 py-5 sm:px-6">
+              {!activeId ? (
+                <ChatHero
+                  onCreate={createConversation}
+                  pinned={pinnedSuggestions}
+                  sendMessage={(prompt) => {
+                    sendMessage(prompt)
+                  }}
+                />
               ) : messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center min-h-[300px] text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted/50 mb-4">
-                    <Bot className="h-8 w-8 text-muted-foreground/40" />
-                  </div>
-                  <h3 className="text-heading-md mb-2">Ready for instructions</h3>
-                  <p className="text-body-sm text-muted-foreground">
-                    Type a prompt below or select a template to begin.
-                  </p>
-                </div>
+                <FreshConversationPrompt
+                  pinned={pinnedSuggestions}
+                  sendMessage={sendMessage}
+                  onOpenResources={() => setShowResources(true)}
+                />
               ) : (
                 <>
                   {hasMoreMessages && (
@@ -915,255 +879,83 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                 </>
               )}
               {loading && (
-                <div className="flex items-start gap-3">
-                  <Avatar className="h-7 w-7 shrink-0 ring-2 ring-primary/20">
-                    <AvatarFallback className="bg-primary/10 text-primary text-micro">
-                      <Bot className="h-3.5 w-3.5" />
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 px-4 py-3 shadow-sm w-full max-w-md">
-                    {progressEvents.length > 0 ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2 text-body-sm text-primary">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          <span>Working on your request…</span>
-                        </div>
-                        <div className="space-y-1.5 mt-3">
-                          {progressEvents.slice(0, currentProgressIndex + 1).map((event, idx) => (
-                            <div key={idx} className="flex items-start gap-2 text-micro">
-                              <div className={cn(
-                                "mt-0.5 h-1.5 w-1.5 rounded-full shrink-0",
-                                idx === currentProgressIndex ? "bg-primary animate-pulse" : "bg-success"
-                              )} />
-                              <div className="flex-1">
-                                {event.type === "step" && (
-                                  <span className="text-foreground/80">{event.step}</span>
-                                )}
-                                {event.type === "tool_start" && (
-                                  <span className="text-foreground/80">
-                                    Running <code className="text-primary font-mono">{event.toolName}</code>
-                                  </span>
-                                )}
-                                {event.type === "tool_complete" && (
-                                  <span className="text-success">
-                                    ✓ <code className="font-mono">{event.toolName}</code> completed
-                                  </span>
-                                )}
-                                {event.type === "tool_error" && (
-                                  <span className="text-destructive">
-                                    ✗ <code className="font-mono">{event.toolName}</code> failed
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-body-sm text-primary">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Processing…</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <ProgressBubble
+                  events={progressEvents}
+                  currentIndex={currentProgressIndex}
+                />
               )}
               <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
-          {/* Input area */}
-          <div className="border-t border-border/50 bg-gradient-to-b from-card/50 to-card p-4">
-            <div className="flex items-end gap-2">
-              <div className="flex-1 relative">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => {
-                    setInput(e.target.value)
-                    adjustTextarea()
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault()
-                      sendMessage(input)
-                    }
-                  }}
-                  placeholder={
-                    activeId
-                      ? "Ask about your Hysteria2 infrastructure…"
-                      : "Start a new conversation first…"
+          {/* Input */}
+          <div className="shrink-0 border-t border-border/60 bg-card/80 p-3 sm:p-4">
+            <div className="relative">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  adjustTextarea()
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    sendMessage(input)
                   }
-                  rows={1}
-                  disabled={!activeId && !loading}
-                  className="flex-1 resize-none rounded-xl border border-border/50 bg-background/50 px-4 py-3 text-body-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 disabled:opacity-50 transition-all shadow-inner"
-                />
-                {activeId && (
-                  <div className="absolute right-2 top-2 flex items-center gap-1">
-                    <Badge variant="outline" className="h-5 px-1.5 text-micro border-primary/30 bg-primary/10 text-primary">
-                      10 tools
-                    </Badge>
-                  </div>
-                )}
-              </div>
+                }}
+                placeholder={
+                  activeId
+                    ? "Ask about your Hysteria2 infrastructure…"
+                    : "Type a message to start a new conversation…"
+                }
+                rows={1}
+                disabled={loading}
+                className="w-full resize-none rounded-xl border border-border/60 bg-background/60 py-3 pl-4 pr-14 text-body-sm leading-relaxed shadow-inner transition-all placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
+              />
               <Button
                 onClick={() => sendMessage(input)}
                 disabled={loading || !input.trim()}
                 size="icon"
-                className="h-10 w-10 shrink-0 rounded-xl bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20"
+                className="absolute bottom-2 right-2 h-9 w-9 rounded-lg bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
               >
-                <Send className="h-4 w-4" />
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
               </Button>
             </div>
-            <p className="mt-2 text-micro text-muted-foreground/60 text-center">
-              Press Enter to send · Shift+Enter for new line
-            </p>
+            <div className="mt-2 flex items-center justify-between text-micro text-muted-foreground/70">
+              <span>
+                <kbd className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
+                  Enter
+                </kbd>{" "}
+                send ·{" "}
+                <kbd className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
+                  Shift+Enter
+                </kbd>{" "}
+                newline
+              </span>
+              <span className="hidden items-center gap-1 sm:inline-flex">
+                <Wrench className="h-3 w-3" />
+                10 tools available
+              </span>
+            </div>
           </div>
         </Card>
 
-        {/* ---- Right panel: Resources ---- */}
-        <div className="flex flex-col gap-3 hidden lg:flex">
-          <Card className="flex flex-col shadow-lg shadow-primary/5 border-primary/20">
-            <CardContent className="p-0">
-              <Tabs defaultValue="templates" className="w-full">
-                <div className="px-3 pt-3 pb-2 border-b border-border/50">
-                  <TabsList className="w-full h-auto bg-muted/50 p-0.5">
-                    <TabsTrigger
-                      value="templates"
-                      className="flex-1 gap-1.5 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm px-2 py-1.5"
-                    >
-                      <Sparkles className="h-3 w-3" />
-                      Templates
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="tools"
-                      className="flex-1 gap-1.5 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm px-2 py-1.5"
-                    >
-                      <Wrench className="h-3 w-3" />
-                      Tools
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-                
-                <TabsContent value="templates" className="mt-0">
-                  <Tabs defaultValue={categories[0] ?? "config"} className="w-full">
-                    <div className="px-3 pb-2 border-b border-border/50">
-                      <TabsList className="w-full h-auto flex-wrap gap-1 bg-transparent p-0">
-                        {categories.map((cat) => (
-                          <TabsTrigger
-                            key={cat}
-                            value={cat}
-                            className="text-xs px-2 py-1 rounded-md capitalize data-[state=active]:bg-primary/10 data-[state=active]:text-primary"
-                          >
-                            {CATEGORY_CONFIG[cat]?.label ?? cat}
-                          </TabsTrigger>
-                        ))}
-                      </TabsList>
-                    </div>
-                    {categories.map((cat) => (
-                      <TabsContent key={cat} value={cat} className="mt-0">
-                        <ScrollArea className="h-[280px]">
-                          <div className="space-y-1.5 px-3 pb-3">
-                            {templates
-                              .filter((t) => t.category === cat)
-                              .map((t) => (
-                                <button
-                                  key={t.id}
-                                  onClick={() => sendMessage(t.prompt)}
-                                  disabled={loading}
-                                  className="w-full rounded-lg border border-border/50 bg-background/50 px-3 py-2 text-left transition-all hover:bg-muted/50 hover:border-primary/30 disabled:opacity-50 group"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-medium group-hover:text-primary transition-colors">
-                                      {t.label}
-                                    </span>
-                                    {cat === "payload" && (
-                                      <Badge variant="outline" className="h-4 px-1 text-xs border-destructive/30 bg-destructive/10 text-destructive">
-                                        Risk
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
-                                    {t.description}
-                                  </p>
-                                </button>
-                              ))}
-                          </div>
-                        </ScrollArea>
-                      </TabsContent>
-                    ))}
-                  </Tabs>
-                </TabsContent>
-
-                <TabsContent value="tools" className="mt-0">
-                  <ScrollArea className="h-[340px]">
-                    <div className="space-y-1 px-3 pb-3">
-                      {TOOLS_LIST.map((tool) => {
-                        const Icon = tool.icon
-                        return (
-                          <div
-                            key={tool.name}
-                            className="flex items-center gap-2.5 rounded-lg px-2 py-2 hover:bg-muted/50 transition-colors group"
-                          >
-                            <div className="flex h-5 w-5 items-center justify-center rounded bg-primary/10 group-hover:bg-primary/20 transition-colors">
-                              <Icon className="h-3 w-3 shrink-0 text-primary" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <code className="text-xs font-mono text-foreground/80 group-hover:text-primary transition-colors">{tool.name}</code>
-                              <p className="text-xs text-muted-foreground truncate">{tool.desc}</p>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-
-          {/* Quick Stats */}
-          <Card className="shadow-lg shadow-primary/5 border-primary/20">
-            <CardContent className="p-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg bg-background/50 border border-border/50 p-2">
-                  <div className="text-xs text-muted-foreground">Total Calls</div>
-                  <div className="text-sm font-semibold text-foreground">{toolUsageStats.totalToolCalls}</div>
-                </div>
-                <div className="rounded-lg bg-background/50 border border-border/50 p-2">
-                  <div className="text-xs text-muted-foreground">Success Rate</div>
-                  <div className={cn(
-                    "text-sm font-semibold",
-                    toolUsageStats.successRate >= 90 ? "text-success" : toolUsageStats.successRate >= 70 ? "text-warning" : "text-destructive"
-                  )}>
-                    {toolUsageStats.successRate}%
-                  </div>
-                </div>
-              </div>
-              
-              {toolUsageStats.topTools.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  <div className="text-xs text-muted-foreground font-medium">Top Tools</div>
-                  <div className="space-y-1.5">
-                    {toolUsageStats.topTools.slice(0, 3).map((tool, i) => (
-                      <div key={tool.name} className="flex items-center gap-2">
-                        <div className="flex h-4 w-4 items-center justify-center rounded bg-primary/10 text-xs text-primary">
-                          {i + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <code className="text-xs font-mono text-foreground truncate block">{tool.name}</code>
-                        </div>
-                        <Badge variant="outline" className="text-xs h-5 px-1.5">
-                          {tool.count}
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        {/* ---- Right rail: Resources ---- */}
+        {showResources && (
+          <ResourcesRail
+            templates={templates}
+            categories={categories}
+            sendMessage={sendMessage}
+            loading={loading}
+            toolUsageStats={toolUsageStats}
+            onClose={() => setShowResources(false)}
+          />
+        )}
       </div>
 
       {/* Keyboard Shortcuts Dialog */}
@@ -1175,43 +967,34 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
               Keyboard Shortcuts
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 py-4">
-            <div className="flex items-center justify-between">
-              <span className="text-body-sm">Focus search</span>
-              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
-                <span className="text-muted-foreground">⌘</span> K
-              </kbd>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-body-sm">New conversation</span>
-              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
-                <span className="text-muted-foreground">⌘</span> N
-              </kbd>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-body-sm">Show shortcuts</span>
-              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
-                <span className="text-muted-foreground">⌘</span> /
-              </kbd>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-body-sm">Send message</span>
-              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
-                Enter
-              </kbd>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-body-sm">New line</span>
-              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
-                Shift + Enter
-              </kbd>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-body-sm">Close / Escape</span>
-              <kbd className="px-2 py-1 rounded bg-muted text-micro font-mono">
-                Esc
-              </kbd>
-            </div>
+          <div className="space-y-2 py-2">
+            {[
+              ["Focus search", ["⌘", "K"]],
+              ["New conversation", ["⌘", "N"]],
+              ["Show shortcuts", ["⌘", "/"]],
+              ["Send message", ["Enter"]],
+              ["New line", ["Shift", "Enter"]],
+              ["Close / Escape", ["Esc"]],
+            ].map(([label, keys]) => (
+              <div
+                key={label as string}
+                className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/40"
+              >
+                <span className="text-body-sm">{label}</span>
+                <div className="flex items-center gap-1">
+                  {(keys as string[]).map((k, idx, arr) => (
+                    <span key={idx} className="flex items-center gap-1">
+                      <kbd className="rounded border border-border/60 bg-muted px-2 py-1 font-mono text-micro">
+                        {k}
+                      </kbd>
+                      {idx < arr.length - 1 && (
+                        <span className="text-micro text-muted-foreground/40">+</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </DialogContent>
       </Dialog>
@@ -1220,26 +1003,813 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
 }
 
 /* ------------------------------------------------------------------ */
-/*  Empty State                                                       */
+/*  Conversations Rail                                                */
 /* ------------------------------------------------------------------ */
 
-function EmptyState({
-  icon,
-  title,
-  description,
+type ConversationsRailProps = {
+  sidebarLoading: boolean
+  createConversation: () => Promise<string | null>
+  searchInputRef: React.RefObject<HTMLInputElement | null>
+  searchQuery: string
+  setSearchQuery: (s: string) => void
+  filterType: "all" | "recent" | "with-tools" | "tag"
+  setFilterType: (f: "all" | "recent" | "with-tools" | "tag") => void
+  allTags: string[]
+  selectedTag: string | null
+  setSelectedTag: (t: string | null) => void
+  groupedConversations: Record<"today" | "yesterday" | "week" | "older", Conversation[]>
+  activeId: string | null
+  selectConversation: (id: string) => Promise<void>
+  deleteConversation: (id: string) => Promise<void>
+  editingTagsForId: string | null
+  setEditingTagsForId: (id: string | null) => void
+  newTag: string
+  setNewTag: (s: string) => void
+  addTag: (id: string, tag: string) => Promise<void>
+  removeTag: (id: string, tag: string) => Promise<void>
+  totalCount: number
+}
+
+function ConversationsRail(props: ConversationsRailProps) {
+  const {
+    sidebarLoading,
+    createConversation,
+    searchInputRef,
+    searchQuery,
+    setSearchQuery,
+    filterType,
+    setFilterType,
+    allTags,
+    selectedTag,
+    setSelectedTag,
+    groupedConversations,
+    activeId,
+    selectConversation,
+    deleteConversation,
+    editingTagsForId,
+    setEditingTagsForId,
+    newTag,
+    setNewTag,
+    addTag,
+    removeTag,
+    totalCount,
+  } = props
+
+  const totalFiltered =
+    groupedConversations.today.length +
+    groupedConversations.yesterday.length +
+    groupedConversations.week.length +
+    groupedConversations.older.length
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Button
+        onClick={createConversation}
+        size="sm"
+        className="w-full justify-center gap-2 bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
+      >
+        <MessageSquarePlus className="h-3.5 w-3.5" />
+        New Conversation
+      </Button>
+
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            placeholder="Search conversations…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-lg border border-border/60 bg-background/50 py-2 pl-8 pr-8 text-body-sm placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-4 gap-1 rounded-lg border border-border/40 bg-muted/30 p-0.5">
+          {(["all", "recent", "with-tools", "tag"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilterType(f)}
+              className={cn(
+                "rounded-md px-2 py-1 text-micro font-medium transition-all",
+                filterType === f
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {f === "with-tools" ? "Tools" : f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {filterType === "tag" && allTags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {allTags.map((tag) => (
+              <button
+                key={tag}
+                onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                className={cn(
+                  "rounded-full px-2 py-0.5 text-micro transition-colors",
+                  selectedTag === tag
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80",
+                )}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-hidden rounded-xl border border-border/60 bg-card/40">
+        <ScrollArea className="h-full">
+          <div className="space-y-3 p-2">
+            {sidebarLoading ? (
+              <div className="space-y-2 py-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-14 w-full rounded-lg" />
+                ))}
+              </div>
+            ) : totalFiltered === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-12 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted/50">
+                  <MessageSquare className="h-6 w-6 text-muted-foreground/40" />
+                </div>
+                <p className="text-caption text-muted-foreground">
+                  {searchQuery
+                    ? "No conversations found"
+                    : totalCount === 0
+                      ? "No conversations yet"
+                      : "No matches for this filter"}
+                </p>
+                <p className="text-micro text-muted-foreground/60">
+                  {searchQuery
+                    ? "Try a different search term"
+                    : totalCount === 0
+                      ? "Start one above to begin"
+                      : "Try a different filter"}
+                </p>
+              </div>
+            ) : (
+              (Object.keys(BUCKET_LABELS) as Array<keyof typeof BUCKET_LABELS>).map((bucket) => {
+                const items = groupedConversations[bucket]
+                if (items.length === 0) return null
+                return (
+                  <div key={bucket} className="space-y-1">
+                    <div className="px-2 pt-1 text-label text-muted-foreground/70">
+                      {BUCKET_LABELS[bucket]}
+                    </div>
+                    <div className="space-y-0.5">
+                      {items.map((conv) => (
+                        <ConversationRow
+                          key={conv.id}
+                          conv={conv}
+                          active={activeId === conv.id}
+                          onSelect={() => selectConversation(conv.id)}
+                          onDelete={() => deleteConversation(conv.id)}
+                          isEditingTags={editingTagsForId === conv.id}
+                          onToggleEditTags={(open) =>
+                            setEditingTagsForId(open ? conv.id : null)
+                          }
+                          newTag={newTag}
+                          setNewTag={setNewTag}
+                          onAddTag={(t) => addTag(conv.id, t)}
+                          onRemoveTag={(t) => removeTag(conv.id, t)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  )
+}
+
+function ConversationRow({
+  conv,
+  active,
+  onSelect,
+  onDelete,
+  isEditingTags,
+  onToggleEditTags,
+  newTag,
+  setNewTag,
+  onAddTag,
+  onRemoveTag,
 }: {
-  icon: React.ReactNode
-  title: string
-  description: string
+  conv: Conversation
+  active: boolean
+  onSelect: () => void
+  onDelete: () => void
+  isEditingTags: boolean
+  onToggleEditTags: (open: boolean) => void
+  newTag: string
+  setNewTag: (s: string) => void
+  onAddTag: (t: string) => Promise<void>
+  onRemoveTag: (t: string) => Promise<void>
+}) {
+  const snippet = previewSnippet(conv)
+  return (
+    <div
+      onClick={onSelect}
+      className={cn(
+        "group relative cursor-pointer rounded-lg px-3 py-2 transition-all",
+        active
+          ? "bg-primary/10 ring-1 ring-primary/30"
+          : "border border-transparent hover:border-border/40 hover:bg-muted/40",
+      )}
+    >
+      {active && (
+        <span className="absolute left-0 top-2 h-[calc(100%-1rem)] w-0.5 rounded-r-full bg-primary" />
+      )}
+      <div className="flex items-start gap-2">
+        <div
+          className={cn(
+            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md",
+            active ? "bg-primary/20" : "bg-muted",
+          )}
+        >
+          <Bot className={cn("h-3 w-3", active ? "text-primary" : "text-muted-foreground/60")} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className={cn(
+                "truncate text-body-sm font-medium",
+                active ? "text-foreground" : "text-foreground/90",
+              )}
+            >
+              {conv.title}
+            </span>
+            <span className="shrink-0 text-micro text-muted-foreground/60">
+              {relativeTime(conv.updatedAt)}
+            </span>
+          </div>
+          <p className="mt-0.5 truncate text-micro text-muted-foreground/70">{snippet}</p>
+          {conv.tags.length > 0 && !isEditingTags && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {conv.tags.slice(0, 3).map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-muted/70 px-1.5 py-0 text-[10px] text-muted-foreground"
+                >
+                  {tag}
+                </span>
+              ))}
+              {conv.tags.length > 3 && (
+                <span className="text-[10px] text-muted-foreground/60">
+                  +{conv.tags.length - 3}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleEditTags(!isEditingTags)
+                }}
+                className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              />
+            }
+          >
+            <Tag className="h-3 w-3" />
+          </TooltipTrigger>
+          <TooltipContent side="left">Edit tags</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete()
+                }}
+                className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              />
+            }
+          >
+            <Trash2 className="h-3 w-3" />
+          </TooltipTrigger>
+          <TooltipContent side="left">Delete</TooltipContent>
+        </Tooltip>
+      </div>
+
+      {isEditingTags && (
+        <div
+          className="mt-2 space-y-1.5 rounded-md border border-border/40 bg-background/50 p-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="text"
+            placeholder="Add tag…"
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newTag.trim()) {
+                e.preventDefault()
+                onAddTag(newTag)
+                setNewTag("")
+              }
+            }}
+            className="w-full rounded border border-border/40 bg-background/70 px-2 py-1 text-micro focus:border-primary/40 focus:outline-none focus:ring-1 focus:ring-primary/30"
+          />
+          {conv.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {conv.tags.map((tag) => (
+                <div
+                  key={tag}
+                  className="flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-micro text-primary"
+                >
+                  {tag}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onRemoveTag(tag)
+                    }}
+                    className="hover:text-destructive"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Resources Rail (Templates, Tools, Stats)                          */
+/* ------------------------------------------------------------------ */
+
+function ResourcesRail({
+  templates,
+  categories,
+  sendMessage,
+  loading,
+  toolUsageStats,
+  onClose,
+}: {
+  templates: Template[]
+  categories: string[]
+  sendMessage: (prompt: string) => Promise<void>
+  loading: boolean
+  toolUsageStats: {
+    totalToolCalls: number
+    successfulToolCalls: number
+    successRate: number
+    topTools: { name: string; count: number }[]
+  }
+  onClose: () => void
 }) {
   return (
-    <div className="flex h-full min-h-[400px] flex-col items-center justify-center gap-4 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-        {icon}
+    <div className="flex flex-col gap-3">
+      <Card className="flex-1 overflow-hidden border-border/60 shadow-sm">
+        <CardContent className="flex h-full flex-col p-0">
+          <Tabs defaultValue="templates" className="flex flex-1 flex-col">
+            <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+              <TabsList className="h-auto gap-0.5 bg-muted/40 p-0.5">
+                <TabsTrigger
+                  value="templates"
+                  className="gap-1.5 px-2.5 py-1 text-micro data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  Templates
+                </TabsTrigger>
+                <TabsTrigger
+                  value="tools"
+                  className="gap-1.5 px-2.5 py-1 text-micro data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  <Wrench className="h-3 w-3" />
+                  Tools
+                </TabsTrigger>
+                <TabsTrigger
+                  value="stats"
+                  className="gap-1.5 px-2.5 py-1 text-micro data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  <BarChart3 className="h-3 w-3" />
+                  Stats
+                </TabsTrigger>
+              </TabsList>
+              <button
+                onClick={onClose}
+                className="rounded p-1 text-muted-foreground/60 hover:bg-muted/50 hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <TabsContent value="templates" className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <div className="space-y-3 p-3">
+                  {categories.length === 0 ? (
+                    <div className="py-8 text-center text-caption text-muted-foreground">
+                      No templates available
+                    </div>
+                  ) : (
+                    categories.map((cat) => {
+                      const conf = CATEGORY_CONFIG[cat] ?? {
+                        color: "text-foreground",
+                        label: cat,
+                        ring: "ring-border/40 bg-muted",
+                      }
+                      const items = templates.filter((t) => t.category === cat)
+                      if (items.length === 0) return null
+                      return (
+                        <div key={cat} className="space-y-1.5">
+                          <div className="flex items-center gap-2 px-1">
+                            <div
+                              className={cn(
+                                "flex h-5 w-5 items-center justify-center rounded ring-1",
+                                conf.ring,
+                              )}
+                            >
+                              <Sparkles className={cn("h-3 w-3", conf.color)} />
+                            </div>
+                            <span className="text-label text-muted-foreground/70">
+                              {conf.label}
+                            </span>
+                            <span className="text-micro text-muted-foreground/60">
+                              {items.length}
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            {items.map((t) => (
+                              <button
+                                key={t.id}
+                                onClick={() => sendMessage(t.prompt)}
+                                disabled={loading}
+                                className="group block w-full rounded-lg border border-border/40 bg-background/40 px-3 py-2 text-left transition-all hover:border-primary/30 hover:bg-primary/5 disabled:opacity-50"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="text-body-sm font-medium text-foreground/90 group-hover:text-primary">
+                                    {t.label}
+                                  </span>
+                                  {cat === "payload" && (
+                                    <Badge
+                                      variant="outline"
+                                      className="h-4 border-destructive/30 bg-destructive/10 px-1 text-[10px] text-destructive"
+                                    >
+                                      Risk
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="mt-0.5 line-clamp-2 text-micro text-muted-foreground">
+                                  {t.description}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="tools" className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <div className="space-y-1 p-3">
+                  {TOOLS_LIST.map((tool) => {
+                    const Icon = tool.icon
+                    return (
+                      <div
+                        key={tool.name}
+                        className="group flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50"
+                      >
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 ring-1 ring-primary/20 transition-colors group-hover:bg-primary/20">
+                          <Icon className="h-3.5 w-3.5 text-primary" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <code className="block truncate font-mono text-micro text-foreground/90 group-hover:text-primary">
+                            {tool.name}
+                          </code>
+                          <p className="truncate text-[10px] text-muted-foreground">
+                            {tool.desc}
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            <TabsContent value="stats" className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <div className="space-y-3 p-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <StatPill
+                      label="Total calls"
+                      value={toolUsageStats.totalToolCalls.toString()}
+                      hint="Tool invocations"
+                    />
+                    <StatPill
+                      label="Success rate"
+                      value={`${toolUsageStats.successRate}%`}
+                      hint="Completed cleanly"
+                      tone={
+                        toolUsageStats.successRate >= 90
+                          ? "success"
+                          : toolUsageStats.successRate >= 70
+                            ? "warning"
+                            : "danger"
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-2 rounded-lg border border-border/40 bg-background/40 p-3">
+                    <div className="flex items-center gap-2">
+                      <History className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      <span className="text-label text-muted-foreground/70">Top tools</span>
+                    </div>
+                    {toolUsageStats.topTools.length === 0 ? (
+                      <p className="py-3 text-center text-micro text-muted-foreground/60">
+                        No tool usage recorded yet
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {toolUsageStats.topTools.map((tool, i) => {
+                          const max = toolUsageStats.topTools[0]?.count || 1
+                          const pct = Math.round((tool.count / max) * 100)
+                          return (
+                            <div key={tool.name} className="space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex min-w-0 items-center gap-2">
+                                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-primary/10 text-[10px] text-primary">
+                                    {i + 1}
+                                  </span>
+                                  <code className="truncate font-mono text-micro text-foreground/90">
+                                    {tool.name}
+                                  </code>
+                                </div>
+                                <span className="text-micro tabular-nums text-muted-foreground">
+                                  {tool.count}
+                                </span>
+                              </div>
+                              <div className="h-1 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full bg-primary/70 transition-all"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function StatPill({
+  label,
+  value,
+  hint,
+  tone = "default",
+}: {
+  label: string
+  value: string
+  hint?: string
+  tone?: "default" | "success" | "warning" | "danger"
+}) {
+  const toneColor = {
+    default: "text-foreground",
+    success: "text-success",
+    warning: "text-warning",
+    danger: "text-destructive",
+  }[tone]
+  return (
+    <div className="rounded-lg border border-border/40 bg-background/40 p-2.5">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{label}</div>
+      <div className={cn("mt-0.5 text-heading-md tabular-nums", toneColor)}>{value}</div>
+      {hint && <div className="mt-0.5 text-[10px] text-muted-foreground/60">{hint}</div>}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Hero (no conversation selected)                                   */
+/* ------------------------------------------------------------------ */
+
+function ChatHero({
+  onCreate,
+  pinned,
+  sendMessage,
+}: {
+  onCreate: () => Promise<string | null>
+  pinned: Template[]
+  sendMessage: (prompt: string) => void
+}) {
+  return (
+    <div className="relative mx-auto flex max-w-2xl flex-col items-center justify-center gap-6 py-10 text-center">
+      <div className="relative">
+        <div
+          aria-hidden
+          className="absolute inset-0 -z-10 rounded-full bg-primary/20 blur-3xl"
+        />
+        <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/30 to-primary/5 ring-1 ring-primary/30">
+          <Sparkles className="h-9 w-9 text-primary glow-primary" />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-heading-lg">How can I help today?</h3>
+        <p className="max-w-md text-body-sm text-muted-foreground">
+          Pick a starter prompt or begin a new conversation. The assistant has access to 10 tools
+          for config, traffic, troubleshooting, and payload operations.
+        </p>
+      </div>
+
+      {pinned.length > 0 && (
+        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+          {pinned.slice(0, 6).map((t) => {
+            const conf = CATEGORY_CONFIG[t.category] ?? {
+              color: "text-foreground",
+              label: t.category,
+              ring: "ring-border/40 bg-muted",
+            }
+            return (
+              <button
+                key={t.id}
+                onClick={() => sendMessage(t.prompt)}
+                className="group flex items-start gap-2.5 rounded-xl border border-border/40 bg-card/50 px-3 py-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:shadow-md"
+              >
+                <div
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md ring-1",
+                    conf.ring,
+                  )}
+                >
+                  <Sparkles className={cn("h-3.5 w-3.5", conf.color)} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-body-sm font-medium text-foreground group-hover:text-primary">
+                    {t.label}
+                  </div>
+                  <div className="mt-0.5 line-clamp-1 text-micro text-muted-foreground">
+                    {t.description}
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      <Button
+        onClick={onCreate}
+        className="gap-2 bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
+      >
+        <MessageSquarePlus className="h-4 w-4" />
+        Start Blank Conversation
+      </Button>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Fresh conversation prompt panel (active conv, no messages)        */
+/* ------------------------------------------------------------------ */
+
+function FreshConversationPrompt({
+  pinned,
+  sendMessage,
+  onOpenResources,
+}: {
+  pinned: Template[]
+  sendMessage: (prompt: string) => void
+  onOpenResources: () => void
+}) {
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 py-6 text-center">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/40 ring-1 ring-border/40">
+        <Bot className="h-6 w-6 text-muted-foreground/60" />
       </div>
       <div>
-        <h3 className="text-heading-md">{title}</h3>
-        <p className="mt-1 text-body-sm text-muted-foreground max-w-sm">{description}</p>
+        <h3 className="text-heading-md">Ready for instructions</h3>
+        <p className="mt-1 text-body-sm text-muted-foreground">
+          Type a prompt below or pick a starter below to begin.
+        </p>
+      </div>
+      {pinned.length > 0 && (
+        <div className="flex flex-wrap justify-center gap-1.5">
+          {pinned.slice(0, 5).map((t) => (
+            <button
+              key={t.id}
+              onClick={() => sendMessage(t.prompt)}
+              className="rounded-full border border-border/50 bg-card px-3 py-1.5 text-micro text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/5 hover:text-foreground"
+            >
+              {t.label}
+            </button>
+          ))}
+          <button
+            onClick={onOpenResources}
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border/60 px-3 py-1.5 text-micro text-muted-foreground hover:border-primary/40 hover:text-primary"
+          >
+            <Plus className="h-3 w-3" />
+            More
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Progress bubble (assistant working with streaming events)         */
+/* ------------------------------------------------------------------ */
+
+function ProgressBubble({
+  events,
+  currentIndex,
+}: {
+  events: ProgressEvent[]
+  currentIndex: number
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <Avatar className="h-7 w-7 shrink-0 ring-2 ring-primary/20">
+        <AvatarFallback className="bg-primary/10 text-primary text-micro">
+          <Bot className="h-3.5 w-3.5" />
+        </AvatarFallback>
+      </Avatar>
+      <div className="w-full max-w-md rounded-xl border border-primary/20 bg-gradient-to-br from-primary/[0.08] to-primary/[0.02] px-4 py-3 shadow-sm">
+        {events.length > 0 ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-body-sm text-primary">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>Working on your request…</span>
+            </div>
+            <div className="mt-3 space-y-1.5">
+              {events.slice(0, currentIndex + 1).map((event, idx) => (
+                <div key={idx} className="flex items-start gap-2 text-micro">
+                  <div
+                    className={cn(
+                      "mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full",
+                      idx === currentIndex ? "animate-pulse bg-primary" : "bg-success",
+                    )}
+                  />
+                  <div className="flex-1">
+                    {event.type === "step" && (
+                      <span className="text-foreground/80">{event.step}</span>
+                    )}
+                    {event.type === "tool_start" && (
+                      <span className="text-foreground/80">
+                        Running{" "}
+                        <code className="font-mono text-primary">{event.toolName}</code>
+                      </span>
+                    )}
+                    {event.type === "tool_complete" && (
+                      <span className="text-success">
+                        ✓ <code className="font-mono">{event.toolName}</code> completed
+                      </span>
+                    )}
+                    {event.type === "tool_error" && (
+                      <span className="text-destructive">
+                        ✗ <code className="font-mono">{event.toolName}</code> failed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-body-sm text-primary">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>Processing…</span>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1277,11 +1847,14 @@ function MessageBubble({
 
   if (isUser) {
     return (
-      <div className="flex items-start gap-3 justify-end">
-        <div className="max-w-[75%] rounded-xl rounded-br-sm bg-primary px-4 py-3 text-primary-foreground">
-          <p className="text-body-sm">{msg.content}</p>
-          <p className="mt-1.5 text-micro opacity-50">
-            {new Date(msg.timestamp).toLocaleTimeString()}
+      <div className="flex items-start justify-end gap-3">
+        <div className="max-w-[78%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+          <p className="whitespace-pre-wrap text-body-sm leading-relaxed">{msg.content}</p>
+          <p className="mt-1 text-[10px] opacity-50">
+            {new Date(msg.timestamp).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
           </p>
         </div>
         <Avatar className="h-7 w-7 shrink-0">
@@ -1317,22 +1890,26 @@ function AssistantMessage({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <Avatar className="h-7 w-7 shrink-0">
+      <Avatar className="h-7 w-7 shrink-0 ring-1 ring-primary/20">
         <AvatarFallback className="bg-primary/10 text-primary text-micro">
           <Bot className="h-3.5 w-3.5" />
         </AvatarFallback>
       </Avatar>
-      <div className="group max-w-[80%] rounded-xl rounded-bl-sm bg-muted/60 border border-border/50 px-4 py-3">
-        <pre className="whitespace-pre-wrap font-mono text-body-sm text-foreground/90 leading-relaxed">
+      <div className="group max-w-[80%] rounded-2xl rounded-bl-md border border-border/40 bg-muted/40 px-4 py-2.5">
+        <div className="whitespace-pre-wrap font-mono text-body-sm leading-relaxed text-foreground/90">
           {content}
-        </pre>
-        <div className="mt-2 flex items-center justify-between">
-          <span className="text-micro text-muted-foreground/60">
-            {new Date(timestamp).toLocaleTimeString()}
+        </div>
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <span className="text-[10px] text-muted-foreground/60">
+            {new Date(timestamp).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
           </span>
           <button
             onClick={() => onCopy(content)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+            className="rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+            title="Copy"
           >
             <Copy className="h-3 w-3" />
           </button>
@@ -1358,63 +1935,52 @@ function ToolCallBubble({ call }: { call: ToolCall }) {
   const status = call.status || "executing"
   const isExecuting = status === "executing"
   const isCompleted = status === "completed"
-  const isFailed = status === "failed"
+
+  const tone = isExecuting
+    ? { ring: "border-info/30 bg-info/5", text: "text-info", Icon: Loader2 }
+    : isCompleted
+      ? { ring: "border-success/30 bg-success/5", text: "text-success", Icon: CheckCircle2 }
+      : { ring: "border-destructive/30 bg-destructive/5", text: "text-destructive", Icon: XCircle }
 
   return (
-    <div className="flex items-start gap-3 ml-10">
-      <Collapsible open={expanded} onOpenChange={setExpanded}>
-        <div className={cn(
-          "rounded-xl border overflow-hidden transition-all",
-          isExecuting ? "border-info/20 bg-info/5" : isCompleted ? "border-success/20 bg-success/5" : "border-destructive/20 bg-destructive/5"
-        )}>
+    <div className="ml-10 flex items-start gap-3">
+      <Collapsible open={expanded} onOpenChange={setExpanded} className="w-full">
+        <div className={cn("overflow-hidden rounded-xl border", tone.ring)}>
           <CollapsibleTrigger
             render={<button type="button" />}
-            className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-muted/50 transition-colors"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/30"
           >
-            <div className="flex items-center gap-2">
-              {isExecuting ? (
-                <Loader2 className="h-3 w-3 text-info shrink-0 animate-spin" />
-              ) : isCompleted ? (
-                <CheckCircle2 className="h-3 w-3 text-success shrink-0" />
-              ) : (
-                <XCircle className="h-3 w-3 text-destructive shrink-0" />
-              )}
-              <span className={cn(
-                "text-micro font-medium",
-                isExecuting ? "text-info" : isCompleted ? "text-success" : "text-destructive"
-              )}>
-                {isExecuting ? "Executing" : isCompleted ? "Completed" : "Failed"}
-              </span>
-            </div>
-            <code className={cn(
-              "rounded px-1.5 py-0.5 font-mono text-micro",
-              isExecuting ? "bg-info/10 text-info-foreground" : isCompleted ? "bg-success/10 text-success-foreground" : "bg-destructive/10 text-destructive-foreground"
-            )}>
+            <tone.Icon
+              className={cn("h-3.5 w-3.5 shrink-0", tone.text, isExecuting && "animate-spin")}
+            />
+            <span className={cn("text-micro font-medium", tone.text)}>
+              {isExecuting ? "Executing" : isCompleted ? "Tool call" : "Failed"}
+            </span>
+            <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-micro">
               {call.name}
             </code>
             {isExecuting && (
-              <div className="flex items-center gap-1.5">
-                <div className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
-                <div className="h-1.5 w-1.5 rounded-full bg-info animate-pulse delay-100" />
-                <div className="h-1.5 w-1.5 rounded-full bg-info animate-pulse delay-200" />
+              <div className="flex items-center gap-1">
+                <div className="h-1 w-1 animate-pulse rounded-full bg-info" />
+                <div className="h-1 w-1 animate-pulse rounded-full bg-info delay-100" />
+                <div className="h-1 w-1 animate-pulse rounded-full bg-info delay-200" />
               </div>
             )}
-            <span className="ml-auto">
-              {expanded ? (
-                <ChevronDown className="h-3 w-3 text-muted-foreground/50" />
-              ) : (
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+            <ChevronRight
+              className={cn(
+                "ml-auto h-3 w-3 text-muted-foreground/50 transition-transform",
+                expanded && "rotate-90",
               )}
-            </span>
+            />
           </CollapsibleTrigger>
           <CollapsibleContent>
-            <Separator className="bg-border/50" />
-            <div className="p-3 space-y-2">
-              <div className="flex items-center gap-2 text-micro text-muted-foreground">
+            <Separator className="bg-border/40" />
+            <div className="space-y-2 p-3">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
                 <Terminal className="h-3 w-3" />
                 <span>Arguments</span>
               </div>
-              <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap rounded-lg bg-background/50 px-3 py-2 font-mono text-micro text-foreground">
+              <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap rounded-lg bg-background/70 px-3 py-2 font-mono text-micro text-foreground/90">
                 {args}
               </pre>
             </div>
@@ -1448,21 +2014,21 @@ function ToolResultBubble({
   const isLong = formatted.length > 300
 
   return (
-    <div className="flex items-start gap-3 ml-10">
-      <Collapsible open={expanded} onOpenChange={setExpanded}>
+    <div className="ml-10 flex items-start gap-3">
+      <Collapsible open={expanded} onOpenChange={setExpanded} className="w-full">
         <div
           className={cn(
-            "rounded-xl border overflow-hidden",
+            "overflow-hidden rounded-xl border",
             isError
-              ? "border-destructive/20 bg-destructive/5"
-              : "border-success/20 bg-success/5",
+              ? "border-destructive/30 bg-destructive/5"
+              : "border-success/30 bg-success/5",
           )}
         >
-          <div className="flex items-center gap-2 px-4 py-2.5">
+          <div className="flex items-center gap-2 px-3 py-2">
             {isError ? (
-              <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
             ) : (
-              <CheckCircle2 className="h-3 w-3 text-success shrink-0" />
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
             )}
             <span
               className={cn(
@@ -1472,20 +2038,21 @@ function ToolResultBubble({
             >
               {isError ? "Tool error" : "Tool result"}
             </span>
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-micro">
+            <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-micro">
               {result.name}
             </code>
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto flex items-center gap-0.5">
               <button
                 onClick={() => onCopy(result.content)}
-                className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
+                className="rounded p-1 text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+                title="Copy"
               >
                 <Copy className="h-3 w-3" />
               </button>
               {isLong && (
                 <CollapsibleTrigger
                   render={<button type="button" />}
-                  className="text-muted-foreground hover:text-foreground transition-colors p-0.5"
+                  className="rounded p-1 text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
                 >
                   {expanded ? (
                     <ChevronDown className="h-3 w-3" />
@@ -1497,7 +2064,7 @@ function ToolResultBubble({
             </div>
           </div>
           <Separator className={isError ? "bg-destructive/10" : "bg-success/10"} />
-          <pre className="max-h-[300px] overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-micro text-muted-foreground">
+          <pre className="max-h-[300px] overflow-auto whitespace-pre-wrap px-3 py-2 font-mono text-micro text-muted-foreground">
             {isLong && !expanded ? formatted.slice(0, 300) + "…" : formatted}
           </pre>
         </div>

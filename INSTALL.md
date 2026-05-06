@@ -128,21 +128,24 @@ ADMIN_PASSWORD=your_secure_password
 
 ```env
 # AI Provider Configuration (choose one)
-# Option 1: OpenRouter (Recommended)
+# Option 1: xAI Grok (Recommended — default provider)
+XAI_API_KEY=your-xai-grok-api-key
+XAI_BASE_URL=https://api.x.ai/v1
+XAI_MODEL=grok-3
+
+# Option 2: OpenRouter
 OPENROUTER_API_KEY=your-openrouter-api-key
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
-
-# Option 2: xAI Grok (for ShadowGrok)
-SHADOWGROK_ENABLED=false
-XAI_API_KEY=your-xai-api-key
-XAI_BASE_URL=https://api.x.ai/v1
-XAI_MODEL=grok-4.20-reasoning
 
 # Option 3: Azure OpenAI
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-azure-openai-api-key
 AZURE_OPENAI_DEPLOYMENT=gpt-4o
+
+# ShadowGrok Settings (uses xAI Grok)
+SHADOWGROK_ENABLED=false
+SHADOWGROK_REQUIRE_APPROVAL=true
 
 # Hysteria 2 Integration
 HYSTERIA_TRAFFIC_API_BASE_URL=http://127.0.0.1:25000

@@ -115,7 +115,7 @@ function FocusRing({ children, ringColor = "primary", className, ...props }: Foc
 }
 
 /* Pressable - Element with press/scale effect */
-interface PressableProps extends React.HTMLAttributes<HTMLDivElement> {
+interface PressableProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'translate'> {
   children: React.ReactNode
   scale?: boolean
   translate?: boolean

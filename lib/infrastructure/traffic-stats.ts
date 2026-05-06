@@ -46,8 +46,8 @@ export class TrafficStatsCollector {
   private readonly cacheTTL = 5000 // 5 seconds cache
 
   constructor() {
-    this.baseUrl = serverEnv.HYSTERIA_TRAFFIC_API_BASE_URL
-    this.secret = serverEnv.HYSTERIA_TRAFFIC_API_SECRET
+    this.baseUrl = serverEnv().HYSTERIA_TRAFFIC_API_BASE_URL
+    this.secret = serverEnv().HYSTERIA_TRAFFIC_API_SECRET
     this.cache = new Map()
   }
 
@@ -56,9 +56,9 @@ export class TrafficStatsCollector {
    */
   private async fetchFromAPI(endpoint: string, options: RequestInit = {}): Promise<unknown> {
     const url = `${this.baseUrl}${endpoint}`
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string> || {}),
     }
 
     if (this.secret) {

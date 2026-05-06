@@ -5,9 +5,18 @@
  * when tool calling fails or returns errors.
  */
 
-import { openai, createOpenAI } from '@ai-sdk/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import { generateText } from 'ai';
 import { serverEnv } from '@/lib/env';
+
+// Default Grok client — replaces OpenAI as the primary provider
+function createGrokClient(apiKey?: string) {
+  const env = serverEnv();
+  return createOpenAI({
+    baseURL: env.XAI_BASE_URL,
+    apiKey: apiKey || env.XAI_API_KEY,
+  });
+}
 
 export interface ProviderConfig {
   name: string;
@@ -95,13 +104,13 @@ export function getAvailableProviders(): ProviderConfig[] {
     });
   }
 
-  // Default OpenAI (last resort)
+  // Default Grok/xAI (last resort — replaces OpenAI)
   providers.push({
-    name: 'openai',
+    name: 'grok',
     priority: 5,
     isEnabled: true,
-    model: 'gpt-4o-mini',
-    client: openai,
+    model: env.XAI_MODEL,
+    client: createGrokClient(),
   });
 
   // Sort by priority
@@ -129,7 +138,7 @@ export async function executeWithFallback(
       maxRetries: 3,
       retryDelay: 1000,
       enableFallback: true,
-      fallbackProviders: ['azure', 'openrouter', 'legacy', 'openai'],
+      fallbackProviders: ['xai', 'grok', 'azure', 'openrouter', 'legacy'],
     },
   } = options;
 

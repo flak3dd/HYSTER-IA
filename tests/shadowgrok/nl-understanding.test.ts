@@ -6,8 +6,7 @@
  * Tests NL prompt interpretation across 7 difficulty levels.
  *
  * API keys — set at least one in `.env` / `.env.local` (tests load via Jest/Next env):
- *   - `XAI_API_KEY` — xAI Grok (ShadowGrok default when configured)
- *   - `OPENAI_API_KEY` — OpenAI-compatible endpoints
+ *   - `XAI_API_KEY` — xAI Grok (default provider)
  *   - `LLM_API_KEY` — legacy/direct LLM provider key
  * If none are set, this suite is skipped (`describe.skip`).
  *
@@ -22,7 +21,6 @@ import { createTestOperator } from '../fixtures/test-data'
 
 const hasApiKey = !!(
   process.env.XAI_API_KEY ||
-  process.env.OPENAI_API_KEY ||
   process.env.LLM_API_KEY ||
   process.env.AZURE_OPENAI_API_KEY ||
   process.env.OPENROUTER_API_KEY

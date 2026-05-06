@@ -160,15 +160,20 @@ HYSTERIA_TRAFFIC_API_SECRET=
 # --- Hysteria egress (for agent outbound HTTP) ---
 HYSTERIA_EGRESS_PROXY_URL=socks5://127.0.0.1:1080
 
-# --- LLM provider (OpenRouter recommended) ---
+# --- LLM provider (xAI Grok is the default) ---
+XAI_API_KEY=your-xai-grok-api-key
+XAI_BASE_URL=https://api.x.ai/v1
+XAI_MODEL=grok-3
+
+# Alternative: OpenRouter
 OPENROUTER_API_KEY=your-openrouter-api-key
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
 
-# Alternative: Direct OpenAI (fallback)
-LLM_PROVIDER_BASE_URL=https://api.openai.com/v1
+# Alternative: Legacy/custom OpenAI-compatible endpoint
+LLM_PROVIDER_BASE_URL=https://api.x.ai/v1
 LLM_PROVIDER_API_KEY=
-LLM_MODEL=gpt-4o
+LLM_MODEL=grok-3
 
 # --- OSINT & Threat Intelligence API Keys ---
 REDIS_URL=redis://localhost:6379  # Optional: for rate limiting and caching
@@ -207,9 +212,16 @@ npm run setup:admin
 
 ### AI Provider Configuration
 
-The LLM layer uses OpenRouter by default, which provides access to multiple AI models through a single API:
+The LLM layer uses **xAI Grok** by default. Set your Grok API key to get started immediately:
 
-**OpenRouter (Recommended):**
+**xAI Grok (Default):**
+```env
+XAI_API_KEY=your-xai-grok-api-key
+XAI_BASE_URL=https://api.x.ai/v1
+XAI_MODEL=grok-3
+```
+
+**Alternative: OpenRouter**
 ```env
 OPENROUTER_API_KEY=your-openrouter-api-key
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
@@ -223,21 +235,14 @@ OpenRouter supports many models including:
 - `meta-llama/llama-3.1-70b-instruct` - Meta Llama 3.1 70B
 - And many more at [openrouter.ai/models](https://openrouter.ai/models)
 
-**Alternative: Direct OpenAI:**
+**Alternative: Legacy/custom OpenAI-compatible endpoint**
 ```env
-LLM_PROVIDER_BASE_URL=https://api.openai.com/v1
-LLM_PROVIDER_API_KEY=your-openai-api-key
-LLM_MODEL=gpt-4o
+LLM_PROVIDER_BASE_URL=https://api.x.ai/v1
+LLM_PROVIDER_API_KEY=your-api-key
+LLM_MODEL=grok-3
 ```
 
-**Alternative: Blackbox AI:**
-```env
-LLM_PROVIDER_BASE_URL=https://api.blackbox.ai/api/chat
-LLM_PROVIDER_API_KEY=your-blackbox-api-key
-LLM_MODEL=blackboxai/openai/gpt-4o
-```
-
-The system automatically prefers OpenRouter configuration if available, falling back to legacy LLM configuration if not.
+The system automatically prefers xAI Grok if `XAI_API_KEY` is set, then falls back through Azure OpenAI, OpenRouter, and legacy providers in that order.
 
 ## Scripts
 

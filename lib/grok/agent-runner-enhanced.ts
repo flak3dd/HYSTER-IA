@@ -286,7 +286,11 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
       stepCount,
       toolExecutions: toolResults.length,
     });
-    reasoningTraceSystem.endSession(traceSessionId);
+    reasoningTraceSystem.endSession({
+      action: finalResponse.includes("paused") ? "pause_execution" : "complete_execution",
+      confidence: 0.9,
+      reasoning: `Task execution completed with ${stepCount} steps and ${toolResults.length} tool executions`
+    });
 
     await prisma.agentTask.update({
       where: { id: agentTask.id },
@@ -314,7 +318,11 @@ export async function runShadowGrokAgent(options: RunAgentOptions) {
       executionId: execution.id,
       error: error.message,
     });
-    reasoningTraceSystem.endSession(traceSessionId);
+    reasoningTraceSystem.endSession({
+      action: "error",
+      confidence: 0,
+      reasoning: `Execution failed: ${error.message}`
+    });
 
     await prisma.shadowGrokExecution.update({
       where: { id: execution.id },

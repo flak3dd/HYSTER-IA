@@ -8,18 +8,18 @@ function toBeaconZod(row: CompromisedHost): Beacon {
     implantId: row.implantId ?? "",
     hostname: row.hostname,
     ipAddress: row.ipAddress,
-    os: row.os,
-    osVersion: row.osVersion ?? undefined,
+    os: row.os ?? "Unknown",
+    osVersion: undefined, // Not available in CompromisedHost model
     domain: row.domain ?? undefined,
-    user: row.user,
+    user: "Unknown", // Not available in CompromisedHost model
     privileges: row.privileges as Beacon["privileges"],
     lastCheckin: row.lastSeen.getTime(),
     status: determineBeaconStatus(row.lastSeen),
-    implantType: row.implantType ?? "Unknown",
-    egressNode: row.egressNode ?? undefined,
-    runningTasks: row.runningTasks ?? 0,
+    implantType: "Unknown", // Not available in CompromisedHost model
+    egressNode: undefined, // Not available in CompromisedHost model
+    runningTasks: 0, // Not available in CompromisedHost model
     firstSeen: row.firstCompromised.getTime(),
-    nodeId: row.nodeId ?? undefined,
+    nodeId: undefined, // Not available in CompromisedHost model
     createdAt: row.firstCompromised.getTime(),
     updatedAt: row.lastSeen.getTime(),
   }
@@ -153,7 +153,7 @@ export async function getBeaconById(id: string): Promise<Beacon | null> {
 }
 
 export async function getBeaconByImplantId(implantId: string): Promise<Beacon | null> {
-  const row = await prisma.compromisedHost.findUnique({ where: { implantId } })
+  const row = await prisma.compromisedHost.findFirst({ where: { implantId } })
   return row ? toBeaconZod(row) : null
 }
 
@@ -166,16 +166,11 @@ export async function createBeacon(input: BeaconCreate): Promise<Beacon> {
       hostname: parsed.hostname,
       ipAddress: parsed.ipAddress,
       os: parsed.os,
-      osVersion: parsed.osVersion,
       domain: parsed.domain,
-      user: parsed.user,
       privileges: parsed.privileges,
-      implantType: parsed.implantType,
-      egressNode: parsed.egressNode,
-      nodeId: parsed.nodeId,
       firstCompromised: now,
       lastSeen: now,
-      runningTasks: 0,
+      // Note: osVersion, user, implantType, egressNode, nodeId, runningTasks not in CompromisedHost model
     },
   })
   return toBeaconZod(row)
@@ -194,10 +189,10 @@ export async function updateBeacon(id: string, input: BeaconUpdate): Promise<Bea
 }
 
 export async function updateBeaconCheckin(implantId: string): Promise<Beacon | null> {
-  const row = await prisma.compromisedHost.update({
+  const row = await prisma.compromisedHost.updateMany({
     where: { implantId },
     data: { lastSeen: new Date() },
-  }).catch(() => null)
+  }).then(() => prisma.compromisedHost.findFirst({ where: { implantId } }))
   return row ? toBeaconZod(row) : null
 }
 

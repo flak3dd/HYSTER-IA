@@ -65,7 +65,7 @@ function StatusIndicator({
       )}
       {...props}
     >
-      {showIcon && icons[variant]}
+      {showIcon && icons[variant ?? "stable"]}
       <span>{label}</span>
     </div>
   )
@@ -105,8 +105,8 @@ function StatusDot({
     <div
       className={cn(
         "rounded-full transition-all duration-200",
-        sizeClasses[size],
-        colorClasses[variant],
+        sizeClasses[size ?? "default"],
+        colorClasses[variant ?? "stable"],
         pulse && "animate-pulse-subtle",
         className
       )}

@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -42,12 +43,20 @@ function LoginForm() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
+  const [disclaimerChecked, setDisclaimerChecked] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
+
+    if (!disclaimerChecked) {
+      const msg = "You must agree to the disclaimer to continue."
+      setError(msg)
+      toast.error(msg)
+      return
+    }
 
     startTransition(async () => {
       try {
@@ -144,6 +153,22 @@ function LoginForm() {
             </div>
           </div>
 
+          <div className="flex items-start gap-3 rounded-lg border border-border/50 bg-muted/30 px-3 py-3">
+            <Checkbox
+              id="disclaimer"
+              checked={disclaimerChecked}
+              onCheckedChange={(checked) => setDisclaimerChecked(checked === true)}
+              className="mt-0.5 shrink-0"
+            />
+            <Label
+              htmlFor="disclaimer"
+              className="cursor-pointer text-body-sm font-normal leading-relaxed text-muted-foreground"
+            >
+              I will not use this for illegal purposes. I understand that all
+              activity is logged and monitored for compliance.
+            </Label>
+          </div>
+
           {error && (
             <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-body-sm text-destructive">
               <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
@@ -151,7 +176,7 @@ function LoginForm() {
             </div>
           )}
 
-          <Button type="submit" disabled={pending} size="lg" className="mt-1 w-full">
+          <Button type="submit" disabled={pending || !disclaimerChecked} size="lg" className="mt-1 w-full">
             {pending ? (
               <span className="flex items-center gap-2">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />

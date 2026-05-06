@@ -35,7 +35,7 @@ export async function createNotification(input: NotificationCreate): Promise<Not
         type: input.type,
         title: input.title,
         message: input.message,
-        metadata: input.metadata || {},
+        metadata: input.metadata || {} as any,
       },
     })
 

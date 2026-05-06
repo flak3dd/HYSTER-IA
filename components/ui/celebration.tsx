@@ -4,6 +4,7 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 import { CheckCircle2, Sparkles, Trophy, Star } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 /* Success Checkmark Animation */
 interface SuccessCheckmarkProps {

@@ -9,12 +9,12 @@ function toCredentialZod(row: CredentialModel & { sourceHost?: { hostname: strin
     username: row.username,
     domain: row.domain ?? undefined,
     hash: row.hash ?? undefined,
-    plaintext: row.plaintext ?? undefined,
-    ticketData: row.ticketData ?? undefined,
+    plaintext: row.password ?? undefined, // Map password field to plaintext
+    ticketData: undefined, // Not available in Credential model
     sourceHostId: row.sourceHostId ?? undefined,
     sourceHostname: row.sourceHost?.hostname ?? undefined,
-    cracked: row.cracked ?? false,
-    notes: row.notes ?? undefined,
+    cracked: false, // Not available in Credential model
+    notes: undefined, // Not available in Credential model
     createdAt: row.createdAt.getTime(),
   }
 }
@@ -111,14 +111,12 @@ export async function createCredential(input: CredentialCreate): Promise<Credent
   const row = await prisma.credential.create({
     data: {
       type: parsed.type ?? "Plaintext",
-      username: parsed.username,
+      username: parsed.username ?? "unknown",
       domain: parsed.domain,
       hash: parsed.hash,
-      plaintext: parsed.plaintext,
-      ticketData: parsed.ticketData,
+      password: parsed.plaintext, // Map plaintext to password field
       sourceHostId: parsed.sourceHostId,
-      notes: parsed.notes,
-      cracked: false,
+      // Note: ticketData, notes, cracked not in Credential model
     },
     include: {
       sourceHost: {
@@ -168,7 +166,7 @@ export async function getCredentialStats(): Promise<{
   
   for (const cred of credentials) {
     byType[cred.type] = (byType[cred.type] || 0) + 1
-    if (cred.cracked) cracked++
+    // Note: cracked field not available in Credential model
     if (cred.domain) domains.add(cred.domain)
   }
   

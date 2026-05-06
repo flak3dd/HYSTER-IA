@@ -15,7 +15,7 @@ export interface EmailNotification {
  */
 export async function sendEmailNotification(email: EmailNotification): Promise<boolean> {
   try {
-    const resendApiKey = serverEnv.RESEND_API_KEY
+    const resendApiKey = process.env.RESEND_API_KEY
     if (!resendApiKey) {
       emailNotifierLogger.warn('Resend API key not configured, skipping email notification')
       return false
@@ -28,7 +28,7 @@ export async function sendEmailNotification(email: EmailNotification): Promise<b
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: serverEnv.MAIL_FROM || 'noreply@hysteria2.local',
+        from: process.env.MAIL_FROM || 'noreply@hysteria2.local',
         to: email.to,
         subject: email.subject,
         html: email.html,

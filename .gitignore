@@ -100,3 +100,4 @@ email-attachments/
 
 # Backups
 *.backup
+.codebuddy

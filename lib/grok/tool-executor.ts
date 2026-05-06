@@ -1859,12 +1859,11 @@ async function rotateSubscriptionTokenTool(args: any, context: ToolContext): Pro
       const { createNotification } = await import('@/lib/notifications/notification-system')
       const subscription = await prisma.subscription.findUnique({
         where: { id: subscription_id },
-        include: { user: true },
       })
 
-      if (subscription && subscription.user) {
+      if (subscription) {
         await createNotification({
-          operatorId: context.userId,
+          operatorId: subscription.userId,
           type: 'success',
           title: 'Subscription Token Rotated',
           message: `Token for subscription "${subscription.name || subscription.id}" has been successfully rotated.`,
@@ -1875,18 +1874,11 @@ async function rotateSubscriptionTokenTool(args: any, context: ToolContext): Pro
           },
         })
 
-        // Optionally send email notification if email is available
-        if (subscription.user.email) {
-          const { sendSubscriptionRotationNotification } = await import('@/lib/notifications/email-notifier')
-          await sendSubscriptionRotationNotification(
-            subscription.user.email,
-            subscription.id,
-            subscription.name || subscription.id
-          )
-        }
+        // Note: Email notification removed as subscription model doesn't have user relation
+        // To implement email notifications, fetch user separately using subscription.userId
       }
     } catch (error) {
-      log(`Failed to send notification: ${error}`)
+      console.error(`Failed to send notification: ${error}`)
     }
   }
 

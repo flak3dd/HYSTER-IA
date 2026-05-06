@@ -64,7 +64,7 @@ function Container({
 }
 
 /* Responsive Section - For section-level containers */
-interface SectionProps extends React.HTMLAttributes<HTMLSectionElement> {
+interface SectionProps extends React.HTMLAttributes<HTMLElement> {
   size?: VariantProps<typeof containerVariants>["size"]
   padding?: VariantProps<typeof containerVariants>["padding"]
   background?: "default" | "muted" | "accent" | "transparent"

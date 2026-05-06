@@ -73,10 +73,16 @@ const ServerEnvSchema = z.object({
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   OPENROUTER_MODEL: z.string().min(1).default("anthropic/claude-3.5-sonnet"),
 
-  // Legacy LLM Configuration (fallback)
-  LLM_PROVIDER_BASE_URL: z.string().url().or(z.literal("")).default("https://api.openai.com/v1"),
+  // Anthropic Configuration
+  ANTHROPIC_API_KEY: z.string().min(1).or(z.literal("")).optional(),
+
+  // Google AI Configuration
+  GOOGLE_API_KEY: z.string().min(1).or(z.literal("")).optional(),
+
+  // Legacy LLM Configuration (fallback — now defaults to xAI Grok instead of OpenAI)
+  LLM_PROVIDER_BASE_URL: z.string().url().or(z.literal("")).default("https://api.x.ai/v1"),
   LLM_PROVIDER_API_KEY: z.string().min(1).or(z.literal("")).optional(),
-  LLM_MODEL: z.string().min(1).or(z.literal("")).default("gpt-4o-mini"),
+  LLM_MODEL: z.string().min(1).or(z.literal("")).default("grok-3"),
   LLM_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.2),
 
   // SSH Public Key for Server Access

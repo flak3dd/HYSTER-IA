@@ -2,11 +2,17 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { SessionHistory } from './session-history'
 import { WorkflowTemplates } from './workflow-templates'
 import { WorkflowProgress } from './workflow-progress'
@@ -36,6 +42,9 @@ import {
   Download,
   Upload,
   Brain,
+  MoreHorizontal,
+  Search,
+  Activity,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -55,26 +64,66 @@ interface WorkflowSession {
 }
 
 const QUICK_ACTIONS = [
-  { icon: Server, label: 'Create Node', prompt: 'Create a new Hysteria2 node', color: 'text-emerald-400' },
-  { icon: Users, label: 'Add User', prompt: 'Create a new client user', color: 'text-blue-400' },
-  { icon: Settings, label: 'Check Status', prompt: 'Check system status', color: 'text-violet-400' },
-  { icon: RefreshCw, label: 'Restart Service', prompt: 'Restart the Hysteria2 service', color: 'text-amber-400' },
-  { icon: Zap, label: 'Generate Config', prompt: 'Generate client configuration', color: 'text-cyan-400' },
-  { icon: Sparkles, label: 'Complex Task', prompt: 'I need help with a complex operation', color: 'text-pink-400' },
-  { icon: Command, label: 'OSINT Scan', prompt: 'Perform OSINT domain enumeration for example.com', color: 'text-orange-400' },
-  { icon: AlertCircle, label: 'Threat Analysis', prompt: 'Analyze threats for IP 8.8.8.8', color: 'text-red-400' },
+  {
+    icon: Server,
+    label: 'Create Node',
+    prompt: 'Create a new Hysteria2 node',
+    desc: 'Provision new infrastructure',
+  },
+  {
+    icon: Users,
+    label: 'Add User',
+    prompt: 'Create a new client user',
+    desc: 'Add client with quota & access',
+  },
+  {
+    icon: Settings,
+    label: 'Check Status',
+    prompt: 'Check system status',
+    desc: 'Health & service summary',
+  },
+  {
+    icon: RefreshCw,
+    label: 'Restart',
+    prompt: 'Restart the Hysteria2 service',
+    desc: 'Service lifecycle controls',
+  },
+  {
+    icon: Zap,
+    label: 'Generate Config',
+    prompt: 'Generate client configuration',
+    desc: 'Build a Hysteria2 client config',
+  },
+  {
+    icon: Search,
+    label: 'OSINT Scan',
+    prompt: 'Perform OSINT domain enumeration for example.com',
+    desc: 'Recon & subdomain enum',
+  },
+  {
+    icon: AlertCircle,
+    label: 'Threat Analysis',
+    prompt: 'Analyze threats for IP 8.8.8.8',
+    desc: 'Reputation, IoC & enrichment',
+  },
+  {
+    icon: Sparkles,
+    label: 'Complex Task',
+    prompt: 'I need help with a complex operation',
+    desc: 'Open-ended multi-step request',
+  },
 ]
 
 const SUGGESTIONS = [
-  "Create a new node in us-east-1",
-  "List all active nodes",
-  "Add a new user with 10GB quota",
-  "Check system health status",
-  "Generate config for user",
-  "Show recent activity",
-  "Enumerate subdomains for example.com",
-  "Analyze threats for domain google.com",
-  "Perform multi-step reconnaissance then threat analysis",
+  'Create a new node in us-east-1',
+  'List all active nodes',
+  'Add a new user with 10GB quota',
+  'Check system health status',
+  'Generate config for user',
+  'Show recent activity',
+  'Enumerate subdomains for example.com',
+  'Analyze threats for domain google.com',
+  'Perform multi-step reconnaissance then threat analysis',
 ]
 
 export function WorkflowChat() {
@@ -101,7 +150,6 @@ export function WorkflowChat() {
     inputRef.current?.focus()
   }, [])
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
@@ -127,7 +175,7 @@ export function WorkflowChat() {
       timestamp: new Date(),
     }
 
-    setMessages(prev => [...prev, userMessage])
+    setMessages((prev) => [...prev, userMessage])
     setInput('')
     setShowSuggestions(false)
     setIsLoading(true)
@@ -151,14 +199,17 @@ export function WorkflowChat() {
         const currentStep = currentSession.steps[currentSession.currentStepOrder]
         if (!currentStep) throw new Error('No current step found')
 
-        const respondResponse = await fetch(`/api/workflow/sessions/${currentSession.id}/respond`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            stepId: currentStep.id,
-            response: textToSend,
-          }),
-        })
+        const respondResponse = await fetch(
+          `/api/workflow/sessions/${currentSession.id}/respond`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              stepId: currentStep.id,
+              response: textToSend,
+            }),
+          },
+        )
 
         if (!respondResponse.ok) throw new Error('Failed to send response')
 
@@ -167,8 +218,12 @@ export function WorkflowChat() {
         setSessionStatus(response.session.status)
       }
 
-      const messageType = response.nextAction === 'completed' ? 'success' :
-                         response.nextAction === 'error' ? 'error' : 'text'
+      const messageType =
+        response.nextAction === 'completed'
+          ? 'success'
+          : response.nextAction === 'error'
+            ? 'error'
+            : 'text'
 
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -178,7 +233,7 @@ export function WorkflowChat() {
         type: messageType,
       }
 
-      setMessages(prev => [...prev, aiMessage])
+      setMessages((prev) => [...prev, aiMessage])
 
       if (response.currentStep?.content) {
         const stepMessage: Message = {
@@ -188,7 +243,7 @@ export function WorkflowChat() {
           timestamp: new Date(),
           type: 'info',
         }
-        setMessages(prev => [...prev, stepMessage])
+        setMessages((prev) => [...prev, stepMessage])
       }
 
       if (response.nextAction === 'completed') {
@@ -211,7 +266,7 @@ export function WorkflowChat() {
         timestamp: new Date(),
         type: 'error',
       }
-      setMessages(prev => [...prev, errorMessage])
+      setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
     }
@@ -237,7 +292,7 @@ export function WorkflowChat() {
         timestamp: new Date(),
         type: result.nextAction === 'completed' ? 'success' : 'text',
       }
-      setMessages(prev => [...prev, aiMessage])
+      setMessages((prev) => [...prev, aiMessage])
 
       if (result.nextAction === 'processing') {
         await processSession(sessionId)
@@ -264,13 +319,22 @@ export function WorkflowChat() {
 
       const sessionMessages: Message[] = []
       session.steps.forEach((step: any) => {
-        if (step.type === 'ai_question' || step.type === 'result_display' || step.type === 'error_handling') {
+        if (
+          step.type === 'ai_question' ||
+          step.type === 'result_display' ||
+          step.type === 'error_handling'
+        ) {
           sessionMessages.push({
             id: step.id,
             role: 'ai',
             content: step.content || '',
             timestamp: new Date(step.timestamp),
-            type: step.type === 'error_handling' ? 'error' : step.type === 'result_display' ? 'success' : 'info',
+            type:
+              step.type === 'error_handling'
+                ? 'error'
+                : step.type === 'result_display'
+                  ? 'success'
+                  : 'info',
           })
         } else if (step.type === 'user_response' && step.userResponse) {
           sessionMessages.push({
@@ -367,13 +431,40 @@ export function WorkflowChat() {
   }
 
   const getStatusConfig = () => {
-    const configs: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-      completed: { color: 'border-success/30 bg-success/10 text-success', icon: <CheckCircle className="h-3 w-3" />, label: 'Completed' },
-      failed: { color: 'border-destructive/30 bg-destructive/10 text-destructive', icon: <XCircle className="h-3 w-3" />, label: 'Failed' },
-      processing: { color: 'border-info/30 bg-info/10 text-info', icon: <Loader2 className="h-3 w-3 animate-spin" />, label: 'Processing' },
-      executing: { color: 'border-info/30 bg-info/10 text-info', icon: <Loader2 className="h-3 w-3 animate-spin" />, label: 'Executing' },
-      awaiting_input: { color: 'border-warning/30 bg-warning/10 text-warning', icon: <AlertCircle className="h-3 w-3" />, label: 'Waiting' },
-      idle: { color: 'border-border bg-muted text-muted-foreground', icon: <Bot className="h-3 w-3" />, label: 'Ready' },
+    const configs: Record<
+      string,
+      { color: string; icon: React.ReactNode; label: string }
+    > = {
+      completed: {
+        color: 'border-success/30 bg-success/10 text-success',
+        icon: <CheckCircle className="h-3 w-3" />,
+        label: 'Completed',
+      },
+      failed: {
+        color: 'border-destructive/30 bg-destructive/10 text-destructive',
+        icon: <XCircle className="h-3 w-3" />,
+        label: 'Failed',
+      },
+      processing: {
+        color: 'border-info/30 bg-info/10 text-info',
+        icon: <Loader2 className="h-3 w-3 animate-spin" />,
+        label: 'Processing',
+      },
+      executing: {
+        color: 'border-info/30 bg-info/10 text-info',
+        icon: <Loader2 className="h-3 w-3 animate-spin" />,
+        label: 'Executing',
+      },
+      awaiting_input: {
+        color: 'border-warning/30 bg-warning/10 text-warning',
+        icon: <AlertCircle className="h-3 w-3" />,
+        label: 'Waiting',
+      },
+      idle: {
+        color: 'border-border bg-muted text-muted-foreground',
+        icon: <Activity className="h-3 w-3" />,
+        label: 'Ready',
+      },
     }
     return configs[sessionStatus] || configs.idle
   }
@@ -383,7 +474,7 @@ export function WorkflowChat() {
       try {
         const parsed = JSON.parse(content)
         return (
-          <pre className="bg-muted/60 border border-border/50 p-3 rounded-lg overflow-x-auto font-mono text-micro text-foreground/80">
+          <pre className="mt-1 overflow-x-auto rounded-lg border border-border/50 bg-muted/60 p-3 font-mono text-micro text-foreground/80">
             <code>{JSON.stringify(parsed, null, 2)}</code>
           </pre>
         )
@@ -391,15 +482,32 @@ export function WorkflowChat() {
         // Not valid JSON
       }
     }
-    return <p className="text-body-sm whitespace-pre-wrap">{content}</p>
+    return <p className="whitespace-pre-wrap text-body-sm leading-relaxed">{content}</p>
   }
 
-  const getMessageBorderStyle = (type?: string) => {
+  const getRoleIcon = (type?: string) => {
     switch (type) {
-      case 'success': return 'border-l-2 border-l-success'
-      case 'error': return 'border-l-2 border-l-destructive'
-      case 'info': return 'border-l-2 border-l-info'
-      default: return ''
+      case 'success':
+        return <CheckCircle className="h-3 w-3 text-success" />
+      case 'error':
+        return <XCircle className="h-3 w-3 text-destructive" />
+      case 'info':
+        return <AlertCircle className="h-3 w-3 text-info" />
+      default:
+        return null
+    }
+  }
+
+  const getMessageBorder = (type?: string) => {
+    switch (type) {
+      case 'success':
+        return 'border-success/30'
+      case 'error':
+        return 'border-destructive/30'
+      case 'info':
+        return 'border-info/30'
+      default:
+        return 'border-border/40'
     }
   }
 
@@ -407,75 +515,154 @@ export function WorkflowChat() {
 
   return (
     <>
-      <Card className="flex flex-col shadow-sm" style={{ height: 'calc(100vh - 220px)', minHeight: '500px' }}>
-        <CardHeader className="flex-shrink-0 pb-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                <Sparkles className="h-4 w-4 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-heading-sm">AI Workflow Assistant</CardTitle>
-                <CardDescription className="text-caption">
-                  Natural language workflow orchestration
-                </CardDescription>
-              </div>
+      <Card
+        className="flex flex-col overflow-hidden border-border/60 shadow-sm"
+        style={{ height: 'calc(100vh - 240px)', minHeight: '520px' }}
+      >
+        {/* Header */}
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-gradient-to-b from-muted/40 to-transparent px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
+              <Sparkles className="h-4 w-4 text-primary" />
             </div>
-            <div className="flex items-center gap-1.5">
-              <Badge variant="outline" className={cn("gap-1.5 text-micro", statusConfig.color)}>
-                {statusConfig.icon}
-                {statusConfig.label}
-              </Badge>
-
-              {currentSession && currentSession.steps.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => setShowProgress(!showProgress)}
-                  title="Progress"
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-body-sm font-semibold">AI Workflow Assistant</span>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'gap-1.5 px-2 py-0.5 text-[10px] tracking-wide',
+                    statusConfig.color,
+                  )}
                 >
-                  {showProgress ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setShowProactiveInsights(true)}
-                title="Proactive Intelligence"
-              >
-                <Brain className="h-3.5 w-3.5" />
-              </Button>
-              <WorkflowScheduler />
-              <WorkflowAnalytics />
-              <FunctionDiscovery />
+                  {statusConfig.icon}
+                  {statusConfig.label}
+                </Badge>
+              </div>
+              <p className="text-micro text-muted-foreground">
+                Natural language orchestration · multi-step planning · function tools
+              </p>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap items-center gap-1">
+            {/* Inline action toolbar for desktop */}
+            <div className="hidden items-center gap-0.5 sm:flex">
               <WorkflowTemplates onSelectTemplate={handleSelectTemplate} />
               <SessionHistory
                 currentSessionId={currentSession?.id}
                 onSelectSession={(sessionId) => loadSession(sessionId)}
               />
-              {currentSession && (
-                <>
-                  <Button variant="ghost" size="icon-xs" onClick={exportWorkflow} title="Export workflow">
-                    <Download className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button variant="ghost" size="icon-xs" onClick={importWorkflow} title="Import workflow">
-                    <Upload className="h-3.5 w-3.5" />
-                  </Button>
-                </>
+              <FunctionDiscovery />
+              <WorkflowScheduler />
+              <WorkflowAnalytics />
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setShowProactiveInsights(true)}
+                    />
+                  }
+                >
+                  <Brain className="h-3.5 w-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Proactive intelligence</TooltipContent>
+              </Tooltip>
+              {currentSession && currentSession.steps.length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn(
+                          'h-8 w-8',
+                          showProgress && 'bg-primary/10 text-primary',
+                        )}
+                        onClick={() => setShowProgress(!showProgress)}
+                      />
+                    }
+                  >
+                    {showProgress ? (
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {showProgress ? 'Hide progress' : 'Show progress'}
+                  </TooltipContent>
+                </Tooltip>
               )}
-              <Separator orientation="vertical" className="mx-1 h-5" />
-              <Button variant="outline" size="sm" onClick={startNewSession} className="gap-1.5 text-micro">
-                <Plus className="h-3 w-3" />
-                New Chat
-              </Button>
+
+              {currentSession && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button variant="ghost" size="icon" className="h-8 w-8" />
+                    }
+                  >
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem onClick={exportWorkflow} className="gap-2">
+                      <Download className="h-4 w-4" />
+                      Export workflow
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={importWorkflow} className="gap-2">
+                      <Upload className="h-4 w-4" />
+                      Import workflow
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
+
+            {/* Compact toolbar for mobile: keep dialogs visible, drop labels */}
+            <div className="flex items-center gap-0.5 sm:hidden">
+              <WorkflowTemplates onSelectTemplate={handleSelectTemplate} />
+              <SessionHistory
+                currentSessionId={currentSession?.id}
+                onSelectSession={(sessionId) => loadSession(sessionId)}
+              />
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => setShowProactiveInsights(true)}
+                    />
+                  }
+                >
+                  <Brain className="h-3.5 w-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Insights</TooltipContent>
+              </Tooltip>
+            </div>
+
+            <div className="mx-1 h-5 w-px bg-border/60" />
+
+            <Button
+              variant="default"
+              size="sm"
+              onClick={startNewSession}
+              className="gap-1.5 text-micro shadow-sm shadow-primary/10"
+            >
+              <Plus className="h-3 w-3" />
+              New
+            </Button>
           </div>
-        </CardHeader>
-        <Separator />
-        <CardContent className="flex-1 flex flex-col min-h-0 p-0">
-          {/* Progress View */}
+        </div>
+
+        <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+          {/* Progress timeline */}
           {showProgress && currentSession && (
-            <div className="border-b border-border p-4">
+            <div className="border-b border-border/60 bg-muted/20 p-4">
               <WorkflowProgress
                 steps={currentSession.steps}
                 currentStepOrder={currentSession.currentStepOrder}
@@ -484,120 +671,108 @@ export function WorkflowChat() {
             </div>
           )}
 
-          {/* Messages */}
+          {/* Messages area */}
           <ScrollArea className="flex-1">
-            <div className="p-5 space-y-4">
+            <div className="space-y-4 p-4 sm:p-5">
               {messages.length === 0 && (
-                <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20 mb-4">
-                    <Bot className="h-8 w-8 text-primary" />
-                  </div>
-                  <h3 className="text-heading-lg mb-1">Welcome to AI Workflow</h3>
-                  <p className="text-body-sm text-muted-foreground mb-8 max-w-md">
-                    Tell me what you want to accomplish in plain English. I'll handle the rest.
-                  </p>
-
-                  {/* Quick Actions */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-w-2xl mb-8">
-                    {QUICK_ACTIONS.map((action) => (
-                      <button
-                        key={action.label}
-                        onClick={() => sendMessage(action.prompt)}
-                        disabled={isLoading}
-                        className="flex flex-col items-center gap-2 rounded-xl border border-border/50 bg-card px-4 py-3.5 transition-all hover:border-border hover:bg-muted/50 disabled:opacity-50"
-                      >
-                        <action.icon className={cn("h-4 w-4", action.color)} />
-                        <span className="text-micro font-medium">{action.label}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Suggestions */}
-                  {showSuggestions && (
-                    <div className="w-full max-w-lg">
-                      <p className="text-micro text-muted-foreground/60 mb-2">Try asking:</p>
-                      <div className="flex flex-wrap gap-1.5 justify-center">
-                        {SUGGESTIONS.map((suggestion) => (
-                          <button
-                            key={suggestion}
-                            onClick={() => sendMessage(suggestion)}
-                            disabled={isLoading}
-                            className="rounded-full border border-border/50 bg-card px-3 py-1 text-micro text-muted-foreground hover:text-foreground hover:border-border transition-all disabled:opacity-50"
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Shortcut hint */}
-                  <div className="mt-6 flex items-center gap-1 text-micro text-muted-foreground/40">
-                    <kbd className="rounded border border-border px-1.5 py-0.5 text-micro font-mono">⌘K</kbd>
-                    <span>to focus input</span>
-                  </div>
-                </div>
+                <WelcomeHero
+                  isLoading={isLoading}
+                  onSend={sendMessage}
+                  showSuggestions={showSuggestions}
+                />
               )}
 
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={cn(
-                    "flex gap-3",
-                    message.role === 'user' ? 'justify-end' : 'justify-start',
-                  )}
-                >
-                  {message.role === 'ai' && (
-                    <Avatar className="h-7 w-7 shrink-0">
+              {messages.map((message) => {
+                const roleIcon = getRoleIcon(message.type)
+                if (message.role === 'user') {
+                  return (
+                    <div key={message.id} className="flex items-start justify-end gap-3">
+                      <div className="max-w-[78%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+                        {formatMessage(message.content)}
+                        <p className="mt-1 text-[10px] opacity-50">
+                          {message.timestamp.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      </div>
+                      <Avatar className="h-7 w-7 shrink-0">
+                        <AvatarFallback className="bg-primary text-primary-foreground text-micro">
+                          <User className="h-3.5 w-3.5" />
+                        </AvatarFallback>
+                      </Avatar>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div key={message.id} className="flex items-start gap-3">
+                    <Avatar className="h-7 w-7 shrink-0 ring-1 ring-primary/20">
                       <AvatarFallback className="bg-primary/10 text-primary text-micro">
                         <Bot className="h-3.5 w-3.5" />
                       </AvatarFallback>
                     </Avatar>
-                  )}
-                  <div
-                    className={cn(
-                      "max-w-[75%] rounded-xl px-4 py-3",
-                      message.role === 'user'
-                        ? 'rounded-br-sm bg-primary text-primary-foreground'
-                        : cn('rounded-bl-sm bg-muted/60 border border-border/50', getMessageBorderStyle(message.type)),
-                    )}
-                  >
-                    {formatMessage(message.content)}
-                    <p className="text-micro opacity-50 mt-1.5">
-                      {message.timestamp.toLocaleTimeString()}
-                    </p>
+                    <div
+                      className={cn(
+                        'group max-w-[80%] rounded-2xl rounded-bl-md border bg-muted/40 px-4 py-2.5',
+                        getMessageBorder(message.type),
+                      )}
+                    >
+                      {roleIcon && (
+                        <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wide">
+                          {roleIcon}
+                          <span
+                            className={cn(
+                              'font-medium',
+                              message.type === 'success' && 'text-success',
+                              message.type === 'error' && 'text-destructive',
+                              message.type === 'info' && 'text-info',
+                            )}
+                          >
+                            {message.type === 'success'
+                              ? 'Result'
+                              : message.type === 'error'
+                                ? 'Error'
+                                : message.type === 'info'
+                                  ? 'Step'
+                                  : ''}
+                          </span>
+                        </div>
+                      )}
+                      {formatMessage(message.content)}
+                      <p className="mt-1 text-[10px] text-muted-foreground/60">
+                        {message.timestamp.toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </p>
+                    </div>
                   </div>
-                  {message.role === 'user' && (
-                    <Avatar className="h-7 w-7 shrink-0">
-                      <AvatarFallback className="bg-primary text-primary-foreground text-micro">
-                        <User className="h-3.5 w-3.5" />
-                      </AvatarFallback>
-                    </Avatar>
-                  )}
-                </div>
-              ))}
+                )
+              })}
 
               {isLoading && (
-                <div className="flex gap-3 justify-start">
-                  <Avatar className="h-7 w-7 shrink-0">
+                <div className="flex items-start gap-3">
+                  <Avatar className="h-7 w-7 shrink-0 ring-2 ring-primary/20">
                     <AvatarFallback className="bg-primary/10 text-primary text-micro">
                       <Bot className="h-3.5 w-3.5" />
                     </AvatarFallback>
                   </Avatar>
-                  <div className="rounded-xl rounded-bl-sm bg-muted/60 border border-border/50 px-4 py-3">
-                    <div className="flex items-center gap-2 text-body-sm text-muted-foreground">
+                  <div className="rounded-2xl rounded-bl-md border border-primary/20 bg-gradient-to-br from-primary/[0.08] to-primary/[0.02] px-4 py-2.5">
+                    <div className="flex items-center gap-2 text-body-sm text-primary">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      <span>Processing…</span>
+                      <span>Thinking…</span>
                     </div>
                   </div>
                 </div>
               )}
+
               <div ref={messagesEndRef} />
             </div>
           </ScrollArea>
 
           {/* Input */}
-          <div className="flex-shrink-0 border-t border-border bg-card/50 p-4">
+          <div className="shrink-0 border-t border-border/60 bg-card/80 p-3 sm:p-4">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <input
@@ -606,21 +781,35 @@ export function WorkflowChat() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                  placeholder="Describe what you want to do…"
-                  disabled={isLoading || sessionStatus === 'processing' || sessionStatus === 'executing'}
-                  className="w-full h-10 px-4 pr-10 rounded-xl border border-border bg-background text-body-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 disabled:opacity-50 transition-all"
+                  placeholder="Describe what you want to accomplish in plain English…"
+                  disabled={
+                    isLoading || sessionStatus === 'processing' || sessionStatus === 'executing'
+                  }
+                  className="h-11 w-full rounded-xl border border-border/60 bg-background/60 px-4 pr-10 text-body-sm shadow-inner transition-all placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
                 />
-                {!input && (
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/30 pointer-events-none">
-                    <Command className="h-3.5 w-3.5" />
-                  </div>
+                {!input && !isLoading && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 cursor-help text-muted-foreground/40">
+                          <Command className="h-3.5 w-3.5" />
+                        </div>
+                      }
+                    />
+                    <TooltipContent side="left">⌘K to focus</TooltipContent>
+                  </Tooltip>
                 )}
               </div>
               <Button
                 onClick={() => sendMessage()}
-                disabled={isLoading || !input.trim() || sessionStatus === 'processing' || sessionStatus === 'executing'}
+                disabled={
+                  isLoading ||
+                  !input.trim() ||
+                  sessionStatus === 'processing' ||
+                  sessionStatus === 'executing'
+                }
                 size="icon"
-                className="h-10 w-10 shrink-0 rounded-xl"
+                className="h-11 w-11 shrink-0 rounded-xl bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
               >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -628,6 +817,27 @@ export function WorkflowChat() {
                   <Send className="h-4 w-4" />
                 )}
               </Button>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-micro text-muted-foreground/70">
+              <span>
+                <kbd className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
+                  Enter
+                </kbd>{' '}
+                send ·{' '}
+                <kbd className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
+                  Esc
+                </kbd>{' '}
+                clear
+              </span>
+              {currentSession && (
+                <span className="hidden items-center gap-1 sm:inline-flex">
+                  <Activity className="h-3 w-3" />
+                  Session{' '}
+                  <code className="rounded bg-muted px-1 font-mono">
+                    {currentSession.id.slice(0, 8)}
+                  </code>
+                </span>
+              )}
             </div>
           </div>
         </CardContent>
@@ -639,5 +849,93 @@ export function WorkflowChat() {
         onClose={() => setShowProactiveInsights(false)}
       />
     </>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Welcome hero (no messages yet)                                    */
+/* ------------------------------------------------------------------ */
+
+function WelcomeHero({
+  isLoading,
+  onSend,
+  showSuggestions,
+}: {
+  isLoading: boolean
+  onSend: (prompt: string) => void
+  showSuggestions: boolean
+}) {
+  return (
+    <div className="mx-auto flex max-w-3xl flex-col items-center gap-6 py-8 text-center">
+      <div className="relative">
+        <div
+          aria-hidden
+          className="absolute inset-0 -z-10 rounded-full bg-primary/20 blur-3xl"
+        />
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/30 to-primary/5 ring-1 ring-primary/30">
+          <Bot className="h-8 w-8 text-primary glow-primary" />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <h3 className="text-heading-lg">What should we run today?</h3>
+        <p className="max-w-xl text-body-sm text-muted-foreground">
+          Tell me what you want to accomplish in plain English. I&apos;ll plan the steps, ask
+          clarifying questions, and execute against your infrastructure.
+        </p>
+      </div>
+
+      {/* Quick action grid */}
+      <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
+        {QUICK_ACTIONS.map((action) => (
+          <button
+            key={action.label}
+            onClick={() => onSend(action.prompt)}
+            disabled={isLoading}
+            className="group flex flex-col items-start gap-1.5 rounded-xl border border-border/40 bg-card/50 px-3 py-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 ring-1 ring-primary/20 transition-colors group-hover:bg-primary/20">
+              <action.icon className="h-3.5 w-3.5 text-primary" />
+            </div>
+            <span className="text-body-sm font-medium text-foreground/90 group-hover:text-primary">
+              {action.label}
+            </span>
+            <span className="line-clamp-1 text-[10px] text-muted-foreground/70">
+              {action.desc}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Suggestion chips */}
+      {showSuggestions && (
+        <div className="w-full">
+          <div className="mb-2 flex items-center justify-center gap-2 text-micro text-muted-foreground/60">
+            <span className="h-px w-8 bg-border/60" />
+            <span>Or try a suggestion</span>
+            <span className="h-px w-8 bg-border/60" />
+          </div>
+          <div className="flex flex-wrap justify-center gap-1.5">
+            {SUGGESTIONS.map((suggestion) => (
+              <button
+                key={suggestion}
+                onClick={() => onSend(suggestion)}
+                disabled={isLoading}
+                className="rounded-full border border-border/50 bg-card px-3 py-1.5 text-micro text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/5 hover:text-foreground disabled:opacity-50"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-1.5 text-micro text-muted-foreground/40">
+        <kbd className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
+          ⌘K
+        </kbd>
+        <span>to focus input</span>
+      </div>
+    </div>
   )
 }

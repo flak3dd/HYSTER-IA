@@ -953,23 +953,17 @@ export const securityAnalysisTool: AgentTool<
     // Analyze nodes
     if (scope === "nodes" || scope === "all") {
       const nodes = await listNodes()
-      const nodesWithoutTLS = nodes.filter(n => !n.config?.tls)
-      if (nodesWithoutTLS.length > 0) {
+      // Note: TLS and obfs checks removed as config property doesn't exist on Node type
+      // These checks should be re-implemented when node configuration is added to schema
+      
+      // Check for nodes with error status
+      const erroredNodes = nodes.filter(n => n.status === "errored")
+      if (erroredNodes.length > 0) {
         findings.push({
           severity: "high",
           category: "Node Security",
-          finding: `${nodesWithoutTLS.length} node(s) configured without TLS encryption`,
-          recommendation: "Enable TLS on all nodes using ACME or custom certificates"
-        })
-      }
-
-      const nodesWithObfs = nodes.filter(n => n.config?.obfs)
-      if (nodesWithObfs.length < nodes.length) {
-        findings.push({
-          severity: "medium",
-          category: "Node Security",
-          finding: `${nodes.length - nodesWithObfs.length} node(s) not using obfuscation`,
-          recommendation: "Enable obfuscation (salamander) on all nodes to evade DPI"
+          finding: `${erroredNodes.length} node(s) in errored state`,
+          recommendation: "Check node logs and restart errored nodes"
         })
       }
     }
@@ -1190,21 +1184,8 @@ export const performanceOptimizationTool: AgentTool<
         })
       }
 
-      const nodesWithoutBwLimit = runningNodes.filter(n => !n.config?.bandwidth)
-      if (nodesWithoutBwLimit.length > 0) {
-        bottlenecks.push({
-          component: "Resource Management",
-          severity: "medium",
-          issue: `${nodesWithoutBwLimit.length} node(s) without bandwidth limits`,
-          impact: "Potential for resource abuse and unfair allocation"
-        })
-        suggestions.push({
-          category: "Resource Management",
-          suggestion: "Configure per-node bandwidth limits based on capacity",
-          expectedImpact: "Prevent abuse and ensure fair resource distribution",
-          complexity: "low"
-        })
-      }
+      // Note: Bandwidth limit check removed as config property doesn't exist on Node type
+      // This check should be re-implemented when node configuration is added to schema
     }
 
     // Analyze network

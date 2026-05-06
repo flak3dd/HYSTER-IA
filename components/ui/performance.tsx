@@ -178,7 +178,7 @@ interface DebouncedComponentProps {
 
 function DebouncedComponent({ children, delay = 300, className }: DebouncedComponentProps) {
   const [debouncedChildren, setDebouncedChildren] = React.useState(children)
-  const timeoutRef = React.useRef<NodeJS.Timeout>()
+  const timeoutRef = React.useRef<NodeJS.Timeout | undefined>(undefined)
 
   React.useEffect(() => {
     if (timeoutRef.current) {

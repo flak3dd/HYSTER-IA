@@ -130,7 +130,7 @@ function MobileDrawerTrigger({
   const Comp = asChild ? React.Fragment : "button"
 
   if (asChild && React.isValidElement(children)) {
-    return React.cloneElement(children, {
+    return React.cloneElement(children as React.ReactElement<any>, {
       onClick: (e: React.MouseEvent) => {
         (children as any).props.onClick?.(e)
         // Trigger drawer open

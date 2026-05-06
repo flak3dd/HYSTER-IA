@@ -108,10 +108,11 @@ function DashboardGrid({
     >
       {React.Children.map(children, (child) => {
         if (!React.isValidElement(child)) return child
-        return React.cloneElement(child as React.ReactElement<any>, {
+        const typedChild = child as React.ReactElement<any>
+        return React.cloneElement(typedChild, {
           editable,
-          isDragging: draggedId === child.props.id,
-          isDragOver: dragOverId === child.props.id,
+          isDragging: draggedId === typedChild.props.id,
+          isDragOver: dragOverId === typedChild.props.id,
           onDragStart: handleDragStart,
           onDragOver: handleDragOver,
           onDragLeave: handleDragLeave,

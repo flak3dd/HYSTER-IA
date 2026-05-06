@@ -1,4 +1,4 @@
-import { openai, createOpenAI } from '@ai-sdk/openai'
+import { createOpenAI } from '@ai-sdk/openai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { google } from '@ai-sdk/google'
 import { generateText } from 'ai'
@@ -7,6 +7,15 @@ import { validateToolCalls } from './tool-validator'
 import { executeWithFallback } from './provider-fallback'
 import { normalizeToolCalls } from './tool-normalizer'
 import { createHash } from 'crypto'
+
+// Default Grok client — replaces OpenAI as the primary provider
+function createGrokClient(apiKey?: string) {
+  const env = serverEnv()
+  return createOpenAI({
+    baseURL: env.XAI_BASE_URL,
+    apiKey: apiKey || env.XAI_API_KEY,
+  })
+}
 
 // ============================================================
 // OPTIMIZED LOGGING UTILITY
@@ -411,7 +420,7 @@ export async function chatComplete(options: {
   if (env.AZURE_OPENAI_ENDPOINT && env.AZURE_OPENAI_API_KEY) availableProviders.push('azure')
   if (env.OPENROUTER_API_KEY) availableProviders.push('openrouter')
   if (env.LLM_PROVIDER_API_KEY) availableProviders.push('legacy')
-  availableProviders.push('openai') // Always available as fallback
+  availableProviders.push('grok') // Always available as fallback (xAI Grok)
 
   // Select provider based on preference, health, or priority
   let selectedProvider = preferredProvider
@@ -434,7 +443,7 @@ export async function chatComplete(options: {
         maxRetries: 2,
         retryDelay: 500,
         enableFallback: true,
-        fallbackProviders: ['azure', 'openrouter', 'legacy', 'openai', 'anthropic', 'google'],
+        fallbackProviders: ['xai', 'grok', 'azure', 'openrouter', 'legacy', 'anthropic', 'google'],
       },
     })
 
@@ -641,25 +650,28 @@ export async function chatComplete(options: {
           providerUsed = 'legacy'
         }
         break
-      case 'openai':
+      case 'grok':
       default:
-        selectedModel = openai(model || 'gpt-4o-mini')
-        selectedModelName = model || 'gpt-4o-mini'
-        providerUsed = 'openai'
+        const grokClient = createGrokClient()
+        selectedModel = grokClient(model || env.XAI_MODEL)
+        selectedModelName = model || env.XAI_MODEL
+        providerUsed = 'grok'
     }
 
     // Fallback if selected provider not available
     if (!selectedModel) {
-      aiWarn(`Provider ${selectedProvider} not available, falling back to OpenAI`)
-      selectedModel = openai(model || 'gpt-4o-mini')
-      selectedModelName = model || 'gpt-4o-mini'
-      providerUsed = 'openai'
+      aiWarn(`Provider ${selectedProvider} not available, falling back to Grok`)
+      const grokClient = createGrokClient()
+      selectedModel = grokClient(model || env.XAI_MODEL)
+      selectedModelName = model || env.XAI_MODEL
+      providerUsed = 'grok'
     }
   } catch (error) {
-    aiWarn(`Provider selection failed: ${error}, falling back to OpenAI`)
-    selectedModel = openai(model || 'gpt-4o-mini')
-    selectedModelName = model || 'gpt-4o-mini'
-    providerUsed = 'openai'
+    aiWarn(`Provider selection failed: ${error}, falling back to Grok`)
+    const grokClient = createGrokClient()
+    selectedModel = grokClient(model || env.XAI_MODEL)
+    selectedModelName = model || env.XAI_MODEL
+    providerUsed = 'grok'
   }
 
   try {
