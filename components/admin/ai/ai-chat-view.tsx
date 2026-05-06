@@ -26,6 +26,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  ListChecks,
   MessageSquarePlus,
   Plus,
   Send,
@@ -84,6 +85,8 @@ type ChatMessage = {
   toolCalls?: ToolCall[]
   toolResult?: ToolResult
   timestamp: number
+  clientMessageId?: string
+  pending?: boolean
 }
 
 type Conversation = {
@@ -101,6 +104,42 @@ type Template = {
   description: string
   prompt: string
   category: string
+}
+
+type GuideStep = {
+  id: string
+  title: string
+  outcome: string
+  prompt: string
+}
+
+type DeployProfileId = "docker_compose" | "docker" | "node_runtime" | "static"
+
+type DeployProfileSignal = {
+  id: DeployProfileId
+  label: string
+  detected: boolean
+  evidence: string[]
+}
+
+type DeployGuideContext = {
+  primaryProfile: DeployProfileId
+  profiles: DeployProfileSignal[]
+  scripts: {
+    install: string | null
+    lint: string | null
+    test: string | null
+    build: string | null
+    start: string | null
+  }
+}
+
+type ChatApiResponse = {
+  messages?: ChatMessage[]
+  error?: string
+  errorCode?: string
+  progress?: ProgressEvent[]
+  fromIdempotency?: boolean
 }
 
 /* ------------------------------------------------------------------ */
@@ -127,6 +166,118 @@ const TOOLS_LIST = [
   { name: "get_payload_status", desc: "Check build status", icon: CheckCircle2 },
   { name: "delete_payload", desc: "Delete payload artifacts", icon: Trash2 },
 ]
+
+const DEFAULT_DEPLOY_GUIDE_CONTEXT: DeployGuideContext = {
+  primaryProfile: "node_runtime",
+  profiles: [
+    { id: "docker_compose", label: "Docker Compose", detected: false, evidence: [] },
+    { id: "docker", label: "Docker", detected: false, evidence: [] },
+    { id: "node_runtime", label: "Node Runtime", detected: true, evidence: [] },
+    { id: "static", label: "Static Hosting", detected: false, evidence: [] },
+  ],
+  scripts: {
+    install: "npm ci",
+    lint: "npm run lint",
+    test: "npm run test",
+    build: "npm run build",
+    start: "npm run start",
+  },
+}
+
+const DEPLOY_PROFILE_LABELS: Record<DeployProfileId, string> = {
+  docker_compose: "Docker Compose",
+  docker: "Docker",
+  node_runtime: "Node Runtime",
+  static: "Static Hosting",
+}
+
+function deployStrategyForProfile(profile: DeployProfileId): string {
+  switch (profile) {
+    case "docker_compose":
+      return "Primary deployment target is Docker Compose. Prefer compose build/up workflows and container-level health checks."
+    case "docker":
+      return "Primary deployment target is a standalone Docker image. Prefer docker build/push/run workflow and registry-based rollout."
+    case "static":
+      return "Primary deployment target is static hosting. Focus on asset build, static output verification, and CDN deployment validation."
+    case "node_runtime":
+    default:
+      return "Primary deployment target is direct Node runtime. Focus on package scripts, process manager startup, and runtime health checks."
+  }
+}
+
+function buildAdaptiveGuideSteps(
+  context: DeployGuideContext,
+  selectedProfile: DeployProfileId,
+): GuideStep[] {
+  const profileLabel = DEPLOY_PROFILE_LABELS[selectedProfile]
+  const strategy = deployStrategyForProfile(selectedProfile)
+  const scriptList = [
+    context.scripts.install,
+    context.scripts.lint,
+    context.scripts.test,
+    context.scripts.build,
+  ]
+    .filter(Boolean)
+    .join(" -> ")
+
+  return [
+    {
+      id: "scope",
+      title: "Scope the release",
+      outcome: "Confirm requirements, risks, and deployment checkpoints.",
+      prompt:
+        `You are my release copilot. Step 1 of a complete build and deployment flow.\n` +
+        `Detected primary deployment profile: ${profileLabel}.\n` +
+        `${strategy}\n` +
+        `Inspect this repository and return: (1) release scope, (2) required environments, (3) prerequisites, (4) go/no-go criteria, and (5) clarifying questions before execution.`,
+    },
+    {
+      id: "env",
+      title: "Prepare environment and secrets",
+      outcome: "Create a validated environment and secret matrix.",
+      prompt:
+        `Step 2 of the release flow for ${profileLabel}.\n` +
+        `Build a full environment matrix for local/staging/production based on this repo's code and config.\n` +
+        `Return required env vars, source of truth for each, validation checks, and a red/yellow/green readiness status per environment.`,
+    },
+    {
+      id: "build",
+      title: "Build and quality gates",
+      outcome: "Run deterministic quality gates before deployment.",
+      prompt:
+        `Step 3 of the release flow for ${profileLabel}.\n` +
+        `Use the repository's real scripts/tools and provide an executable gate checklist.\n` +
+        `Preferred sequence from detected scripts: ${scriptList || "install -> lint -> test -> build"}.\n` +
+        `For each gate, include: command, expected output, fail triage, and pass criteria.`,
+    },
+    {
+      id: "staging",
+      title: "Deploy to staging",
+      outcome: "Execute safe staging rollout with smoke tests.",
+      prompt:
+        `Step 4 of the release flow for ${profileLabel}.\n` +
+        `${strategy}\n` +
+        `Provide a staging runbook with exact commands, migration handling, smoke-test checklist, and rollback path. Pause for explicit confirmation before risky actions.`,
+    },
+    {
+      id: "production",
+      title: "Deploy to production",
+      outcome: "Execute controlled production rollout and rollback safety.",
+      prompt:
+        `Step 5 of the release flow for ${profileLabel}.\n` +
+        `Create a controlled production rollout plan with checkpoints, health criteria, rollback triggers, and communication updates.\n` +
+        `Include command-by-command execution and verification order.`,
+    },
+    {
+      id: "post-deploy",
+      title: "Post-deploy verification",
+      outcome: "Close out release with monitoring and summary.",
+      prompt:
+        `Final step of the release flow for ${profileLabel}.\n` +
+        `Provide a post-deploy checklist for logs/metrics, critical journey checks, watch window, incident triggers, and release summary template for stakeholders.`,
+    },
+  ]
+}
 
 /* Relative time formatter for conversation list grouping. */
 function relativeTime(ts: number) {
@@ -168,6 +319,13 @@ function previewSnippet(conv: Conversation): string {
   return text.length > 80 ? text.slice(0, 80) + "…" : text
 }
 
+function createClientMessageId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `msg-${crypto.randomUUID()}`
+  }
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main view                                                         */
 /* ------------------------------------------------------------------ */
@@ -180,6 +338,9 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
   const [sidebarLoading, setSidebarLoading] = useState(true)
+  const [messagesLoading, setMessagesLoading] = useState(false)
+  const [initError, setInitError] = useState<string | null>(null)
+  const [sendError, setSendError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [filterType, setFilterType] = useState<"all" | "recent" | "with-tools" | "tag">("all")
   const [selectedTag, setSelectedTag] = useState<string | null>(null)
@@ -188,6 +349,16 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showConversations, setShowConversations] = useState(true)
   const [showResources, setShowResources] = useState(false)
+  const [resourcesTab, setResourcesTab] = useState<"templates" | "tools" | "stats" | "guide">(
+    "templates",
+  )
+  const [deployGuideContext, setDeployGuideContext] = useState<DeployGuideContext>(
+    DEFAULT_DEPLOY_GUIDE_CONTEXT,
+  )
+  const [deployGuideLoading, setDeployGuideLoading] = useState(false)
+  const [selectedDeployProfile, setSelectedDeployProfile] = useState<DeployProfileId>(
+    DEFAULT_DEPLOY_GUIDE_CONTEXT.primaryProfile,
+  )
   const [messagesPage, setMessagesPage] = useState(1)
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
   const [currentProgressIndex, setCurrentProgressIndex] = useState(0)
@@ -195,6 +366,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const lastRetryRef = useRef<{ prompt: string; clientMessageId: string } | null>(null)
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -260,6 +432,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           prev.map((c) => (c.id === conversationId ? { ...c, tags: updatedTags } : c)),
         )
         toast.success("Tag added")
+      } else {
+        throw new Error("Tag update failed")
       }
     } catch {
       toast.error("Failed to add tag")
@@ -283,6 +457,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           prev.map((c) => (c.id === conversationId ? { ...c, tags: updatedTags } : c)),
         )
         toast.success("Tag removed")
+      } else {
+        throw new Error("Tag update failed")
       }
     } catch {
       toast.error("Failed to remove tag")
@@ -297,34 +473,99 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`
   }, [])
 
+  const loadInitialData = useCallback(async () => {
+    setSidebarLoading(true)
+    setInitError(null)
+    const [convRes, tmplRes] = await Promise.allSettled([
+      apiFetch("/api/admin/ai/conversations"),
+      apiFetch("/api/admin/ai/templates"),
+    ])
+
+    if (convRes.status === "fulfilled" && convRes.value.ok) {
+      const data = await convRes.value.json()
+      const fetchedConversations = (data.conversations ?? []) as Conversation[]
+      setConversations(fetchedConversations)
+
+      const savedActiveId = sessionStorage.getItem("ai-active-conversation-id")
+      if (savedActiveId) {
+        const cached = fetchedConversations.find((c) => c.id === savedActiveId)
+        if (cached) {
+          setActiveId(savedActiveId)
+          setMessages(cached.messages)
+          void apiFetch(`/api/admin/ai/conversations/${savedActiveId}`)
+            .then(async (res) => {
+              if (!res.ok) return
+              const payload = await res.json()
+              const canonical = payload.conversation as Conversation
+              setConversations((prev) => {
+                const others = prev.filter((c) => c.id !== canonical.id)
+                return [canonical, ...others]
+              })
+              setMessages(canonical.messages ?? [])
+            })
+            .catch(() => {
+              /* keep cached restore data */
+            })
+        }
+      }
+    } else {
+      setInitError("Failed to load conversations")
+    }
+
+    if (tmplRes.status === "fulfilled" && tmplRes.value.ok) {
+      const data = await tmplRes.value.json()
+      setTemplates(data.templates ?? [])
+    } else {
+      setInitError((prev) => prev ?? "Failed to load templates")
+    }
+
+    setSidebarLoading(false)
+  }, [])
+
   /* ---- Load conversations + templates on mount ---- */
   useEffect(() => {
-    const init = async () => {
-      const [convRes, tmplRes] = await Promise.allSettled([
-        apiFetch("/api/admin/ai/conversations"),
-        apiFetch("/api/admin/ai/templates"),
-      ])
-      if (convRes.status === "fulfilled" && convRes.value.ok) {
-        const data = await convRes.value.json()
-        setConversations(data.conversations ?? [])
+    const timer = window.setTimeout(() => {
+      void loadInitialData()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [loadInitialData])
+
+  /* ---- Detect deployment profile for adaptive guide ---- */
+  useEffect(() => {
+    const loadGuideContext = async () => {
+      setDeployGuideLoading(true)
+      try {
+        const res = await apiFetch("/api/admin/ai/deploy-profile")
+        if (!res.ok) return
+        const data = (await res.json()) as Partial<DeployGuideContext>
+        if (!data || !data.primaryProfile || !data.profiles || !data.scripts) return
+        setDeployGuideContext({
+          primaryProfile: data.primaryProfile,
+          profiles: data.profiles,
+          scripts: data.scripts,
+        })
+        setSelectedDeployProfile(data.primaryProfile)
+      } catch {
+        /* keep defaults */
+      } finally {
+        setDeployGuideLoading(false)
       }
-      if (tmplRes.status === "fulfilled" && tmplRes.value.ok) {
-        const data = await tmplRes.value.json()
-        setTemplates(data.templates ?? [])
-      }
-      setSidebarLoading(false)
     }
-    init()
+    loadGuideContext()
   }, [])
 
   /* ---- Select conversation ---- */
   const selectConversation = useCallback(
     async (id: string) => {
       setActiveId(id)
+      sessionStorage.setItem("ai-active-conversation-id", id)
       setMessagesPage(1)
+      setMessagesLoading(true)
+      setSendError(null)
       const cached = conversations.find((c) => c.id === id)
       if (cached) {
         setMessages(cached.messages)
+        setMessagesLoading(false)
         setTimeout(scrollToBottom, 100)
         return
       }
@@ -334,12 +575,38 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           const data = await res.json()
           setMessages(data.conversation.messages ?? [])
           setTimeout(scrollToBottom, 100)
+        } else {
+          const err = await res.json().catch(() => ({ error: `${res.status}` }))
+          setSendError(err.error ?? "Failed to load conversation")
         }
       } catch {
-        /* ignore */
+        setSendError("Failed to load conversation")
+      } finally {
+        setMessagesLoading(false)
       }
     },
     [conversations, scrollToBottom],
+  )
+
+  const refreshConversationFromServer = useCallback(
+    async (conversationId: string) => {
+      const res = await apiFetch(`/api/admin/ai/conversations/${conversationId}`)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `${res.status}` }))
+        throw new Error(err.error ?? "Failed to refresh conversation")
+      }
+      const data = await res.json()
+      const conversation = data.conversation as Conversation
+
+      setConversations((prev) => {
+        const others = prev.filter((c) => c.id !== conversation.id)
+        return [conversation, ...others]
+      })
+      if (activeId === conversationId) {
+        setMessages(conversation.messages ?? [])
+      }
+    },
+    [activeId],
   )
 
   /* ---- Paginated messages ---- */
@@ -363,7 +630,9 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         const conv = data.conversation as Conversation
         setConversations((prev) => [conv, ...prev])
         setActiveId(conv.id)
+        sessionStorage.setItem("ai-active-conversation-id", conv.id)
         setMessages([])
+        setSendError(null)
         return conv.id
       }
     } catch {
@@ -376,11 +645,16 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const deleteConversation = useCallback(
     async (id: string) => {
       try {
-        await apiFetch(`/api/admin/ai/conversations/${id}`, { method: "DELETE" })
+        const res = await apiFetch(`/api/admin/ai/conversations/${id}`, { method: "DELETE" })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: `${res.status}` }))
+          throw new Error(err.error ?? "Delete failed")
+        }
         setConversations((prev) => prev.filter((c) => c.id !== id))
         if (activeId === id) {
           setActiveId(null)
           setMessages([])
+          sessionStorage.removeItem("ai-active-conversation-id")
         }
         toast.success("Conversation deleted")
       } catch {
@@ -391,58 +665,63 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   )
 
   /* ---- Send message ---- */
-  const sendMessage = useCallback(
-    async (prompt: string) => {
-      if (!prompt.trim() || loading) return
+  async function sendMessage(
+    prompt: string,
+    options?: { clientMessageId?: string },
+  ): Promise<void> {
+    if (!prompt.trim() || loading) return
 
-      setProgressEvents([])
-      setCurrentProgressIndex(0)
+    setProgressEvents([])
+    setCurrentProgressIndex(0)
+    setSendError(null)
 
-      let convId = activeId
-      if (!convId) {
-        convId = await createConversation()
-        if (!convId) return
+    let convId = activeId
+    if (!convId) {
+      convId = await createConversation()
+      if (!convId) return
+    }
+
+    const clientMessageId = options?.clientMessageId ?? createClientMessageId()
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: prompt.trim(),
+      timestamp: Date.now(),
+      clientMessageId,
+      pending: true,
+    }
+    setMessages((prev) => [...prev, userMsg])
+    setInput("")
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto"
+    }
+    setLoading(true)
+    setTimeout(scrollToBottom, 100)
+
+    try {
+      const res = await apiFetch("/api/admin/ai/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: convId,
+          message: prompt.trim(),
+          clientMessageId,
+        }),
+      })
+
+      const data = (await res.json().catch(() => ({}))) as ChatApiResponse
+      const progress = data.progress ?? []
+      setProgressEvents(progress)
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error ?? `HTTP ${res.status}`)
       }
 
-      const userMsg: ChatMessage = {
-        role: "user",
-        content: prompt.trim(),
-        timestamp: Date.now(),
-      }
-      setMessages((prev) => [...prev, userMsg])
-      setInput("")
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto"
-      }
-      setLoading(true)
-      setTimeout(scrollToBottom, 100)
-
-      try {
-        const res = await apiFetch("/api/admin/ai/chat", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            conversationId: convId,
-            message: prompt.trim(),
-          }),
-        })
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: `${res.status}` }))
-          throw new Error(err.error ?? `HTTP ${res.status}`)
-        }
-
-        const data = await res.json()
-        const newMsgs = (data.messages as ChatMessage[]) ?? []
-        const progress = (data.progress as ProgressEvent[]) ?? []
-
-        setProgressEvents(progress)
-
-        setMessages((prev) => {
-          const withoutPending = prev.slice(0, -1)
-          return [...withoutPending, ...newMsgs]
-        })
-
+      await refreshConversationFromServer(convId).catch(() => {
+        const newMsgs = data.messages ?? []
+        setMessages((prev) => [
+          ...prev.filter((m) => m.clientMessageId !== clientMessageId),
+          ...newMsgs,
+        ])
         setConversations((prev) =>
           prev.map((c) =>
             c.id === convId
@@ -450,29 +729,28 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
               : c,
           ),
         )
+      })
 
-        setTimeout(scrollToBottom, 100)
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Request failed"
-        toast.error("AI request failed", {
-          description: errorMessage,
-          action: {
-            label: "Retry",
-            onClick: () => sendMessage(prompt),
+      lastRetryRef.current = null
+      setTimeout(scrollToBottom, 100)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Request failed"
+      setMessages((prev) => prev.filter((m) => m.clientMessageId !== clientMessageId))
+      setSendError(errorMessage)
+      lastRetryRef.current = { prompt: prompt.trim(), clientMessageId }
+      toast.error("AI request failed", {
+        description: errorMessage,
+        action: {
+          label: "Retry",
+          onClick: () => {
+            void sendMessage(prompt.trim(), { clientMessageId })
           },
-        })
-        const errorMsg: ChatMessage = {
-          role: "assistant",
-          content: `Error: ${errorMessage}. Please try again or use a different approach.`,
-          timestamp: Date.now(),
-        }
-        setMessages((prev) => [...prev, errorMsg])
-      } finally {
-        setLoading(false)
-      }
-    },
-    [activeId, loading, createConversation, scrollToBottom],
-  )
+        },
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   /* ---- Copy helper ---- */
   const copyToClipboard = (text: string) => {
@@ -580,6 +858,11 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     }
     return result
   }, [templates])
+
+  const adaptiveGuideSteps = useMemo(
+    () => buildAdaptiveGuideSteps(deployGuideContext, selectedDeployProfile),
+    [deployGuideContext, selectedDeployProfile],
+  )
 
   /* ---- Tool usage analytics ---- */
   const toolUsageStats = useMemo(() => {
@@ -841,18 +1124,58 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           {/* Messages */}
           <ScrollArea className="flex-1">
             <div className="space-y-4 px-4 py-5 sm:px-6">
-              {!activeId ? (
+              {initError && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-body-sm text-destructive">
+                  <span>{initError}</span>
+                  <Button variant="outline" size="sm" className="h-7" onClick={() => void loadInitialData()}>
+                    Retry load
+                  </Button>
+                </div>
+              )}
+              {sendError && (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-body-sm text-warning-foreground">
+                  <span className="text-warning">{sendError}</span>
+                  {lastRetryRef.current && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7"
+                      onClick={() => {
+                        const retry = lastRetryRef.current
+                        if (!retry) return
+                        void sendMessage(retry.prompt, { clientMessageId: retry.clientMessageId })
+                      }}
+                    >
+                      Retry
+                    </Button>
+                  )}
+                </div>
+              )}
+              {messagesLoading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-body-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading conversation…
+                </div>
+              ) : !activeId ? (
                 <ChatHero
                   onCreate={createConversation}
                   pinned={pinnedSuggestions}
-                  sendMessage={(prompt) => {
-                    sendMessage(prompt)
+                  loading={loading}
+                  onOpenGuide={() => {
+                    setResourcesTab("guide")
+                    setShowResources(true)
                   }}
+                  sendMessage={sendMessage}
                 />
               ) : messages.length === 0 ? (
                 <FreshConversationPrompt
                   pinned={pinnedSuggestions}
+                  loading={loading}
                   sendMessage={sendMessage}
+                  onOpenGuide={() => {
+                    setResourcesTab("guide")
+                    setShowResources(true)
+                  }}
                   onOpenResources={() => setShowResources(true)}
                 />
               ) : (
@@ -871,7 +1194,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                   )}
                   {paginatedMessages.map((msg, i) => (
                     <MessageBubble
-                      key={`${msg.timestamp}-${i}`}
+                      key={msg.clientMessageId ?? `${msg.timestamp}-${i}`}
                       msg={msg}
                       onCopy={copyToClipboard}
                     />
@@ -901,7 +1224,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault()
-                    sendMessage(input)
+                    void sendMessage(input)
                   }
                 }}
                 placeholder={
@@ -914,7 +1237,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                 className="w-full resize-none rounded-xl border border-border/60 bg-background/60 py-3 pl-4 pr-14 text-body-sm leading-relaxed shadow-inner transition-all placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
               />
               <Button
-                onClick={() => sendMessage(input)}
+                onClick={() => void sendMessage(input)}
                 disabled={loading || !input.trim()}
                 size="icon"
                 className="absolute bottom-2 right-2 h-9 w-9 rounded-lg bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
@@ -953,6 +1276,13 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
             sendMessage={sendMessage}
             loading={loading}
             toolUsageStats={toolUsageStats}
+            guideSteps={adaptiveGuideSteps}
+            guideProfiles={deployGuideContext.profiles}
+            activeGuideProfile={selectedDeployProfile}
+            onGuideProfileChange={setSelectedDeployProfile}
+            guideLoading={deployGuideLoading}
+            activeTab={resourcesTab}
+            onTabChange={(tab) => setResourcesTab(tab)}
             onClose={() => setShowResources(false)}
           />
         )}
@@ -1370,6 +1700,13 @@ function ResourcesRail({
   sendMessage,
   loading,
   toolUsageStats,
+  guideSteps,
+  guideProfiles,
+  activeGuideProfile,
+  onGuideProfileChange,
+  guideLoading,
+  activeTab,
+  onTabChange,
   onClose,
 }: {
   templates: Template[]
@@ -1382,15 +1719,29 @@ function ResourcesRail({
     successRate: number
     topTools: { name: string; count: number }[]
   }
+  guideSteps: GuideStep[]
+  guideProfiles: DeployProfileSignal[]
+  activeGuideProfile: DeployProfileId
+  onGuideProfileChange: (profile: DeployProfileId) => void
+  guideLoading: boolean
+  activeTab: "templates" | "tools" | "stats" | "guide"
+  onTabChange: (tab: "templates" | "tools" | "stats" | "guide") => void
   onClose: () => void
 }) {
   return (
     <div className="flex flex-col gap-3">
       <Card className="flex-1 overflow-hidden border-border/60 shadow-sm">
         <CardContent className="flex h-full flex-col p-0">
-          <Tabs defaultValue="templates" className="flex flex-1 flex-col">
+          <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as typeof activeTab)} className="flex flex-1 flex-col">
             <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
               <TabsList className="h-auto gap-0.5 bg-muted/40 p-0.5">
+                <TabsTrigger
+                  value="guide"
+                  className="gap-1.5 px-2.5 py-1 text-micro data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                >
+                  <ListChecks className="h-3 w-3" />
+                  Guide
+                </TabsTrigger>
                 <TabsTrigger
                   value="templates"
                   className="gap-1.5 px-2.5 py-1 text-micro data-[state=active]:bg-background data-[state=active]:shadow-sm"
@@ -1420,6 +1771,20 @@ function ResourcesRail({
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
+
+            <TabsContent value="guide" className="flex-1 overflow-hidden">
+              <ScrollArea className="h-full">
+                <BuildDeployGuide
+                  steps={guideSteps}
+                  profiles={guideProfiles}
+                  activeProfile={activeGuideProfile}
+                  onChangeProfile={onGuideProfileChange}
+                  sendMessage={sendMessage}
+                  loading={loading}
+                  profileLoading={guideLoading}
+                />
+              </ScrollArea>
+            </TabsContent>
 
             <TabsContent value="templates" className="flex-1 overflow-hidden">
               <ScrollArea className="h-full">
@@ -1459,7 +1824,7 @@ function ResourcesRail({
                             {items.map((t) => (
                               <button
                                 key={t.id}
-                                onClick={() => sendMessage(t.prompt)}
+                                onClick={() => void sendMessage(t.prompt)}
                                 disabled={loading}
                                 className="group block w-full rounded-lg border border-border/40 bg-background/40 px-3 py-2 text-left transition-all hover:border-primary/30 hover:bg-primary/5 disabled:opacity-50"
                               >
@@ -1625,11 +1990,15 @@ function StatPill({
 function ChatHero({
   onCreate,
   pinned,
+  loading,
+  onOpenGuide,
   sendMessage,
 }: {
   onCreate: () => Promise<string | null>
   pinned: Template[]
-  sendMessage: (prompt: string) => void
+  loading: boolean
+  onOpenGuide: () => void
+  sendMessage: (prompt: string) => Promise<void>
 }) {
   return (
     <div className="relative mx-auto flex max-w-2xl flex-col items-center justify-center gap-6 py-10 text-center">
@@ -1661,8 +2030,9 @@ function ChatHero({
             return (
               <button
                 key={t.id}
-                onClick={() => sendMessage(t.prompt)}
-                className="group flex items-start gap-2.5 rounded-xl border border-border/40 bg-card/50 px-3 py-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:shadow-md"
+                disabled={loading}
+                onClick={() => void sendMessage(t.prompt)}
+                className="group flex items-start gap-2.5 rounded-xl border border-border/40 bg-card/50 px-3 py-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
               >
                 <div
                   className={cn(
@@ -1688,10 +2058,21 @@ function ChatHero({
 
       <Button
         onClick={onCreate}
+        disabled={loading}
         className="gap-2 bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
       >
         <MessageSquarePlus className="h-4 w-4" />
         Start Blank Conversation
+      </Button>
+
+      <Button
+        variant="outline"
+        onClick={onOpenGuide}
+        disabled={loading}
+        className="gap-2 border-primary/30 bg-primary/5 hover:bg-primary/10"
+      >
+        <ListChecks className="h-4 w-4 text-primary" />
+        Open Build &amp; Deploy Guide
       </Button>
     </div>
   )
@@ -1703,11 +2084,15 @@ function ChatHero({
 
 function FreshConversationPrompt({
   pinned,
+  loading,
   sendMessage,
+  onOpenGuide,
   onOpenResources,
 }: {
   pinned: Template[]
-  sendMessage: (prompt: string) => void
+  loading: boolean
+  sendMessage: (prompt: string) => Promise<void>
+  onOpenGuide: () => void
   onOpenResources: () => void
 }) {
   return (
@@ -1726,21 +2111,156 @@ function FreshConversationPrompt({
           {pinned.slice(0, 5).map((t) => (
             <button
               key={t.id}
-              onClick={() => sendMessage(t.prompt)}
-              className="rounded-full border border-border/50 bg-card px-3 py-1.5 text-micro text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/5 hover:text-foreground"
+              disabled={loading}
+              onClick={() => void sendMessage(t.prompt)}
+              className="rounded-full border border-border/50 bg-card px-3 py-1.5 text-micro text-muted-foreground transition-all hover:border-primary/30 hover:bg-primary/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border/50 disabled:hover:bg-card disabled:hover:text-muted-foreground"
             >
               {t.label}
             </button>
           ))}
           <button
+            disabled={loading}
+            onClick={onOpenGuide}
+            className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/5 px-3 py-1.5 text-micro text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ListChecks className="h-3 w-3" />
+            Build &amp; Deploy Guide
+          </button>
+          <button
+            disabled={loading}
             onClick={onOpenResources}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border/60 px-3 py-1.5 text-micro text-muted-foreground hover:border-primary/40 hover:text-primary"
+            className="inline-flex items-center gap-1 rounded-full border border-dashed border-border/60 px-3 py-1.5 text-micro text-muted-foreground hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-3 w-3" />
             More
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Build & Deploy Guide                                              */
+/* ------------------------------------------------------------------ */
+
+function BuildDeployGuide({
+  steps,
+  profiles,
+  activeProfile,
+  onChangeProfile,
+  sendMessage,
+  loading,
+  profileLoading,
+}: {
+  steps: GuideStep[]
+  profiles: DeployProfileSignal[]
+  activeProfile: DeployProfileId
+  onChangeProfile: (profile: DeployProfileId) => void
+  sendMessage: (prompt: string) => Promise<void>
+  loading: boolean
+  profileLoading: boolean
+}) {
+  const activeProfileLabel = DEPLOY_PROFILE_LABELS[activeProfile]
+
+  return (
+    <div className="space-y-2.5 p-3">
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 text-primary">
+            <ListChecks className="h-3.5 w-3.5" />
+          </div>
+          <div>
+            <p className="text-body-sm font-medium">Step-by-step build and deployment guide</p>
+            <p className="text-micro text-muted-foreground">
+              Use each full prompt in order to run a complete end-to-end delivery flow.
+            </p>
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {profiles.map((profile) => (
+            <button
+              key={profile.id}
+              disabled={loading}
+              onClick={() => onChangeProfile(profile.id)}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-micro transition-colors",
+                activeProfile === profile.id
+                  ? "border-primary/50 bg-primary/10 text-primary"
+                  : "border-border/50 bg-background/60 text-muted-foreground hover:border-primary/30 hover:text-foreground",
+                loading && "cursor-not-allowed opacity-50 hover:border-border/50 hover:text-muted-foreground",
+              )}
+            >
+              {profile.label}
+              {profile.detected && (
+                <span className="ml-1 rounded-full bg-success/10 px-1 py-0 text-[10px] text-success">
+                  detected
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1 text-[10px] text-muted-foreground/70">
+          Active profile: <span className="font-medium text-foreground/90">{activeProfileLabel}</span>
+          {profileLoading ? " · detecting repository config…" : ""}
+        </p>
+        {profiles.find((p) => p.id === activeProfile)?.evidence?.length ? (
+          <p className="mt-1 text-[10px] text-muted-foreground/70">
+            Evidence: {profiles.find((p) => p.id === activeProfile)?.evidence.join(" · ")}
+          </p>
+        ) : null}
+      </div>
+
+      {steps.map((step, index) => (
+        <div
+          key={step.id}
+          className="space-y-2 rounded-lg border border-border/40 bg-background/40 p-2.5"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+                {index + 1}
+              </span>
+              <div>
+                <p className="text-body-sm font-medium text-foreground/90">{step.title}</p>
+                <p className="text-micro text-muted-foreground">{step.outcome}</p>
+              </div>
+            </div>
+            <Badge variant="outline" className="text-[10px]">
+              Step {index + 1}
+            </Badge>
+          </div>
+
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border/50 bg-muted/40 p-2 text-micro text-foreground/85">
+            {step.prompt}
+          </pre>
+
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              disabled={loading}
+              className="h-7 gap-1.5 px-2.5 text-micro"
+              onClick={() => void sendMessage(step.prompt)}
+            >
+              <Send className="h-3 w-3" />
+              Use Prompt
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={loading}
+              className="h-7 gap-1.5 px-2.5 text-micro"
+              onClick={() => {
+                navigator.clipboard.writeText(step.prompt)
+                toast.success("Prompt copied")
+              }}
+            >
+              <Copy className="h-3 w-3" />
+              Copy
+            </Button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1848,14 +2368,29 @@ function MessageBubble({
   if (isUser) {
     return (
       <div className="flex items-start justify-end gap-3">
-        <div className="max-w-[78%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
+        <div
+          className={cn(
+            "max-w-[78%] rounded-2xl rounded-br-md px-4 py-2.5 shadow-sm",
+            msg.pending
+              ? "border border-primary/40 bg-primary/85 text-primary-foreground"
+              : "bg-primary text-primary-foreground",
+          )}
+        >
           <p className="whitespace-pre-wrap text-body-sm leading-relaxed">{msg.content}</p>
-          <p className="mt-1 text-[10px] opacity-50">
-            {new Date(msg.timestamp).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </p>
+          <div className="mt-1 flex items-center justify-between gap-2 text-[10px] opacity-60">
+            <p>
+              {new Date(msg.timestamp).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </p>
+            {msg.pending && (
+              <span className="inline-flex items-center gap-1">
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                sending
+              </span>
+            )}
+          </div>
         </div>
         <Avatar className="h-7 w-7 shrink-0">
           <AvatarFallback className="bg-primary text-primary-foreground text-micro">

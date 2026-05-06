@@ -63,6 +63,7 @@ export type AiConversationUpdate = z.infer<typeof AiConversationUpdate>
 export const AiChatRequest = z.object({
   conversationId: z.string().min(1),
   message: z.string().min(1).max(20_000),
+  clientMessageId: z.string().min(8).max(128).optional(),
 })
 export type AiChatRequest = z.infer<typeof AiChatRequest>
 

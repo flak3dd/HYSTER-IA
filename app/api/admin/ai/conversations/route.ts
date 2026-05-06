@@ -44,6 +44,9 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     }
     
     const conversation = await updateConversation(conversationId, input, admin.id)
+    if (!conversation) {
+      return NextResponse.json({ error: "not found" }, { status: 404 })
+    }
     return NextResponse.json({ conversation })
   } catch (err) {
     return toErrorResponse(err)

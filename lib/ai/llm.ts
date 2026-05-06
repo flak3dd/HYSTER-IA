@@ -378,6 +378,7 @@ export async function chatComplete(options: {
     }
   }>
   _provider?: string
+  _model?: string
   _validation?: {
     allValid: boolean
     totalWarnings: number
@@ -410,7 +411,7 @@ export async function chatComplete(options: {
   const requestStartTime = Date.now()
 
   let selectedModel: any
-  let selectedModelName: string
+  let selectedModelName: string = model || env.XAI_MODEL
 
   // Build list of available providers
   const availableProviders: string[] = []
@@ -539,6 +540,7 @@ export async function chatComplete(options: {
         finishReason: result.finishReason,
         toolCalls: finalToolCalls,
         _provider: providerUsed,
+        _model: model,
         _validation: {
           allValid: validation.allValid,
           totalWarnings: validation.totalWarnings,
@@ -577,6 +579,7 @@ export async function chatComplete(options: {
       finishReason: result.finishReason,
       toolCalls: finalNormalizedCalls,
       _provider: providerUsed,
+      _model: model,
       _sessionId: effectiveSessionId,
       _health: providerHealthMonitor.getHealth(providerUsed),
     }
@@ -773,6 +776,7 @@ export async function chatComplete(options: {
         finishReason: result.finishReason,
         toolCalls: finalToolCalls,
         _provider: providerUsed,
+        _model: selectedModelName,
         _validation: {
           allValid: validation.allValid,
           totalWarnings: validation.totalWarnings,
@@ -815,6 +819,7 @@ export async function chatComplete(options: {
       finishReason: result.finishReason,
       toolCalls: finalNormalizedCalls,
       _provider: providerUsed,
+      _model: selectedModelName,
       _sessionId: effectiveSessionId,
       _health: providerHealthMonitor.getHealth(providerUsed),
     }

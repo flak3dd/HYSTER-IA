@@ -1,10 +1,23 @@
 import { chatComplete, type ChatMessage } from "@/lib/ai/llm"
 import { aiToolDefinitions, runAiTool } from "@/lib/ai/tools"
-import { appendMessages, getConversation } from "@/lib/ai/conversations"
+import { appendMessages, getConversationForUser } from "@/lib/ai/conversations"
 import type { AiMessage } from "@/lib/ai/types"
 import { buildSystemPrompt, Role } from "@/lib/ai/system-prompt"
+import logger from "@/lib/logger"
 
 const MAX_TOOL_ROUNDS = 15
+const DEFAULT_CHAT_TIMEOUT_MS = 120_000
+const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000
+
+const log = logger.child({ module: "ai-chat" })
+
+type RunChatErrorCode =
+  | "not_found"
+  | "timeout"
+  | "llm_failed"
+  | "max_rounds_exceeded"
+  | "tool_failed"
+  | "internal_error"
 
 type ProgressCallback = (progress: {
   type: "step" | "tool_start" | "tool_complete" | "tool_error"
@@ -13,6 +26,56 @@ type ProgressCallback = (progress: {
   toolArgs?: string
   toolResult?: string
 }) => Promise<void> | void
+
+type RunChatResult = {
+  messages: AiMessage[]
+  error?: string
+  errorCode?: RunChatErrorCode
+  fromIdempotency?: boolean
+}
+
+type RunChatOptions = {
+  clientMessageId?: string
+  requestId?: string
+  timeoutMs?: number
+}
+
+const idempotencyCache = new Map<string, { result: RunChatResult; timestamp: number }>()
+const inFlightByKey = new Map<string, Promise<RunChatResult>>()
+
+function isTimeoutError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const msg = err.message.toLowerCase()
+  return (
+    err.name === "TimeoutError" ||
+    msg.includes("timeout") ||
+    msg.includes("aborted") ||
+    msg.includes("aborterror")
+  )
+}
+
+function toErrorString(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+function cacheGet(key: string): RunChatResult | null {
+  const entry = idempotencyCache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.timestamp > IDEMPOTENCY_TTL_MS) {
+    idempotencyCache.delete(key)
+    return null
+  }
+  return entry.result
+}
+
+function cacheSetSuccess(key: string, result: RunChatResult): void {
+  if (result.error) return
+  idempotencyCache.set(key, { result, timestamp: Date.now() })
+}
+
+function toolSignal(base: AbortSignal, timeoutMs: number): AbortSignal {
+  return AbortSignal.any([base, AbortSignal.timeout(timeoutMs)])
+}
 
 // Format tool results for human-readable summary
 function formatToolResultSummary(toolName: string, result: unknown): string {
@@ -82,245 +145,397 @@ export async function runChat(
   userMessage: string,
   invokerUid: string,
   onProgress?: ProgressCallback,
-): Promise<{ messages: AiMessage[]; error?: string }> {
-  const conversation = await getConversation(conversationId)
-  if (!conversation) {
-    return { messages: [], error: "conversation not found" }
+  options: RunChatOptions = {},
+): Promise<RunChatResult> {
+  const adminIdSafe = invokerUid.slice(0, 8)
+  const requestId = options.requestId ?? `chat-${Date.now()}`
+  const timeoutMs = options.timeoutMs ?? DEFAULT_CHAT_TIMEOUT_MS
+  const clientMessageId = options.clientMessageId ?? null
+  const idempotencyKey = options.clientMessageId
+    ? `${invokerUid}:${conversationId}:${options.clientMessageId}`
+    : null
+
+  const cachedResult = idempotencyKey ? cacheGet(idempotencyKey) : null
+  if (cachedResult) {
+    log.info(
+      { requestId, conversationId, adminIdSafe, clientMessageId },
+      "chat idempotency cache hit",
+    )
+    return { ...cachedResult, fromIdempotency: true }
   }
 
-  const now = Date.now()
-  const userMsg: AiMessage = {
-    role: "user",
-    content: userMessage,
-    timestamp: now,
-  }
-
-  // Build LLM message history from conversation
-  const llmMessages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
-  ]
-
-  // Include existing conversation messages (limited to last 40 for context window)
-  const recentMessages = conversation.messages.slice(-40)
-  for (const msg of recentMessages) {
-    if (msg.role === "user" || msg.role === "assistant") {
-      const chatMsg: ChatMessage = {
-        role: msg.role,
-        content: msg.content ?? "",
-      }
-      if (msg.toolCalls && msg.toolCalls.length > 0) {
-        chatMsg.tool_calls = msg.toolCalls.map((tc) => ({
-          id: tc.id,
-          type: "function" as const,
-          function: { name: tc.name, arguments: tc.arguments },
-        }))
-      }
-      llmMessages.push(chatMsg)
-    } else if (msg.role === "tool" && msg.toolResult) {
-      llmMessages.push({
-        role: "tool",
-        content: msg.toolResult.content,
-        tool_call_id: msg.toolResult.toolCallId,
-      })
+  if (idempotencyKey) {
+    const inFlight = inFlightByKey.get(idempotencyKey)
+    if (inFlight) {
+      log.info(
+        { requestId, conversationId, adminIdSafe, clientMessageId },
+        "joining in-flight chat request",
+      )
+      const result = await inFlight
+      return { ...result, fromIdempotency: true }
     }
   }
 
-  // Add the new user message
-  llmMessages.push({ role: "user", content: userMessage })
+  const execute = async (): Promise<RunChatResult> => {
+    const startedAt = Date.now()
+    log.info({ requestId, conversationId, adminIdSafe, clientMessageId }, "chat run started")
 
-  const tools = aiToolDefinitions()
-  const newMessages: AiMessage[] = [userMsg]
+    const conversation = await getConversationForUser(conversationId, invokerUid)
+    if (!conversation) {
+      return { messages: [], error: "conversation not found", errorCode: "not_found" }
+    }
 
-  try {
-    await onProgress?.({ type: "step", step: "Thinking about your request..." })
-    
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      let result: { content: string | null; toolCalls: { id: string; type: "function"; function: { name: string; arguments: string } }[]; finishReason: string | null }
-      
-      try {
-        result = await chatComplete({
-          messages: llmMessages,
-          tools,
-          temperature: 0.3,
-          useShadowGrok: true, // Use xAI Grok by default for chat
+    const now = Date.now()
+    const userMsg: AiMessage = {
+      role: "user",
+      content: userMessage,
+      timestamp: now,
+    }
+
+    const llmMessages: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }]
+    const providersUsed = new Set<string>()
+    const modelsUsed = new Set<string>()
+
+    const recentMessages = conversation.messages.slice(-40)
+    for (const msg of recentMessages) {
+      if (msg.role === "user" || msg.role === "assistant") {
+        const chatMsg: ChatMessage = {
+          role: msg.role,
+          content: msg.content ?? "",
+        }
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          chatMsg.tool_calls = msg.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function" as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          }))
+        }
+        llmMessages.push(chatMsg)
+      } else if (msg.role === "tool" && msg.toolResult) {
+        llmMessages.push({
+          role: "tool",
+          content: msg.toolResult.content,
+          tool_call_id: msg.toolResult.toolCallId,
         })
-      } catch (llmErr) {
-        // LLM unavailable - try rule-based fallback for payload intents
-        const payloadIntent = detectPayloadIntent(userMessage)
-        if (payloadIntent) {
-          await onProgress?.({ 
-            type: "tool_start", 
-            toolName: payloadIntent.toolName,
-            toolArgs: JSON.stringify(payloadIntent.args)
+      }
+    }
+
+    llmMessages.push({ role: "user", content: userMessage })
+    const tools = aiToolDefinitions()
+    const newMessages: AiMessage[] = [userMsg]
+    const turnSignal = AbortSignal.timeout(timeoutMs)
+
+    try {
+      await onProgress?.({ type: "step", step: "Thinking about your request..." })
+
+      let terminatedWithFinalAnswer = false
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        let result: {
+          content: string | null
+          toolCalls: { id: string; type: "function"; function: { name: string; arguments: string } }[]
+          finishReason: string | null
+          _provider?: string
+          _model?: string
+        }
+
+        try {
+          result = await chatComplete({
+            messages: llmMessages,
+            tools,
+            temperature: 0.3,
+            useShadowGrok: true,
+            enableFallback: true,
+            signal: turnSignal,
           })
-          
-          // Execute the tool directly
-          const toolResult = await runAiTool(
-            payloadIntent.toolName,
-            payloadIntent.args,
-            { signal: AbortSignal.timeout(60_000), invokerUid }
-          )
-          
-          await onProgress?.({ 
-            type: "tool_complete", 
-            toolName: payloadIntent.toolName,
-            toolResult: JSON.stringify(toolResult)
-          })
-          
-          // Create synthetic responses
+          if (result._provider) providersUsed.add(result._provider)
+          if (result._model) modelsUsed.add(result._model)
+        } catch (llmErr) {
+          const payloadIntent = detectPayloadIntent(userMessage)
+          if (payloadIntent) {
+            await onProgress?.({
+              type: "tool_start",
+              toolName: payloadIntent.toolName,
+              toolArgs: JSON.stringify(payloadIntent.args),
+            })
+
+            const toolResult = await runAiTool(payloadIntent.toolName, payloadIntent.args, {
+              signal: toolSignal(turnSignal, 60_000),
+              invokerUid,
+            })
+
+            await onProgress?.({
+              type: "tool_complete",
+              toolName: payloadIntent.toolName,
+              toolResult: JSON.stringify(toolResult),
+            })
+
+            const fallbackToolCallId = `fallback-${Date.now()}`
+            const assistantMsg: AiMessage = {
+              role: "assistant",
+              content: `I'll help you with that. Executing ${payloadIntent.toolName}...`,
+              toolCalls: [
+                {
+                  id: fallbackToolCallId,
+                  name: payloadIntent.toolName,
+                  arguments: JSON.stringify(payloadIntent.args),
+                },
+              ],
+              timestamp: Date.now(),
+            }
+            newMessages.push(assistantMsg)
+
+            const toolMsg: AiMessage = {
+              role: "tool",
+              content: null,
+              toolResult: {
+                toolCallId: fallbackToolCallId,
+                name: payloadIntent.toolName,
+                content: JSON.stringify(toolResult),
+              },
+              timestamp: Date.now(),
+            }
+            newMessages.push(toolMsg)
+
+            const summaryMsg: AiMessage = {
+              role: "assistant",
+              content: formatToolResultSummary(payloadIntent.toolName, toolResult),
+              timestamp: Date.now(),
+            }
+            newMessages.push(summaryMsg)
+
+            await appendMessages(conversationId, newMessages)
+            const successResult: RunChatResult = { messages: newMessages }
+            log.info(
+              {
+                requestId,
+                conversationId,
+                adminIdSafe,
+                clientMessageId,
+                durationMs: Date.now() - startedAt,
+                rounds: round + 1,
+                fallbackRuleUsed: payloadIntent.toolName,
+                providers: ["rule-fallback"],
+                models: [],
+                outcome: "success",
+              },
+              "chat run completed via rule fallback",
+            )
+            return successResult
+          }
+
+          if (isTimeoutError(llmErr)) {
+            throw new Error("chat request timed out")
+          }
+          throw llmErr
+        }
+
+        if (result.toolCalls.length > 0) {
           const assistantMsg: AiMessage = {
             role: "assistant",
-            content: `I'll help you with that. Executing ${payloadIntent.toolName}...`,
-            toolCalls: [{
-              id: `fallback-${Date.now()}`,
-              name: payloadIntent.toolName,
-              arguments: JSON.stringify(payloadIntent.args),
-            }],
+            content: result.content,
+            toolCalls: result.toolCalls.map((tc) => ({
+              id: tc.id,
+              name: tc.function.name,
+              arguments: tc.function.arguments,
+            })),
             timestamp: Date.now(),
           }
           newMessages.push(assistantMsg)
-          
-          const toolMsg: AiMessage = {
-            role: "tool",
-            content: null,
-            toolResult: {
-              toolCallId: `fallback-${Date.now()}`,
-              name: payloadIntent.toolName,
-              content: JSON.stringify(toolResult),
-            },
-            timestamp: Date.now(),
-          }
-          newMessages.push(toolMsg)
-          
-          // Add final summary message
-          const summaryMsg: AiMessage = {
+          llmMessages.push({
             role: "assistant",
-            content: formatToolResultSummary(payloadIntent.toolName, toolResult),
-            timestamp: Date.now(),
-          }
-          newMessages.push(summaryMsg)
-          
-          await appendMessages(conversationId, newMessages)
-          return { messages: newMessages }
-        }
-        
-        // No payload intent detected, re-throw the LLM error
-        throw llmErr
-      }
+            content: result.content ?? "",
+            tool_calls: result.toolCalls,
+          })
 
-      if (result.toolCalls.length > 0) {
-        // Assistant message with tool calls
-        const assistantMsg: AiMessage = {
+          const toolExecutionPromises = result.toolCalls.map(async (call) => {
+            await onProgress?.({
+              type: "tool_start",
+              toolName: call.function.name,
+              toolArgs: call.function.arguments,
+            })
+            const toolStartedAt = Date.now()
+            let parsedArgs: unknown = {}
+            try {
+              parsedArgs = call.function.arguments ? JSON.parse(call.function.arguments) : {}
+            } catch {
+              parsedArgs = {}
+            }
+
+            let resultContent: string
+            let toolSuccess = true
+            try {
+              const toolResult = await runAiTool(call.function.name, parsedArgs, {
+                signal: toolSignal(turnSignal, 90_000),
+                invokerUid,
+              })
+              resultContent = JSON.stringify(toolResult)
+              await onProgress?.({
+                type: "tool_complete",
+                toolName: call.function.name,
+                toolResult: resultContent,
+              })
+            } catch (err) {
+              toolSuccess = false
+              resultContent = JSON.stringify({
+                error: err instanceof Error ? err.message : String(err),
+              })
+              await onProgress?.({
+                type: "tool_error",
+                toolName: call.function.name,
+                toolResult: resultContent,
+              })
+            }
+
+            log.info(
+              {
+                requestId,
+                conversationId,
+                adminIdSafe,
+                clientMessageId,
+                toolName: call.function.name,
+                durationMs: Date.now() - toolStartedAt,
+                success: toolSuccess,
+              },
+              "chat tool execution",
+            )
+
+            return {
+              toolMsg: {
+                role: "tool" as const,
+                content: null,
+                toolResult: {
+                  toolCallId: call.id,
+                  name: call.function.name,
+                  content: resultContent,
+                },
+                timestamp: Date.now(),
+              },
+              llmMsg: {
+                role: "tool" as const,
+                content: resultContent,
+                tool_call_id: call.id,
+              },
+            }
+          })
+
+          const toolResults = await Promise.all(toolExecutionPromises)
+
+          for (const { toolMsg, llmMsg } of toolResults) {
+            newMessages.push(toolMsg)
+            llmMessages.push(llmMsg)
+          }
+
+          continue
+        }
+
+        const finalMsg: AiMessage = {
           role: "assistant",
           content: result.content,
-          toolCalls: result.toolCalls.map((tc) => ({
-            id: tc.id,
-            name: tc.function.name,
-            arguments: tc.function.arguments,
-          })),
           timestamp: Date.now(),
         }
-        newMessages.push(assistantMsg)
-        llmMessages.push({
+        newMessages.push(finalMsg)
+        terminatedWithFinalAnswer = true
+        break
+      }
+
+      if (!terminatedWithFinalAnswer) {
+        const maxRoundsMsg: AiMessage = {
           role: "assistant",
-          content: result.content ?? "",
-          tool_calls: result.toolCalls,
-        })
-
-        // Execute each tool call (parallel for independent tools)
-        const toolExecutionPromises = result.toolCalls.map(async (call) => {
-          await onProgress?.({ 
-            type: "tool_start", 
-            toolName: call.function.name,
-            toolArgs: call.function.arguments
-          })
-          let parsedArgs: unknown = {}
-          try {
-            parsedArgs = call.function.arguments
-              ? JSON.parse(call.function.arguments)
-              : {}
-          } catch {
-            parsedArgs = {}
-          }
-
-          let resultContent: string
-          try {
-            const toolResult = await runAiTool(
-              call.function.name,
-              parsedArgs,
-              { signal: AbortSignal.timeout(90_000), invokerUid }, // Increased timeout
-            )
-            resultContent = JSON.stringify(toolResult)
-            
-            await onProgress?.({ 
-              type: "tool_complete", 
-              toolName: call.function.name,
-              toolResult: resultContent
-            })
-          } catch (err) {
-            resultContent = JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            })
-            
-            await onProgress?.({ 
-              type: "tool_error", 
-              toolName: call.function.name,
-              toolResult: resultContent
-            })
-          }
-
-          return {
-            toolMsg: {
-              role: "tool" as const,
-              content: null,
-              toolResult: {
-                toolCallId: call.id,
-                name: call.function.name,
-                content: resultContent,
-              },
-              timestamp: Date.now(),
-            },
-            llmMsg: {
-              role: "tool" as const,
-              content: resultContent,
-              tool_call_id: call.id,
-            },
-          }
-        })
-
-        const toolResults = await Promise.all(toolExecutionPromises)
-        
-        for (const { toolMsg, llmMsg } of toolResults) {
-          newMessages.push(toolMsg)
-          llmMessages.push(llmMsg)
+          content:
+            "I reached the maximum number of tool-execution rounds for this request. Please refine the prompt or split this into smaller steps.",
+          timestamp: Date.now(),
         }
-
-        // Continue loop — LLM may want to call more tools or produce final answer
-        continue
+        newMessages.push(maxRoundsMsg)
+        await appendMessages(conversationId, newMessages)
+        log.warn(
+          {
+            requestId,
+            conversationId,
+            adminIdSafe,
+            clientMessageId,
+            durationMs: Date.now() - startedAt,
+            rounds: MAX_TOOL_ROUNDS,
+            providers: [...providersUsed],
+            models: [...modelsUsed],
+            outcome: "max_rounds_exceeded",
+          },
+          "chat run reached max rounds",
+        )
+        return {
+          messages: newMessages,
+          error: "max tool rounds exceeded",
+          errorCode: "max_rounds_exceeded",
+        }
       }
 
-      // No tool calls — this is the final assistant response
-      const finalMsg: AiMessage = {
-        role: "assistant",
-        content: result.content,
-        timestamp: Date.now(),
+      await appendMessages(conversationId, newMessages)
+      const successResult: RunChatResult = { messages: newMessages }
+      log.info(
+        {
+          requestId,
+          conversationId,
+          adminIdSafe,
+          clientMessageId,
+          durationMs: Date.now() - startedAt,
+          rounds: Math.min(MAX_TOOL_ROUNDS, newMessages.length),
+          providers: [...providersUsed],
+          models: [...modelsUsed],
+          outcome: "success",
+        },
+        "chat run completed",
+      )
+      return successResult
+    } catch (err) {
+      const errorText = toErrorString(err)
+      const errorCode: RunChatErrorCode = isTimeoutError(err)
+        ? "timeout"
+        : errorText.includes("Failed to complete chat request")
+          ? "llm_failed"
+          : "internal_error"
+
+      if (newMessages.length > 0) {
+        await appendMessages(conversationId, newMessages).catch(() => {})
       }
-      newMessages.push(finalMsg)
-      break
-    }
 
-    // Persist all new messages
-    await appendMessages(conversationId, newMessages)
+      log.error(
+        {
+          requestId,
+          conversationId,
+          adminIdSafe,
+          clientMessageId,
+          durationMs: Date.now() - startedAt,
+          error: errorText,
+          errorCode,
+          providers: [...providersUsed],
+          models: [...modelsUsed],
+          outcome: "error",
+        },
+        "chat run failed",
+      )
 
-    return { messages: newMessages }
-  } catch (err) {
-    // Still persist what we have so far
-    if (newMessages.length > 0) {
-      await appendMessages(conversationId, newMessages).catch(() => {})
-    }
-    return {
-      messages: newMessages,
-      error: err instanceof Error ? err.message : String(err),
+      return {
+        messages: newMessages,
+        error:
+          errorCode === "timeout"
+            ? "chat request timed out"
+            : errorCode === "llm_failed"
+              ? "language model request failed"
+              : "chat request failed",
+        errorCode,
+      }
     }
   }
+
+  if (!idempotencyKey) {
+    return execute()
+  }
+
+  const execPromise = execute().finally(() => {
+    inFlightByKey.delete(idempotencyKey)
+  })
+  inFlightByKey.set(idempotencyKey, execPromise)
+
+  const result = await execPromise
+  cacheSetSuccess(idempotencyKey, result)
+  return result
 }

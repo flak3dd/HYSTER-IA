@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db"
 import type { AiConversation as PrismaConv, AiMessage as PrismaMsg } from "@prisma/client"
+import { Prisma } from "@prisma/client"
 import {
   AiConversation,
   AiMessage,
@@ -84,6 +85,17 @@ export async function getConversation(
   return result
 }
 
+export async function getConversationForUser(
+  id: string,
+  createdBy: string,
+): Promise<AiConversation | null> {
+  const row = await prisma.aiConversation.findFirst({
+    where: { id, createdBy },
+    include: { messages: { orderBy: { sortOrder: "asc" } } },
+  })
+  return row ? toConvZod(row) : null
+}
+
 export async function createConversation(
   input: AiConversationCreate,
   createdBy: string,
@@ -102,35 +114,57 @@ export async function appendMessages(
   id: string,
   messages: AiMessage[],
 ): Promise<AiConversation | null> {
-  const existing = await prisma.aiConversation.findUnique({
-    where: { id },
-    include: { messages: { orderBy: { sortOrder: "desc" }, take: 1 } },
-  })
-  if (!existing) return null
+  if (messages.length === 0) {
+    return getConversation(id)
+  }
 
-  const startOrder = existing.messages.length > 0 ? existing.messages[0].sortOrder + 1 : 0
+  const maxRetries = 3
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const applied = await prisma.$transaction(
+        async (tx) => {
+          const existing = await tx.aiConversation.findUnique({
+            where: { id },
+            include: { messages: { orderBy: { sortOrder: "desc" }, take: 1 } },
+          })
+          if (!existing) return false
 
-  await prisma.$transaction([
-    ...messages.map((msg, i) =>
-      prisma.aiMessage.create({
-        data: {
-          conversationId: id,
-          role: msg.role,
-          content: msg.content,
-          toolCalls: msg.toolCalls ? (msg.toolCalls as object[]) : undefined,
-          toolResult: msg.toolResult ? (msg.toolResult as object) : undefined,
-          sortOrder: startOrder + i,
-          timestamp: new Date(msg.timestamp),
+          const startOrder = existing.messages.length > 0 ? existing.messages[0].sortOrder + 1 : 0
+
+          for (const [i, msg] of messages.entries()) {
+            await tx.aiMessage.create({
+              data: {
+                conversationId: id,
+                role: msg.role,
+                content: msg.content,
+                toolCalls: msg.toolCalls ? (msg.toolCalls as object[]) : undefined,
+                toolResult: msg.toolResult ? (msg.toolResult as object) : undefined,
+                sortOrder: startOrder + i,
+                timestamp: new Date(msg.timestamp),
+              },
+            })
+          }
+
+          await tx.aiConversation.update({ where: { id }, data: { updatedAt: new Date() } })
+          return true
         },
-      }),
-    ),
-    prisma.aiConversation.update({ where: { id }, data: { updatedAt: new Date() } }),
-  ])
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
 
-  // Invalidate cache
-  clearCached(id)
-  
-  return getConversation(id)
+      if (!applied) return null
+      clearCached(id)
+      return getConversation(id)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const isRetryable = msg.includes("could not serialize access") || msg.includes("P2034")
+      if (!isRetryable || attempt === maxRetries) {
+        throw err
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 20))
+    }
+  }
+
+  return null
 }
 
 export async function updateConversationTitle(
@@ -143,7 +177,34 @@ export async function updateConversationTitle(
   return true
 }
 
+export async function updateConversationTitleForUser(
+  id: string,
+  title: string,
+  createdBy: string,
+): Promise<boolean> {
+  const existing = await prisma.aiConversation.findFirst({ where: { id, createdBy } })
+  if (!existing) return false
+  await prisma.aiConversation.update({ where: { id }, data: { title } })
+  clearCached(id)
+  return true
+}
+
 export async function deleteConversation(id: string): Promise<boolean> {
+  try {
+    await prisma.aiConversation.delete({ where: { id } })
+    clearCached(id)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function deleteConversationForUser(
+  id: string,
+  createdBy: string,
+): Promise<boolean> {
+  const existing = await prisma.aiConversation.findFirst({ where: { id, createdBy } })
+  if (!existing) return false
   try {
     await prisma.aiConversation.delete({ where: { id } })
     clearCached(id)

@@ -315,6 +315,7 @@
   }
   html {
     @apply font-sans;
+    font-size: 93.75%;
   }
 }
 
