@@ -74,9 +74,27 @@ export type ProviderPreset = {
   sizes: { id: string; label: string; cpu: number; ram: string; disk: string; price: string }[]
 }
 
+export type ValidationIssue = {
+  severity: "error" | "warning"
+  message: string
+  code: string
+  suggestion?: string
+}
+
+export type ValidationResult = {
+  valid: boolean
+  issues: ValidationIssue[]
+}
+
 export interface VpsProviderClient {
   readonly name: VpsProvider
   presets(): ProviderPreset
+  validate?(opts: {
+    name: string
+    region: string
+    size: string
+    resourceGroup?: string
+  }): Promise<ValidationResult>
   createServer(opts: {
     name: string
     region: string

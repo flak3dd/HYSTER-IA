@@ -707,37 +707,218 @@ GUIDELINES:
     return prompt
   }
 
-  private parseUncertaintyResponse(response: string): any {
+  /**
+   * Extract JSON from LLM response using proper parsing without regex.
+   * Finds first '{' and last '}' to extract JSON object.
+   */
+  private extractJsonObject(response: string): string | null {
+    const startIndex = response.indexOf('{')
+    const endIndex = response.lastIndexOf('}')
+
+    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
+      return null
+    }
+
+    return response.slice(startIndex, endIndex + 1)
+  }
+
+  /**
+   * Parse uncertainty response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseUncertaintyResponseStructured(response: string): Promise<any> {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : {}
+      const { generateObject } = await import('ai')
+      const { UncertaintyAssessmentSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: UncertaintyAssessmentSchema,
+        prompt: `Parse this uncertainty assessment into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
     } catch {
       return {}
     }
   }
 
-  private parseKnowledgeGapResponse(response: string): any {
+  /**
+   * Parse knowledge gap response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseKnowledgeGapResponseStructured(response: string): Promise<any> {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : { gaps: [] }
+      const { generateObject } = await import('ai')
+      const { KnowledgeGapSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: KnowledgeGapSchema,
+        prompt: `Parse this knowledge gap analysis into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
     } catch {
       return { gaps: [] }
     }
   }
 
-  private parseSelfQuestioningResponse(response: string): any {
+  /**
+   * Parse self-questioning response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseSelfQuestioningResponseStructured(response: string): Promise<any> {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : { questions: [] }
+      const { generateObject } = await import('ai')
+      const { SelfQuestioningSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: SelfQuestioningSchema,
+        prompt: `Parse these self-generated questions into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
     } catch {
       return { questions: [] }
     }
   }
 
+  /**
+   * Parse strategy response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseStrategyResponseStructured(response: string): Promise<any> {
+    try {
+      const { generateObject } = await import('ai')
+      const { StrategySelectionSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: StrategySelectionSchema,
+        prompt: `Parse this strategy selection into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
+    } catch {
+      return { strategy: 'standard' }
+    }
+  }
+
+  /**
+   * Parse emotional response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseEmotionalResponseStructured(response: string): Promise<any> {
+    try {
+      const { generateObject } = await import('ai')
+      const { EmotionalStateSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: EmotionalStateSchema,
+        prompt: `Parse this emotional state assessment into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
+    } catch {
+      return { state: 'neutral' }
+    }
+  }
+
+  /**
+   * Parse bias detection response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseBiasResponseStructured(response: string): Promise<any> {
+    try {
+      const { generateObject } = await import('ai')
+      const { BiasDetectionSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: BiasDetectionSchema,
+        prompt: `Parse this bias detection result into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
+    } catch {
+      return { biases: [] }
+    }
+  }
+
+  /**
+   * Parse reflection response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseReflectionResponseStructured(response: string): Promise<any> {
+    try {
+      const { generateObject } = await import('ai')
+      const { ReflectionSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: ReflectionSchema,
+        prompt: `Parse this reflection into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
+    } catch {
+      return { reflection: '', lessonsLearned: [], improvements: [] }
+    }
+  }
+
+  /**
+   * @deprecated Use parseUncertaintyResponseStructured() instead.
+   */
+  private parseUncertaintyResponse(response: string): any {
+    try {
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : {}
+    } catch {
+      return {}
+    }
+  }
+
+  /**
+   * @deprecated Use parseKnowledgeGapResponseStructured() instead.
+   */
+  private parseKnowledgeGapResponse(response: string): any {
+    try {
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : { gaps: [] }
+    } catch {
+      return { gaps: [] }
+    }
+  }
+
+  /**
+   * @deprecated Use parseSelfQuestioningResponseStructured() instead.
+   */
+  private parseSelfQuestioningResponse(response: string): any {
+    try {
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : { questions: [] }
+    } catch {
+      return { questions: [] }
+    }
+  }
+
+  /**
+   * @deprecated Use parseStrategyResponseStructured() instead.
+   */
   private parseStrategyResponse(response: string): any {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : { strategy: 'standard' }
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : { strategy: 'standard' }
     } catch {
       return { strategy: 'standard' }
     }
@@ -766,8 +947,8 @@ GUIDELINES:
 
   private parseEmotionalResponse(response: string): any {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : { state: 'neutral' }
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : { state: 'neutral' }
     } catch {
       return { state: 'neutral' }
     }
@@ -775,8 +956,8 @@ GUIDELINES:
 
   private parseBiasResponse(response: string): any {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : { biases: [] }
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : { biases: [] }
     } catch {
       return { biases: [] }
     }
@@ -784,8 +965,8 @@ GUIDELINES:
 
   private parseReflectionResponse(response: string): any {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : { reflection: '', lessonsLearned: [], improvements: [] }
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : { reflection: '', lessonsLearned: [], improvements: [] }
     } catch {
       return { reflection: '', lessonsLearned: [], improvements: [] }
     }

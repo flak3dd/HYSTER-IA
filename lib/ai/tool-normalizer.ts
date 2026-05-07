@@ -12,9 +12,9 @@ export interface NormalizedToolCall {
   type: 'function';
   function: {
     name: string;
-    arguments: Record<string, any>;
+    arguments: Record<string, unknown>;
   };
-  originalFormat: any;
+  originalFormat: unknown;
   normalizationSteps: string[];
 }
 
@@ -25,30 +25,81 @@ export interface NormalizationResult {
   warnings: string[];
 }
 
+type ToolParameters = {
+  type?: string;
+  required?: string[];
+  properties?: Record<string, { default?: unknown }>;
+  [key: string]: unknown;
+}
+
+type ToolLike = {
+  type?: string;
+  name?: string;
+  function?: {
+    name?: string;
+    parameters?: ToolParameters;
+  };
+  jsonSchema?: ToolParameters;
+  inputSchema?: ToolParameters;
+  parameters?: ToolParameters;
+}
+
+type RawToolCall = {
+  id?: string;
+  toolCallId?: string;
+  toolName?: string;
+  function?: {
+    name?: string;
+    arguments?: unknown;
+  };
+  arguments?: unknown;
+  input?: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getAvailableToolName(tool: ToolLike): string | undefined {
+  const name = tool?.type === 'function' ? tool.function?.name : tool?.name;
+  return typeof name === 'string' && name.length > 0 ? name : undefined;
+}
+
+function getAvailableToolParameters(tool: ToolLike): ToolParameters | undefined {
+  if (tool?.type === 'function') {
+    return tool.function?.parameters;
+  }
+  return tool?.jsonSchema ?? tool?.inputSchema ?? tool?.parameters;
+}
+
 /**
  * Normalize a single tool call to standard format
  */
 export function normalizeToolCall(
-  rawToolCall: any,
-  availableTools: any[] = SHADOWGROK_TOOLS
+  rawToolCall: RawToolCall,
+  availableTools: ToolLike[] = SHADOWGROK_TOOLS
 ): NormalizedToolCall {
   const normalizationSteps: string[] = [];
   let toolName = rawToolCall.function?.name || rawToolCall.toolName;
-  let toolId = rawToolCall.id || rawToolCall.toolCallId || `call_${Date.now()}`;
+  const toolId = rawToolCall.id || rawToolCall.toolCallId || `call_${Date.now()}`;
   
   // Step 1: Extract arguments from various formats
-  let argumentsObj: Record<string, any> = {};
+  let argumentsObj: Record<string, unknown> = {};
   if (rawToolCall.function?.arguments) {
     try {
       if (typeof rawToolCall.function.arguments === 'string') {
         argumentsObj = JSON.parse(rawToolCall.function.arguments);
         normalizationSteps.push('Parsed JSON arguments from string');
-      } else {
+      } else if (isRecord(rawToolCall.function.arguments)) {
         argumentsObj = rawToolCall.function.arguments;
         normalizationSteps.push('Used arguments object directly');
       }
     } catch (e) {
-      normalizationSteps.push(`Failed to parse arguments: ${e}`);
+      normalizationSteps.push(`Failed to parse arguments: ${getErrorMessage(e)}`);
       argumentsObj = {};
     }
   } else if (rawToolCall.arguments) {
@@ -56,15 +107,15 @@ export function normalizeToolCall(
       if (typeof rawToolCall.arguments === 'string') {
         argumentsObj = JSON.parse(rawToolCall.arguments);
         normalizationSteps.push('Parsed arguments from raw arguments string');
-      } else {
+      } else if (isRecord(rawToolCall.arguments)) {
         argumentsObj = rawToolCall.arguments;
         normalizationSteps.push('Used raw arguments object');
       }
     } catch (e) {
-      normalizationSteps.push(`Failed to parse raw arguments: ${e}`);
+      normalizationSteps.push(`Failed to parse raw arguments: ${getErrorMessage(e)}`);
       argumentsObj = {};
     }
-  } else if (rawToolCall.input) {
+  } else if (isRecord(rawToolCall.input)) {
     argumentsObj = rawToolCall.input;
     normalizationSteps.push('Used input field as arguments');
   }
@@ -75,15 +126,19 @@ export function normalizeToolCall(
 
   // Step 3: Validate tool name exists
   const knownToolNames = availableTools
-    .map(t => t.type === 'function' ? t.function?.name : t.name)
-    .filter(Boolean);
+    .map(getAvailableToolName)
+    .filter((name): name is string => Boolean(name));
 
-  if (!knownToolNames.includes(toolName)) {
-    normalizationSteps.push(`Tool name "${toolName}" not found in known tools`);
+  if (typeof toolName !== 'string' || toolName.length === 0) {
+    toolName = '';
+    normalizationSteps.push('Tool name missing');
+  } else if (!knownToolNames.includes(toolName)) {
+    const unknownToolName = toolName;
+    normalizationSteps.push(`Tool name "${unknownToolName}" not found in known tools`);
     // Try to find a similar tool name
     const similarTool = knownToolNames.find(name => 
-      name.toLowerCase().includes(toolName.toLowerCase()) ||
-      toolName.toLowerCase().includes(name.toLowerCase())
+      name.toLowerCase().includes(unknownToolName.toLowerCase()) ||
+      unknownToolName.toLowerCase().includes(name.toLowerCase())
     );
     if (similarTool) {
       toolName = similarTool;
@@ -95,17 +150,18 @@ export function normalizeToolCall(
 
   // Step 4: Ensure required parameters are present
   const toolDef = availableTools.find(t => 
-    (t.type === 'function' && t.function?.name === toolName) || t.name === toolName
+    getAvailableToolName(t) === toolName
   );
   
-  if (toolDef && toolDef.function?.parameters?.required) {
-    const requiredParams = toolDef.function.parameters.required;
+  const toolParameters = toolDef ? getAvailableToolParameters(toolDef) : undefined;
+  if (toolParameters?.required) {
+    const requiredParams = toolParameters.required;
     const missingParams = requiredParams.filter((param: string) => !(param in argumentsObj));
     
     if (missingParams.length > 0) {
       normalizationSteps.push(`Missing required parameters: ${missingParams.join(', ')}`);
       // Add default values for missing required parameters if available
-      const properties = toolDef.function.parameters.properties || {};
+      const properties = toolParameters.properties || {};
       missingParams.forEach((param: string) => {
         if (properties[param]?.default !== undefined) {
           argumentsObj[param] = properties[param].default;
@@ -118,8 +174,8 @@ export function normalizeToolCall(
   }
 
   // Step 5: Remove unknown parameters (optional, based on strictness)
-  if (toolDef && toolDef.function?.parameters?.properties) {
-    const validParams = Object.keys(toolDef.function.parameters.properties);
+  if (toolParameters?.properties) {
+    const validParams = Object.keys(toolParameters.properties);
     const providedParams = Object.keys(argumentsObj);
     const unknownParams = providedParams.filter(p => !validParams.includes(p));
     
@@ -145,8 +201,8 @@ export function normalizeToolCall(
  * Normalize multiple tool calls
  */
 export function normalizeToolCalls(
-  rawToolCalls: any[],
-  availableTools: any[] = SHADOWGROK_TOOLS
+  rawToolCalls: RawToolCall[],
+  availableTools: ToolLike[] = SHADOWGROK_TOOLS
 ): NormalizationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -169,8 +225,8 @@ export function normalizeToolCalls(
       if (hasWarnings) {
         warnings.push(`Tool call ${normalized.id} had warnings during normalization`);
       }
-    } catch (error: any) {
-      errors.push(`Failed to normalize tool call: ${error.message}`);
+    } catch (error) {
+      errors.push(`Failed to normalize tool call: ${getErrorMessage(error)}`);
     }
   }
 
@@ -183,32 +239,33 @@ export function normalizeToolCalls(
 }
 
 /**
- * Normalize argument types to match expected schema
+ * Normalize argument types using Zod schema coercion
+ *
+ * NOTE: All type coercion is now handled by Zod schemas at validation time.
+ * This function only handles structural normalization (arrays, nested objects)
+ * without using any regex patterns.
+ *
+ * The LLM is expected to produce correctly-typed values via structured output.
+ * If types are incorrect, Zod validation will catch them with clear error messages.
  */
-function normalizeArgumentTypes(args: Record<string, any>): Record<string, any> {
-  const normalized: Record<string, any> = {};
+function normalizeArgumentTypes(args: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(args)) {
-    // Handle string representations of numbers
-    if (typeof value === 'string') {
-      if (/^\d+$/.test(value)) {
-        normalized[key] = parseInt(value, 10);
-      } else if (/^\d+\.\d+$/.test(value)) {
-        normalized[key] = parseFloat(value);
-      } else if (value.toLowerCase() === 'true') {
-        normalized[key] = true;
-      } else if (value.toLowerCase() === 'false') {
-        normalized[key] = false;
-      } else if (value.toLowerCase() === 'null') {
-        normalized[key] = null;
-      } else {
-        normalized[key] = value;
-      }
-    } else if (Array.isArray(value)) {
-      normalized[key] = value.map(item => normalizeArgumentTypes({ _: item })._);
-    } else if (typeof value === 'object' && value !== null) {
+    // Structural normalization only - no regex-based type coercion
+    if (Array.isArray(value)) {
+      // Recursively normalize array items
+      normalized[key] = value.map(item => {
+        if (isRecord(item)) {
+          return normalizeArgumentTypes(item);
+        }
+        return item;
+      });
+    } else if (isRecord(value)) {
+      // Recursively normalize nested objects
       normalized[key] = normalizeArgumentTypes(value);
     } else {
+      // Pass through as-is - Zod will handle type coercion during validation
       normalized[key] = value;
     }
   }
@@ -222,7 +279,7 @@ function normalizeArgumentTypes(args: Record<string, any>): Record<string, any> 
 export function convertToProviderFormat(
   normalizedCall: NormalizedToolCall,
   targetProvider: 'openai' | 'xai' | 'anthropic' | 'generic'
-): any {
+): unknown {
   switch (targetProvider) {
     case 'openai':
       return {

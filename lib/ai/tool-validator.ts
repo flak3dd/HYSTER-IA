@@ -31,12 +31,61 @@ export interface ToolValidationResult {
   errors: string[];
 }
 
+type ToolParameters = {
+  type?: string;
+  required?: string[];
+  properties?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+type ToolLike = {
+  id?: string;
+  type?: string;
+  name?: string;
+  toolName?: string;
+  toolCallId?: string;
+  arguments?: unknown;
+  function?: {
+    name?: string;
+    arguments?: unknown;
+    parameters?: ToolParameters;
+  };
+  jsonSchema?: ToolParameters;
+  inputSchema?: ToolParameters;
+  parameters?: ToolParameters;
+  _metadata?: {
+    mappingSource?: string;
+  };
+}
+
+function getKnownToolName(tool: ToolLike): string | undefined {
+  const name = tool?.type === 'function' ? tool.function?.name : tool?.name;
+  return typeof name === 'string' && name.length > 0 ? name : undefined;
+}
+
+function getKnownToolParameters(tool: ToolLike): ToolParameters | undefined {
+  if (tool?.type === 'function') {
+    return tool.function?.parameters;
+  }
+  return tool?.jsonSchema ?? tool?.inputSchema ?? tool?.parameters;
+}
+
+function findKnownToolByName(name: string, knownTools: ToolLike[]): ToolLike | undefined {
+  return knownTools.find(tool => getKnownToolName(tool) === name) ?? getToolByName(name);
+}
+
+function normalizeArgumentsForValidation(args: unknown): string {
+  if (typeof args === 'string') return args.length > 0 ? args : '{}';
+  if (args && typeof args === 'object') return JSON.stringify(args);
+  return '{}';
+}
+
 /**
  * Validate a single tool call against the known tool definitions
  */
 export function validateToolCall(
-  toolCall: any,
-  knownTools: any[] = SHADOWGROK_TOOLS
+  toolCall: ToolLike,
+  knownTools: ToolLike[] = SHADOWGROK_TOOLS
 ): ToolValidationResult {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -45,21 +94,30 @@ export function validateToolCall(
 
   let toolName = toolCall.function?.name || toolCall.toolName;
   let originalToolName = toolName;
-  const originalArgs = toolCall.function?.arguments || toolCall.arguments || '{}';
+  const originalArgs = normalizeArgumentsForValidation(
+    toolCall.function?.arguments ?? toolCall.arguments ?? {},
+  );
 
   // Check if tool name exists in known tools
   const knownToolNames = knownTools
-    .map(t => t.type === 'function' ? t.function?.name : t.name)
-    .filter(Boolean);
+    .map(getKnownToolName)
+    .filter((name): name is string => Boolean(name));
 
-  if (!knownToolNames.includes(toolName)) {
-    errors.push(`Tool "${toolName}" not found in known tools`);
+  if (typeof toolName !== 'string' || toolName.length === 0) {
+    errors.push('Tool name is missing');
+    toolName = '';
+    originalToolName = originalToolName || '';
+  }
+
+  if (toolName && !knownToolNames.includes(toolName)) {
+    const unknownToolName = toolName;
+    errors.push(`Tool "${unknownToolName}" not found in known tools`);
     
     // Try fuzzy matching
     const similarTool = knownToolNames.find(name => 
-      name.toLowerCase().includes(toolName.toLowerCase()) ||
-      toolName.toLowerCase().includes(name.toLowerCase()) ||
-      levenshteinDistance(name.toLowerCase(), toolName.toLowerCase()) < 3
+      name.toLowerCase().includes(unknownToolName.toLowerCase()) ||
+      unknownToolName.toLowerCase().includes(name.toLowerCase()) ||
+      levenshteinDistance(name.toLowerCase(), unknownToolName.toLowerCase()) < 3
     );
 
     if (similarTool) {
@@ -70,11 +128,12 @@ export function validateToolCall(
   }
 
   // Validate tool arguments if tool definition is available
-  const toolDef = getToolByName(toolName);
+  const toolDef = toolName ? findKnownToolByName(toolName, knownTools) : undefined;
   if (toolDef) {
     try {
       const args = JSON.parse(originalArgs);
-      const requiredParams = toolDef.function.parameters.required || [];
+      const parameters = getKnownToolParameters(toolDef);
+      const requiredParams = parameters?.required || [];
       
       // Check for missing required parameters
       for (const param of requiredParams) {
@@ -84,7 +143,7 @@ export function validateToolCall(
       }
 
       // Check for unexpected parameters
-      const validParams = Object.keys(toolDef.function.parameters.properties || {});
+      const validParams = Object.keys(parameters?.properties || {});
       const providedParams = Object.keys(args);
       const unexpectedParams = providedParams.filter(p => !validParams.includes(p));
       
@@ -125,8 +184,8 @@ export function validateToolCall(
  * Validate and correct multiple tool calls
  */
 export function validateToolCalls(
-  toolCalls: any[],
-  knownTools: any[] = SHADOWGROK_TOOLS
+  toolCalls: ToolLike[],
+  knownTools: ToolLike[] = SHADOWGROK_TOOLS
 ): { validatedCalls: ValidatedToolCall[]; allValid: boolean; totalWarnings: number; totalErrors: number } {
   const validatedCalls = toolCalls.map(tc => validateToolCall(tc, knownTools));
   const allValid = validatedCalls.every(result => result.isValid);
@@ -170,12 +229,12 @@ function levenshteinDistance(str1: string, str2: string): number {
  */
 export function getToolSuggestions(
   partialName: string,
-  knownTools: any[] = SHADOWGROK_TOOLS,
+  knownTools: ToolLike[] = SHADOWGROK_TOOLS,
   maxSuggestions: number = 3
 ): string[] {
   const knownToolNames = knownTools
-    .map(t => t.type === 'function' ? t.function?.name : t.name)
-    .filter(Boolean);
+    .map(getKnownToolName)
+    .filter((name): name is string => Boolean(name));
 
   const suggestions = knownToolNames
     .map(name => ({

@@ -11,9 +11,9 @@ export type SessionPrincipal = {
 export async function readSession(): Promise<SessionPrincipal | null> {
   const store = await cookies()
   const accessToken = store.get('access_token')?.value
-  
+
   if (!accessToken) return null
-  
+
   try {
     const operator = await getOperatorFromAccessToken(accessToken)
     return {
@@ -23,9 +23,8 @@ export async function readSession(): Promise<SessionPrincipal | null> {
       isActive: operator.isActive,
     }
   } catch {
-    // Clear invalid cookies
-    store.delete('access_token')
-    store.delete('refresh_token')
+    // Invalid token - return null without clearing cookies
+    // (cookie clearing must be done in a Server Action or Route Handler)
     return null
   }
 }

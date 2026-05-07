@@ -757,6 +757,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     setTimeout(scrollToBottom, 100)
 
     abortControllerRef.current = new AbortController()
+    let failureMessages: ChatMessage[] = []
 
     try {
       const res = await apiFetch("/api/admin/ai/chat", {
@@ -771,6 +772,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
       })
 
       const data = (await res.json().catch(() => ({}))) as ChatApiResponse
+      failureMessages = data.messages ?? []
       const progress = data.progress ?? []
       setProgressEvents(progress)
 
@@ -805,7 +807,21 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
       }
 
       const errorMessage = err instanceof Error ? err.message : "Request failed"
-      setMessages((prev) => prev.filter((m) => m.clientMessageId !== clientMessageId))
+      if (failureMessages.length > 0) {
+        setMessages((prev) => [
+          ...prev.filter((m) => m.clientMessageId !== clientMessageId),
+          ...failureMessages,
+        ])
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === convId
+              ? { ...c, updatedAt: Date.now(), messages: [...c.messages, ...failureMessages] }
+              : c,
+          ),
+        )
+      } else {
+        setMessages((prev) => prev.filter((m) => m.clientMessageId !== clientMessageId))
+      }
       setSendError(errorMessage)
       lastRetryRef.current = { prompt: prompt.trim(), clientMessageId }
       toast.error("AI request failed", {
@@ -2435,9 +2451,6 @@ function MessageBubble({
   if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
     return (
       <div className="flex flex-col gap-2">
-        {msg.content && (
-          <AssistantMessage content={msg.content} onCopy={onCopy} timestamp={msg.timestamp} />
-        )}
         {msg.toolCalls.map((tc) => (
           <ToolCallBubble key={tc.id} call={tc} />
         ))}
@@ -2543,13 +2556,21 @@ function AssistantMessage({
 function ToolCallBubble({ call }: { call: ToolCall }) {
   const [expanded, setExpanded] = useState(false)
   let args = ""
+  let hasArgs = false
   try {
-    args = JSON.stringify(JSON.parse(call.arguments), null, 2)
+    const parsed = call.arguments ? JSON.parse(call.arguments) : {}
+    hasArgs =
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      Object.keys(parsed).length > 0
+    args = hasArgs ? JSON.stringify(parsed, null, 2) : ""
   } catch {
     args = call.arguments
+    hasArgs = Boolean(call.arguments?.trim())
   }
 
-  const status = call.status || "executing"
+  const status = call.status || "completed"
   const isExecuting = status === "executing"
   const isCompleted = status === "completed"
 
@@ -2571,11 +2592,18 @@ function ToolCallBubble({ call }: { call: ToolCall }) {
               className={cn("h-3.5 w-3.5 shrink-0", tone.text, isExecuting && "animate-spin")}
             />
             <span className={cn("text-micro font-medium", tone.text)}>
-              {isExecuting ? "Executing" : isCompleted ? "Tool call" : "Failed"}
+              {isExecuting ? "Executing" : isCompleted ? "Tool action" : "Failed"}
             </span>
             <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono text-micro">
               {call.name}
             </code>
+            <span className="text-micro text-muted-foreground">
+              {hasArgs
+                ? "Input available"
+                : isExecuting
+                  ? "Running without extra input"
+                  : "No input required"}
+            </span>
             {isExecuting && (
               <div className="flex items-center gap-1">
                 <div className="h-1 w-1 animate-pulse rounded-full bg-info" />
@@ -2587,21 +2615,24 @@ function ToolCallBubble({ call }: { call: ToolCall }) {
               className={cn(
                 "ml-auto h-3 w-3 text-muted-foreground/50 transition-transform",
                 expanded && "rotate-90",
+                !hasArgs && "opacity-0",
               )}
             />
           </CollapsibleTrigger>
-          <CollapsibleContent>
-            <Separator className="bg-border/40" />
-            <div className="space-y-2 p-3">
-              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                <Terminal className="h-3 w-3" />
-                <span>Arguments</span>
+          {hasArgs && (
+            <CollapsibleContent>
+              <Separator className="bg-border/40" />
+              <div className="space-y-2 p-3">
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                  <Terminal className="h-3 w-3" />
+                  <span>Inputs</span>
+                </div>
+                <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap rounded-lg bg-background/70 px-3 py-2 font-mono text-micro text-foreground/90">
+                  {args}
+                </pre>
               </div>
-              <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap rounded-lg bg-background/70 px-3 py-2 font-mono text-micro text-foreground/90">
-                {args}
-              </pre>
-            </div>
-          </CollapsibleContent>
+            </CollapsibleContent>
+          )}
         </div>
       </Collapsible>
     </div>

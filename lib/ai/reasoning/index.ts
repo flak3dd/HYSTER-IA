@@ -5,6 +5,7 @@
  * - Chain-of-Thought Engine
  * - Meta-Cognition Engine
  * - Reasoning Trace System
+ * - Structured Output Schemas (replaces regex JSON parsing)
  */
 
 export {
@@ -38,3 +39,18 @@ export {
   type DecisionNode,
   type ReasoningTrace,
 } from './reasoning-trace'
+
+export {
+  DecompositionSchema,
+  ThoughtAnalysisSchema,
+  VerificationSchema,
+  SynthesisSchema,
+  UncertaintyAssessmentSchema,
+  KnowledgeGapSchema,
+  SelfQuestioningSchema,
+  StrategySelectionSchema,
+  EmotionalStateSchema,
+  BiasDetectionSchema,
+  ReflectionSchema,
+  IntentAnalysisSchema,
+} from './schemas'

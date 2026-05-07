@@ -1,5 +1,5 @@
 import { randomUUID, randomBytes } from "node:crypto"
-import type { Deployment, DeploymentConfig, DeploymentStatus, DeploymentStep } from "./types"
+import type { Deployment, DeploymentConfig, DeploymentStatus, DeploymentStep, ValidationResult } from "./types"
 import { resolveProviderAsync } from "./providers"
 import { generateSshKeyPair, waitForSsh, sshExec } from "./ssh"
 import { buildProvisionScript } from "./provision-script"
@@ -76,8 +76,80 @@ export async function startDeployment(config: DeploymentConfig): Promise<Deploym
   return deployment
 }
 
+export async function validateDeploymentConfig(config: DeploymentConfig): Promise<ValidationResult> {
+  const issues: ValidationResult["issues"] = []
+
+  // 1. Validate panel URL is not localhost
+  const panelUrl = config.panelUrl
+  if (panelUrl) {
+    const lowerUrl = panelUrl.toLowerCase()
+    if (lowerUrl.includes("localhost") || lowerUrl.includes("127.0.0.1") || lowerUrl.includes("::1")) {
+      issues.push({
+        severity: "error",
+        code: "panel_url_localhost",
+        message: `Panel URL "${panelUrl}" points to localhost. Remote nodes cannot reach it.`,
+        suggestion:
+          "You are running the panel locally. Remote cloud nodes need a public URL to reach it. " +
+          "Quick fixes:\n" +
+          "  1. Use a tunnel: run 'ngrok http 3000' and use the HTTPS URL it gives you\n" +
+          "  2. Use Cloudflare Tunnel: 'cloudflared tunnel --url http://localhost:3000'\n" +
+          "  3. Deploy the panel to a cloud server (Hetzner CX22 ~$4/mo) and set NEXT_PUBLIC_APP_URL\n" +
+          "Then pass that public URL as panelUrl, or set NEXT_PUBLIC_APP_URL in your .env file.",
+      })
+    }
+  }
+
+  // 2. Validate provider credentials
+  try {
+    const provider = await resolveProviderAsync(config.provider)
+
+    // 3. Provider-specific validation (e.g., Azure resource groups)
+    if (provider.validate) {
+      const providerValidation = await provider.validate({
+        name: config.name,
+        region: config.region,
+        size: config.size,
+        resourceGroup: config.resourceGroup,
+      })
+      issues.push(...providerValidation.issues)
+      if (!providerValidation.valid) {
+        return { valid: false, issues }
+      }
+    }
+  } catch (err) {
+    issues.push({
+      severity: "error",
+      code: "provider_credentials_missing",
+      message: err instanceof Error ? err.message : String(err),
+      suggestion: `Add ${config.provider} credentials in Settings > Provider Keys or environment variables.`,
+    })
+    return { valid: false, issues }
+  }
+
+  return { valid: !issues.some((i) => i.severity === "error"), issues }
+}
+
 async function runDeployment(id: string, config: DeploymentConfig): Promise<void> {
   const provider = await resolveProviderAsync(config.provider)
+
+  // Pre-flight validation: catch blockers before generating SSH keys or calling cloud APIs
+  emit(id, "pending", `Pre-flight validation for ${config.provider} deployment...`)
+  const preflight = await validateDeploymentConfig(config)
+  if (!preflight.valid) {
+    const errors = preflight.issues
+      .filter((i) => i.severity === "error")
+      .map((i) => `• [${i.code}] ${i.message}${i.suggestion ? `\n  → Fix: ${i.suggestion}` : ""}`)
+      .join("\n\n")
+    emit(id, "failed", `Pre-flight validation failed — ${preflight.issues.filter((i) => i.severity === "error").length} blocker(s) found`, errors)
+    return
+  }
+
+  // Report any warnings
+  for (const issue of preflight.issues) {
+    if (issue.severity === "warning") {
+      emit(id, "pending", `Warning [${issue.code}]: ${issue.message}${issue.suggestion ? ` (${issue.suggestion})` : ""}`)
+    }
+  }
 
   // Generate SSH key pair
   emit(id, "creating_vps", "Generating SSH key pair...")

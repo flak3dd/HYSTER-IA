@@ -77,11 +77,23 @@ async function armPut(
   return res.json()
 }
 
+function extractAzureError(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: { code?: string; message?: string }
+    }
+    if (parsed.error?.message) {
+      return `${parsed.error.code ?? "Unknown"}: ${parsed.error.message}`
+    }
+  } catch {}
+  return text.slice(0, 400)
+}
+
 async function armGet(token: string, url: string): Promise<unknown> {
   const res = await fetch(url, { headers: headers(token) })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`Azure GET failed (${res.status}): ${text.slice(0, 400)}`)
+    throw new Error(`Azure GET failed (${res.status}): ${extractAzureError(text)}`)
   }
   return res.json()
 }
@@ -119,6 +131,141 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
           { id: "Standard_D2s_v5", label: "D2s v5", cpu: 2, ram: "8 GB", disk: "Temp", price: "~$70/mo" },
         ],
       }
+    },
+
+    async validate(opts): Promise<import("../types").ValidationResult> {
+      const issues: import("../types").ValidationIssue[] = []
+      let valid = true
+      const location = opts.region
+
+      // 1. Verify auth works
+      let token: string
+      try {
+        token = await getAccessToken(auth)
+      } catch (err) {
+        return {
+          valid: false,
+          issues: [{
+            severity: "error",
+            code: "azure_auth_failed",
+            message: `Azure authentication failed: ${err instanceof Error ? err.message : String(err)}`,
+            suggestion: "Verify AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and AZURE_SUBSCRIPTION_ID are correct.",
+          }],
+        }
+      }
+
+      // 2. Check region is valid
+      const preset = this.presets()
+      const validRegions = preset.regions.map((r) => r.id.toLowerCase())
+      if (!validRegions.includes(location.toLowerCase())) {
+        issues.push({
+          severity: "error",
+          code: "azure_invalid_region",
+          message: `Region "${location}" is not a known Azure region.`,
+          suggestion: `Valid regions: ${preset.regions.map((r) => r.id).join(", ")}`,
+        })
+        valid = false
+      }
+
+      // 3. Check size is valid
+      const validSizes = preset.sizes.map((s) => s.id.toLowerCase())
+      if (!validSizes.includes(opts.size.toLowerCase())) {
+        issues.push({
+          severity: "warning",
+          code: "azure_unrecognized_size",
+          message: `VM size "${opts.size}" may not be available in all regions.`,
+          suggestion: `Valid sizes: ${preset.sizes.map((s) => s.id).join(", ")}`,
+        })
+      }
+
+      // 4. Resolve resource group before deployment
+      if (opts.resourceGroup) {
+        try {
+          await armGet(
+            token,
+            `${ARM_API}/subscriptions/${sub}/resourceGroups/${opts.resourceGroup}?api-version=${ARM_API_VERSION_RESOURCES}`,
+          )
+          issues.push({
+            severity: "warning",
+            code: "azure_rg_found",
+            message: `Resource group "${opts.resourceGroup}" verified.`,
+          })
+        } catch (err) {
+          issues.push({
+            severity: "error",
+            code: "azure_rg_not_found",
+            message: `Resource group "${opts.resourceGroup}" not found or inaccessible: ${err instanceof Error ? err.message : String(err)}`,
+            suggestion: `Create it in region "${location}" via Azure Portal/CLI, or pick a different resource group.`,
+          })
+          valid = false
+        }
+      } else {
+        // Try to discover an existing resource group
+        try {
+          const listRes = await fetch(
+            `${ARM_API}/subscriptions/${sub}/resourceGroups?api-version=${ARM_API_VERSION_RESOURCES}`,
+            { headers: headers(token) },
+          )
+          if (listRes.ok) {
+            const listData = (await listRes.json()) as {
+              value?: Array<{ name: string; location: string }>
+            }
+            const rgs = listData.value ?? []
+            if (rgs.length === 0) {
+              issues.push({
+                severity: "error",
+                code: "azure_no_resource_groups",
+                message: `No resource groups found in subscription "${sub}".`,
+                suggestion: `Create a resource group in region "${location}" via Azure Portal/CLI, then pass its name as "resourceGroup".`,
+              })
+              valid = false
+            } else {
+              const match = rgs.find(
+                (rg) => rg.location.toLowerCase() === location.toLowerCase(),
+              )
+              if (match) {
+                issues.push({
+                  severity: "warning",
+                  code: "azure_rg_auto_discovered",
+                  message: `Resource group "${match.name}" in region "${location}" will be used automatically.`,
+                })
+              } else {
+                const fallback = rgs[0]
+                issues.push({
+                  severity: "warning",
+                  code: "azure_rg_region_mismatch",
+                  message: `No resource group in region "${location}". Will fall back to "${fallback.name}" in "${fallback.location}".`,
+                  suggestion: `For cleaner resource management, create a resource group in "${location}".`,
+                })
+              }
+            }
+          } else {
+            const text = await listRes.text().catch(() => "unknown error")
+            const is403 = listRes.status === 403
+            issues.push({
+              severity: "error",
+              code: "azure_rg_list_failed",
+              message: is403
+                ? `Cannot list resource groups: ${extractAzureError(text)}`
+                : `Cannot list resource groups (HTTP ${listRes.status}): ${extractAzureError(text)}`,
+              suggestion: is403
+                ? "The service principal lacks 'Microsoft.Resources/subscriptions/resourceGroups/read' permission. Provide an explicit 'resourceGroup' name to bypass listing."
+                : "The service principal may lack permission to list resource groups. Provide an explicit resourceGroup name.",
+            })
+            valid = false
+          }
+        } catch (err) {
+          issues.push({
+            severity: "error",
+            code: "azure_rg_discovery_failed",
+            message: `Failed to discover resource groups: ${err instanceof Error ? err.message : String(err)}`,
+            suggestion: "Provide an explicit resourceGroup name to bypass discovery.",
+          })
+          valid = false
+        }
+      }
+
+      return { valid, issues }
     },
 
     async createServer(opts): Promise<VpsCreateResult> {
@@ -173,9 +320,12 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
           } else {
             throw new Error("list_failed")
           }
-        } catch {
+        } catch (innerErr) {
+          // Preserve the original inner error for diagnostics
+          const innerMsg = innerErr instanceof Error ? innerErr.message : String(innerErr)
           throw new Error(
             `Azure deployment requires an existing resource group, and none was found in region "${location}".\n\n` +
+            `Inner error: ${innerMsg}\n\n` +
             `Action required — choose one:\n` +
             `1. Create a resource group in "${location}" via Azure Portal / CLI, then pass its name as "resourceGroup".\n` +
             `2. Grant this service principal "Contributor" role at the subscription scope so it can create resource groups automatically.`

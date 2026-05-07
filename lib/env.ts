@@ -60,6 +60,12 @@ const ServerEnvSchema = z.object({
   // AI Debug Logging
   AI_DEBUG: z.coerce.boolean().default(false),
 
+  // AI Reasoning-First Mode (uses reasoning orchestrator before direct LLM tool calling)
+  AI_REASONING_FIRST: z.coerce.boolean().default(true),
+
+  // OpenAI Configuration (GPT-4o — best tool calling support)
+  OPENAI_API_KEY: z.string().min(1).or(z.literal("")).optional(),
+
   // Azure OpenAI Configuration (highest priority when set)
   AZURE_OPENAI_ENDPOINT: z.string().url().or(z.literal("")).optional(),       // e.g. https://your-resource.openai.azure.com/
   AZURE_OPENAI_API_KEY: z.string().min(1).or(z.literal("")).optional(),

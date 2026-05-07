@@ -261,17 +261,63 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
   }
 
   /**
-   * Parse enhanced LLM response with multi-step support
+   * Parse enhanced LLM response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseEnhancedLlmResponseStructured(response: string): Promise<IntentAnalysis> {
+    try {
+      const { generateObject } = await import('ai')
+      const { IntentAnalysisSchema } = await import('../ai/reasoning/schemas')
+      const { getExtractorModel } = await import('../ai/reasoning/extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: IntentAnalysisSchema,
+        prompt: `Parse this intent analysis into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+
+      const parsed = result.object
+      return {
+        intent: parsed.intent || 'Unknown intent',
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
+        extractedParameters: parsed.extractedParameters || {},
+        suggestedFunction: parsed.suggestedFunction || undefined,
+        requiresClarification: parsed.requiresConfirmation || false,
+        clarificationQuestions: [],
+        suggestedChaining: undefined,
+        alternativeApproaches: undefined,
+        dependencies: undefined,
+        estimatedSteps: undefined,
+        riskLevel: parsed.riskLevel || undefined,
+      }
+    } catch {
+      // Fallback to simple text-based parsing
+      return {
+        intent: response.slice(0, 200),
+        confidence: 0.3,
+        extractedParameters: {},
+        requiresClarification: true,
+        clarificationQuestions: ['Could you clarify what you want to do?'],
+      }
+    }
+  }
+
+  /**
+   * @deprecated Use parseEnhancedLlmResponseStructured() instead.
+   * Kept for backward compatibility during migration.
    */
   private parseEnhancedLlmResponse(response: string): IntentAnalysis {
     try {
-      // Try to extract JSON from the response
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) {
+      // Try to extract JSON from the response using proper parsing
+      const startIndex = response.indexOf('{')
+      const endIndex = response.lastIndexOf('}')
+      if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
         throw new Error('No JSON found in response')
       }
 
-      const parsed = JSON.parse(jsonMatch[0])
+      const jsonStr = response.slice(startIndex, endIndex + 1)
+      const parsed = JSON.parse(jsonStr)
 
       return {
         intent: parsed.intent || 'Unknown intent',
@@ -300,86 +346,56 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
   }
 
   /**
-   * Enhanced fallback with pattern matching and multi-step detection
+   * Enhanced fallback with AI-powered parameter extraction.
+   * Replaces regex-based pattern matching with structured LLM extraction.
    */
-  private enhancedFallbackAnalysis(userText: string, availableFunctions: any[], context: Record<string, unknown>): IntentAnalysis {
+  private async enhancedFallbackAnalysisStructured(userText: string, availableFunctions: any[], context: Record<string, unknown>): Promise<IntentAnalysis> {
     const lowerText = userText.toLowerCase()
 
-    // Enhanced keyword mappings with patterns and multi-step support
-    const intentPatterns = {
+    // Keyword-based category detection (no regex, just string matching for categories)
+    const intentCategories = {
       node_management: {
         keywords: ['node', 'server', 'instance', 'host', 'deploy', 'create', 'add', 'new'],
         functions: ['create_node', 'update_node', 'delete_node', 'list_nodes'],
-        extractors: {
-          region: /(?:in|at|region)\s+(\w+(?:-\w+)*)/i,
-          hostname: /(?:host|hostname|server|ip)\s+(\S+)/i,
-          name: /(?:name|called|named)\s+(\S+)/i,
-        },
-        chaining: ['create_node', 'list_nodes']
       },
       user_management: {
-        keywords: ['user', 'client', 'account', 'quota', 'create', 'add', 'new'],
+        keywords: ['user', 'client', 'account', 'quota'],
         functions: ['create_user', 'delete_user', 'list_users'],
-        extractors: {
-          quota: /(\d+)\s*(?:gb|mb|tb)/i,
-          displayname: /(?:name|called|named)\s+(\S+)/i,
-        },
-        chaining: ['create_user', 'generate_config']
       },
       config_management: {
         keywords: ['config', 'configuration', 'generate', 'yaml', 'clash'],
         functions: ['generate_config', 'update_server_config'],
-        extractors: {
-          format: /(?:format|type)\s+(\w+)/i,
-          userId: /(?:user|for)\s+(\S+)/i,
-        },
-        chaining: ['list_users', 'generate_config']
       },
       system_operations: {
         keywords: ['status', 'health', 'check', 'restart', 'reboot', 'system'],
         functions: ['check_status', 'restart_service'],
-        extractors: {},
-        chaining: ['check_status']
       },
       osint_operations: {
         keywords: ['osint', 'enumerate', 'subdomain', 'dns', 'whois', 'domain', 'reconnaissance', 'recon'],
         functions: ['enumerate_domain', 'analyze_domain_threats'],
-        extractors: {
-          domain: /(?:domain|for|target)\s+(\S+\.\S+)/i,
-        },
-        chaining: ['enumerate_domain', 'analyze_domain_threats']
       },
       threat_intel: {
         keywords: ['threat', 'intel', 'malware', 'virustotal', 'analyze', 'ioc', 'indicator'],
         functions: ['analyze_ip_threats', 'analyze_domain_threats', 'analyze_url_threats'],
-        extractors: {
-          target: /(?:analyze|check|scan)\s+(\S+)/i,
-        },
-        chaining: ['enumerate_domain', 'analyze_domain_threats', 'generate_threat_report']
       },
       complex_operations: {
         keywords: ['complex', 'advanced', 'multi', 'orchestrate', 'workflow', 'then', 'after'],
         functions: ['complex_operation'],
-        extractors: {
-          operation: /(?:do|perform|execute)\s+(.+)/i,
-        },
-        chaining: ['check_status', 'complex_operation', 'generate_report']
-      }
+      },
     }
 
     // Find matching intent category
-    let bestMatch: { category: string; score: number; function: string; chaining?: string[] } | null = null
+    let bestMatch: { category: string; score: number; function: string } | null = null
     let highestScore = 0
 
-    for (const [category, config] of Object.entries(intentPatterns)) {
+    for (const [category, config] of Object.entries(intentCategories)) {
       const keywordScore = config.keywords.filter(keyword => lowerText.includes(keyword)).length
       if (keywordScore > highestScore) {
         highestScore = keywordScore
         bestMatch = {
           category,
           score: keywordScore,
-          function: config.functions[0], // Default to first function
-          chaining: config.chaining
+          function: config.functions[0],
         }
       }
     }
@@ -389,19 +405,23 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
     const isMultiStep = multiStepKeywords.some(keyword => lowerText.includes(keyword))
 
     if (bestMatch && bestMatch.score >= 2) {
-      // Extract parameters using regex patterns
-      const extractedParams: Record<string, unknown> = {}
-      const patterns = intentPatterns[bestMatch.category as keyof typeof intentPatterns].extractors
-      
-      for (const [param, pattern] of Object.entries(patterns)) {
-        const match = userText.match(pattern)
-        if (match) {
-          extractedParams[param] = match[1]
-        }
+      // Use AI-powered parameter extraction instead of regex
+      let extractedParams: Record<string, unknown> = {}
+      try {
+        const { extractToolArgs } = await import('../ai/argument-extractor')
+        const extractionResult = await extractToolArgs(
+          bestMatch.function,
+          {},
+          userText,
+        )
+        extractedParams = extractionResult.args
+      } catch {
+        // If AI extraction fails, proceed without extracted params
+        extractedParams = {}
       }
 
       return {
-        intent: `User wants to ${bestMatch.category.replace('_', ' ')}`,
+        intent: `User wants to ${bestMatch.category.replace(/_/g, ' ')}`,
         confidence: Math.min(0.7, bestMatch.score * 0.15),
         extractedParameters: extractedParams,
         suggestedFunction: bestMatch.function,

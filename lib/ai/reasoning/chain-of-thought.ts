@@ -834,19 +834,86 @@ GUIDELINES:
     return prompt
   }
 
-  private parseDecomposition(response: string): any {
+  /**
+   * Extract JSON from response using proper parsing without regex.
+   * Finds first '{' and last '}' to extract JSON object.
+   */
+  private extractJsonObject(response: string): string | null {
+    const startIndex = response.indexOf('{')
+    const endIndex = response.lastIndexOf('}')
+
+    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
+      return null
+    }
+
+    return response.slice(startIndex, endIndex + 1)
+  }
+
+  /**
+   * Parse decomposition using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseDecompositionStructured(response: string): Promise<any> {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : { subProblems: [], estimatedSteps: 1 }
+      const { generateObject } = await import('ai')
+      const { DecompositionSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: DecompositionSchema,
+        prompt: `Parse this decomposition response into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
     } catch {
       return { subProblems: [], estimatedSteps: 1 }
     }
   }
 
+  /**
+   * Parse thought response using structured output schema.
+   * Replaces regex-based JSON extraction with generateObject().
+   */
+  private async parseThoughtResponseStructured(response: string): Promise<any> {
+    try {
+      const { generateObject } = await import('ai')
+      const { ThoughtAnalysisSchema } = await import('./schemas')
+      const { getExtractorModel } = await import('./extractor-provider')
+
+      const result = await generateObject({
+        model: getExtractorModel(),
+        schema: ThoughtAnalysisSchema,
+        prompt: `Parse this thought analysis into structured data:\n\n${response}`,
+        temperature: 0,
+      })
+      return result.object
+    } catch {
+      return { analysis: response, confidence: 0.5 }
+    }
+  }
+
+  /**
+   * @deprecated Use parseDecompositionStructured() instead.
+   * Kept for backward compatibility during migration.
+   */
+  private parseDecomposition(response: string): any {
+    try {
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : { subProblems: [], estimatedSteps: 1 }
+    } catch {
+      return { subProblems: [], estimatedSteps: 1 }
+    }
+  }
+
+  /**
+   * @deprecated Use parseThoughtResponseStructured() instead.
+   * Kept for backward compatibility during migration.
+   */
   private parseThoughtResponse(response: string): any {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/)
-      return jsonMatch ? JSON.parse(jsonMatch[0]) : { analysis: response, confidence: 0.5 }
+      const jsonStr = this.extractJsonObject(response)
+      return jsonStr ? JSON.parse(jsonStr) : { analysis: response, confidence: 0.5 }
     } catch {
       return { analysis: response, confidence: 0.5 }
     }
