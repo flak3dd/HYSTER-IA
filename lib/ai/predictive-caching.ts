@@ -519,7 +519,9 @@ class PredictiveCachingEngine {
   }
 }
 
-// Global singleton instance
-const predictiveCaching = new PredictiveCachingEngine()
+// Global singleton instance (globalThis-guarded to survive HMR)
+const gPC = globalThis as typeof globalThis & { __predictiveCaching?: PredictiveCachingEngine }
+const predictiveCaching = gPC.__predictiveCaching ?? new PredictiveCachingEngine()
+if (!gPC.__predictiveCaching) gPC.__predictiveCaching = predictiveCaching
 
 export { PredictiveCachingEngine, predictiveCaching }

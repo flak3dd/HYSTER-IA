@@ -1,7 +1,11 @@
 import { z } from "zod"
 import type { AgentTool, AgentToolContext } from "@/lib/ai/tool-types"
 import { chatComplete } from "@/lib/ai/llm"
-import { listNodes } from "@/lib/db/nodes"
+import { listNodes, getNodeById, createNode, updateNode, deleteNode } from "@/lib/db/nodes"
+import { getProfileById, resolveProfileConfig } from "@/lib/db/profiles"
+import { sshExec } from "@/lib/deploy/ssh"
+import { renderHysteriaYaml } from "@/lib/hysteria/config"
+import { listBeacons, getBeaconById } from "@/lib/db/beacons"
 import { listUsers } from "@/lib/db/users"
 import { listProfiles } from "@/lib/db/profiles"
 import { getServerConfig } from "@/lib/db/server-config"
@@ -26,9 +30,21 @@ import type { DeploymentConfig } from "@/lib/deploy/types"
 const GenerateConfigInput = z.object({
   description: z
     .string()
-    .min(1)
     .max(4000)
+    .optional()
     .describe("Natural language description of the desired Hysteria2 server config"),
+  applyToNodes: z
+    .array(z.string().min(1))
+    .optional()
+    .describe("Optional: Array of node IDs to immediately apply this config to via SSH"),
+  sshPrivateKey: z
+    .string()
+    .optional()
+    .describe("Required if applyToNodes is set: SSH private key for accessing nodes"),
+  restartService: z
+    .boolean()
+    .default(true)
+    .describe("Restart hysteria-server service after applying config (default: true)"),
 })
 
 const CONFIG_SYSTEM_PROMPT = `You are a Hysteria2 server configuration expert. Given a natural language description, generate a valid Hysteria2 server configuration in YAML format.
@@ -50,11 +66,19 @@ Rules:
 
 export const generateConfigTool: AgentTool<
   z.infer<typeof GenerateConfigInput>,
-  { yaml: string }
+  {
+    yaml: string
+    applied?: Array<{
+      nodeId: string
+      success: boolean
+      message: string
+      steps?: Array<{ step: string; status: "ok" | "error"; output?: string; error?: string }>
+    }>
+  }
 > = {
   name: "generate_config",
   description:
-    "Generate a Hysteria2 server configuration YAML from a natural language description. Returns a preview config — the admin must review before applying.",
+    "Generate a Hysteria2 server configuration YAML from a natural language description. Optionally apply the generated config directly to one or more nodes via SSH. Returns a preview config — review before applying.",
   parameters: GenerateConfigInput,
   jsonSchema: {
     type: "object",
@@ -63,19 +87,125 @@ export const generateConfigTool: AgentTool<
         type: "string",
         description: "Natural language description of the desired config",
       },
+      applyToNodes: {
+        type: "array",
+        items: { type: "string" },
+        description: "Optional: Node IDs to apply config to via SSH",
+      },
+      sshPrivateKey: {
+        type: "string",
+        description: "Required if applyToNodes is set: SSH private key (PEM format)",
+      },
+      restartService: {
+        type: "boolean",
+        default: true,
+        description: "Restart service after applying config",
+      },
     },
-    required: ["description"],
+    required: [],
   },
   async run(input, ctx) {
+    const description = input.description?.trim()
+    if (!description) {
+      return {
+        yaml: "# Error: No description provided.\n# Please describe what kind of Hysteria2 config you want (e.g., obfuscated, high-throughput, minimal).",
+      }
+    }
+
+    // Generate config
     const result = await chatComplete({
       messages: [
         { role: "system", content: CONFIG_SYSTEM_PROMPT },
-        { role: "user", content: input.description },
+        { role: "user", content: description },
       ],
       temperature: 0.3,
       signal: ctx.signal,
     })
-    return { yaml: result.content ?? "" }
+
+    const yaml = result.content ?? ""
+
+    // If applyToNodes is specified, apply config to each node
+    const applied: Array<{
+      nodeId: string
+      success: boolean
+      message: string
+      steps?: Array<{ step: string; status: "ok" | "error"; output?: string; error?: string }>
+    }> = []
+
+    if (input.applyToNodes && input.applyToNodes.length > 0) {
+      if (!input.sshPrivateKey) {
+        applied.push({
+          nodeId: "N/A",
+          success: false,
+          message: "sshPrivateKey is required when applyToNodes is specified",
+        })
+        return { yaml, applied }
+      }
+
+      for (const nodeId of input.applyToNodes) {
+        const steps: Array<{ step: string; status: "ok" | "error"; output?: string; error?: string }> = []
+
+        try {
+          // Get node
+          const node = await getNodeById(nodeId)
+          if (!node) {
+            applied.push({
+              nodeId,
+              success: false,
+              message: "Node not found",
+              steps: [{ step: "lookup_node", status: "error", error: "Node not found" }],
+            })
+            continue
+          }
+          steps.push({ step: "lookup_node", status: "ok", output: `Found node ${node.name} at ${node.hostname}` })
+
+          // Write config via SSH
+          const escapedYaml = yaml.replace(/'/g, "'\"'\"'")
+          const writeCmd = `mkdir -p /etc/hysteria && echo '${escapedYaml}' > /etc/hysteria/config.yaml && chmod 600 /etc/hysteria/config.yaml`
+
+          const writeResult = await sshExec({
+            host: node.hostname,
+            privateKey: input.sshPrivateKey,
+            command: writeCmd,
+            timeoutMs: 30_000,
+          })
+
+          if (writeResult.code !== 0) {
+            steps.push({ step: "write_config", status: "error", error: writeResult.stderr || `Exit code ${writeResult.code}` })
+            applied.push({ nodeId, success: false, message: "Failed to write config", steps })
+            continue
+          }
+          steps.push({ step: "write_config", status: "ok", output: "Config written to /etc/hysteria/config.yaml" })
+
+          // Restart service if requested
+          if (input.restartService) {
+            const restartResult = await sshExec({
+              host: node.hostname,
+              privateKey: input.sshPrivateKey,
+              command: "systemctl daemon-reload && systemctl restart hysteria-server && systemctl is-active hysteria-server",
+              timeoutMs: 30_000,
+            })
+
+            if (restartResult.stdout.includes("active")) {
+              steps.push({ step: "restart_service", status: "ok", output: "Service restarted and is active" })
+            } else {
+              steps.push({ step: "restart_service", status: "error", error: restartResult.stderr || "Service not active" })
+            }
+          }
+
+          applied.push({ nodeId, success: true, message: `Config applied to node "${node.name}"`, steps })
+        } catch (err) {
+          steps.push({
+            step: "ssh_connection",
+            status: "error",
+            error: err instanceof Error ? err.message : String(err),
+          })
+          applied.push({ nodeId, success: false, message: "SSH connection failed", steps })
+        }
+      }
+    }
+
+    return { yaml, applied: applied.length > 0 ? applied : undefined }
   },
 }
 
@@ -704,25 +834,41 @@ export const deletePayloadTool: AgentTool<
 /* ------------------------------------------------------------------ */
 
 const DeployNodeInput = z.object({
-  provider: z.enum(["hetzner", "digitalocean", "vultr", "lightsail", "azure"]).describe("Cloud provider to use"),
-  region: z.string().min(1).describe("Region/zone for deployment"),
-  size: z.string().min(1).describe("Server size/plan"),
-  name: z.string().min(1).max(120).describe("Node name"),
+  provider: z.enum(["hetzner", "digitalocean", "vultr", "lightsail", "azure"]).optional().describe("Cloud provider to use (auto: hetzner)"),
+  region: z.string().min(1).optional().describe("Region/zone for deployment (auto-selected)"),
+  size: z.string().min(1).optional().describe("Server size/plan (auto-selected)"),
+  name: z.string().min(1).max(120).optional().describe("Node name (auto-generated if omitted)"),
   domain: z.string().optional().describe("Optional domain name for TLS"),
   port: z.coerce.number().int().min(1).max(65535).default(443).describe("Port to listen on"),
   tags: z.array(z.string().max(40)).default([]).describe("Tags for the node"),
-  panelUrl: z.string().url().describe("Panel URL for auth backend"),
+  panelUrl: z.string().url().optional().describe("Panel URL for auth backend (auto-detected)"),
   bandwidthUp: z.string().optional().describe("Upload bandwidth limit"),
   bandwidthDown: z.string().optional().describe("Download bandwidth limit"),
   resourceGroup: z.string().optional().describe("Azure: existing resource group name (avoids permission issues)"),
 })
 
+/** Smart defaults per provider — chosen as cheapest, most reliable entry-level option */
+const DEPLOY_DEFAULTS: Record<
+  string,
+  { region: string; size: string }
+> = {
+  hetzner: { region: "fsn1", size: "cx22" },
+  digitalocean: { region: "nyc3", size: "s-1vcpu-2gb" },
+  vultr: { region: "ewr", size: "vc2-1c-2gb" },
+  lightsail: { region: "us-east-1", size: "nano_3_0" },
+  azure: { region: "eastus", size: "Standard_B1s" },
+}
+
 export const deployNodeTool: AgentTool<
   z.infer<typeof DeployNodeInput>,
-  { deploymentId: string; status: string; message: string }
+  { deploymentId: string; status: string; message: string; defaultsApplied: Record<string, string | number | undefined> }
 > = {
   name: "deploy_node",
-  description: "Deploy a new Hysteria2 node to a cloud provider. Creates VPS, installs Hysteria2, and registers the node in the database. Provider must be one of: hetzner, digitalocean, vultr, lightsail, azure.",
+  description:
+    "Deploy a new Hysteria2 node to a cloud provider. Creates VPS, installs Hysteria2, and registers the node in the database. " +
+    "Provider: hetzner, digitalocean, vultr, lightsail, azure. " +
+    "CRITICAL for Azure: resourceGroup parameter is REQUIRED. The service principal cannot list resource groups, so you must explicitly provide an existing resource group name. " +
+    "Example resource groups: hysteria-rg-eastus, hysteria-rg-westeurope, hysteria-rg-australiaeast.",
   parameters: DeployNodeInput,
   jsonSchema: {
     type: "object",
@@ -730,46 +876,64 @@ export const deployNodeTool: AgentTool<
       provider: {
         type: "string",
         enum: ["hetzner", "digitalocean", "vultr", "lightsail", "azure"],
-        description: "Cloud provider (must be exactly one of: hetzner, digitalocean, vultr, lightsail, azure)"
+        description: "Cloud provider (auto: hetzner)"
       },
-      region: { type: "string", description: "Region for deployment (e.g., ewr, fra, eastus)" },
-      size: { type: "string", description: "Server size (e.g., vc2-2c-4gb, Standard_B2s)" },
-      name: { type: "string", description: "Node name" },
+      region: { type: "string", description: "Region for deployment (auto-selected from provider defaults)" },
+      size: { type: "string", description: "Server size (auto-selected from provider defaults)" },
+      name: { type: "string", description: "Node name (auto-generated if omitted)" },
       domain: { type: "string", description: "Optional domain name for TLS" },
       port: { type: "integer", default: 443, description: "Port (default: 443)" },
       tags: { type: "array", items: { type: "string" }, description: "Tags for organization" },
-      panelUrl: { type: "string", description: "Panel URL for auth backend (e.g., http://localhost:3000)" },
+      panelUrl: { type: "string", description: "Panel URL for auth backend (auto-detected from env)" },
       bandwidthUp: { type: "string", description: "Upload bandwidth (e.g., 1 gbps)" },
       bandwidthDown: { type: "string", description: "Download bandwidth (e.g., 10 gbps)" },
       resourceGroup: { type: "string", description: "Azure: existing resource group name to avoid permission issues" },
     },
-    required: ["provider", "region", "size", "name", "panelUrl"],
+    required: [],
   },
   async run(input, ctx) {
-    // Validate provider enum
     const validProviders = ["hetzner", "digitalocean", "vultr", "lightsail", "azure"]
-    if (!validProviders.includes(input.provider)) {
-      throw new Error(`Invalid provider "${input.provider}". Must be one of: ${validProviders.join(", ")}`)
+
+    // --- Smart defaults ---
+    let provider = input.provider
+    if (!provider || !validProviders.includes(provider)) {
+      provider = "hetzner"
+    }
+
+    const defaults = DEPLOY_DEFAULTS[provider]
+    const region = input.region?.trim() || defaults.region
+    const size = input.size?.trim() || defaults.size
+    const name = input.name?.trim() || `hysteria-${provider}-${Date.now()}`
+    const panelUrl = input.panelUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+
+    const defaultsApplied: Record<string, string | number | undefined> = {
+      provider,
+      region,
+      size,
+      name,
+      panelUrl,
     }
 
     const config: DeploymentConfig = {
-      provider: input.provider,
-      region: input.region,
-      size: input.size,
-      name: input.name,
+      provider,
+      region,
+      size,
+      name,
       domain: input.domain,
       port: input.port,
       tags: input.tags,
-      panelUrl: input.panelUrl,
+      panelUrl,
       bandwidthUp: input.bandwidthUp,
       bandwidthDown: input.bandwidthDown,
       resourceGroup: input.resourceGroup,
     }
+
     const deployment = await startDeployment(config)
     return {
       deploymentId: deployment.id,
       status: deployment.status,
-      message: `Deployment started for ${input.name} on ${input.provider}`,
+      message: `Deployment started for "${name}" on ${provider} (${region}, ${size}).`,
+      defaultsApplied,
     }
   },
 }
@@ -1262,7 +1426,9 @@ export const performanceOptimizationTool: AgentTool<
 /* ------------------------------------------------------------------ */
 
 const IncidentResponseInput = z.object({
-  incidentType: z.enum(["node_down", "security_breach", "performance_degradation", "auth_failure", "other"]).describe("Type of incident"),
+  incidentType: z.enum(["node_down", "security_breach", "performance_degradation", "auth_failure", "other"]).describe(
+    "Type of incident. Must be one of: node_down (node failure), security_breach (security incident), performance_degradation (performance issues), auth_failure (authentication failures), other (miscellaneous)"
+  ),
   description: z.string().min(10).max(2000).describe("Detailed description of the incident"),
   severity: z.enum(["low", "medium", "high", "critical"]).default("medium").describe("Incident severity level"),
   autoMitigate: z.boolean().default(false).describe("Automatically apply mitigation steps (use with caution)"),
@@ -1292,7 +1458,7 @@ export const incidentResponseTool: AgentTool<
 > = {
   name: "incident_response",
   description:
-    "Automated incident response system for handling security events, node failures, performance issues, and authentication failures. Provides analysis, recommended actions, and optional automated mitigation.",
+    "Automated incident response system for handling infrastructure incidents. Valid incident types: 'node_down' (node failure), 'security_breach' (security incident), 'performance_degradation' (performance issues), 'auth_failure' (authentication failures), 'other' (miscellaneous). Provides analysis, recommended actions, and optional automated mitigation.",
   parameters: IncidentResponseInput,
   jsonSchema: {
     type: "object",
@@ -1300,7 +1466,7 @@ export const incidentResponseTool: AgentTool<
       incidentType: {
         type: "string",
         enum: ["node_down", "security_breach", "performance_degradation", "auth_failure", "other"],
-        description: "Type of incident"
+        description: "Type of incident. Valid values: node_down (node failure), security_breach (security incident), performance_degradation (performance issues), auth_failure (authentication failures), other (miscellaneous)"
       },
       description: {
         type: "string",
@@ -1784,6 +1950,520 @@ export const threatIntelligenceTool: AgentTool<
 }
 
 /* ------------------------------------------------------------------ */
+/*  Tool: list_nodes                                                  */
+/* ------------------------------------------------------------------ */
+
+const ListNodesInput = z.object({
+  status: z.enum(["stopped", "starting", "running", "stopping", "errored"]).optional().describe("Filter by node status"),
+  provider: z.string().optional().describe("Filter by cloud provider"),
+  tag: z.string().optional().describe("Filter by tag"),
+  limit: z.coerce.number().int().min(1).max(100).default(50).describe("Max nodes to return"),
+})
+
+export const listNodesTool: AgentTool<
+  z.infer<typeof ListNodesInput>,
+  {
+    nodes: Array<{
+      id: string
+      name: string
+      hostname: string
+      region: string | null
+      listenAddr: string
+      status: string
+      tags: string[]
+      provider: string | null
+      lastHeartbeatAt: number | null
+      createdAt: number
+    }>
+    count: number
+  }
+> = {
+  name: "list_nodes",
+  description: "List all Hysteria2 nodes in the infrastructure inventory. Filter by status, provider, or tag. Returns node IDs, names, hostnames, status, and metadata.",
+  parameters: ListNodesInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["stopped", "starting", "running", "stopping", "errored"], description: "Filter by status" },
+      provider: { type: "string", description: "Filter by provider name" },
+      tag: { type: "string", description: "Filter by tag" },
+      limit: { type: "integer", default: 50, description: "Max results (1-100)" },
+    },
+  },
+  async run(input) {
+    const all = await listNodes({ take: input.limit })
+    let nodes = all
+    if (input.status) nodes = nodes.filter((n) => n.status === input.status)
+    const providerFilter = input.provider
+    if (providerFilter) nodes = nodes.filter((n) => n.provider?.toLowerCase().includes(providerFilter.toLowerCase()))
+    const tagFilter = input.tag
+    if (tagFilter) nodes = nodes.filter((n) => n.tags.some((t) => t.toLowerCase().includes(tagFilter.toLowerCase())))
+    return {
+      nodes: nodes.map((n) => ({
+        id: n.id,
+        name: n.name,
+        hostname: n.hostname,
+        region: n.region ?? null,
+        listenAddr: n.listenAddr,
+        status: n.status,
+        tags: n.tags,
+        provider: n.provider ?? null,
+        lastHeartbeatAt: n.lastHeartbeatAt,
+        createdAt: n.createdAt,
+      })),
+      count: nodes.length,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: get_node                                                    */
+/* ------------------------------------------------------------------ */
+
+const GetNodeInput = z.object({
+  nodeId: z.string().min(1).describe("Node ID to retrieve"),
+})
+
+export const getNodeTool: AgentTool<
+  z.infer<typeof GetNodeInput>,
+  {
+    found: boolean
+    node?: {
+      id: string
+      name: string
+      hostname: string
+      region: string | null
+      listenAddr: string
+      status: string
+      tags: string[]
+      provider: string | null
+      profileId: string | null
+      lastHeartbeatAt: number | null
+      createdAt: number
+      updatedAt: number
+    }
+  }
+> = {
+  name: "get_node",
+  description: "Get detailed information about a specific Hysteria2 node by ID. Returns full node configuration and status.",
+  parameters: GetNodeInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      nodeId: { type: "string", description: "Node ID" },
+    },
+    required: ["nodeId"],
+  },
+  async run(input) {
+    const node = await getNodeById(input.nodeId)
+    if (!node) return { found: false }
+    return {
+      found: true,
+      node: {
+        id: node.id,
+        name: node.name,
+        hostname: node.hostname,
+        region: node.region ?? null,
+        listenAddr: node.listenAddr,
+        status: node.status,
+        tags: node.tags,
+        provider: node.provider ?? null,
+        profileId: node.profileId,
+        lastHeartbeatAt: node.lastHeartbeatAt,
+        createdAt: node.createdAt,
+        updatedAt: node.updatedAt,
+      },
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: create_node                                                 */
+/* ------------------------------------------------------------------ */
+
+const CreateNodeInput = z.object({
+  name: z.string().min(1).max(120).optional().describe("Node display name (auto-generated if omitted)"),
+  hostname: z.string().min(1).optional().describe("Server hostname or IP (placeholder assigned if omitted)"),
+  region: z.string().optional().describe("Region / datacenter"),
+  listenAddr: z.string().default(":443").describe("Listen address:port (default :443)"),
+  tags: z.array(z.string().max(40)).default([]).describe("Organizational tags"),
+  provider: z.string().optional().describe("Cloud provider (hetzner, digitalocean, vultr, aws, azure, etc.)"),
+})
+
+export const createNodeTool: AgentTool<
+  z.infer<typeof CreateNodeInput>,
+  { nodeId: string; name: string; status: string; message: string; defaultsApplied?: Record<string, string | undefined> }
+> = {
+  name: "create_node",
+  description:
+    "Register a new Hysteria2 node in the database. This creates the node inventory entry only — use deploy_node to provision the actual VPS and install Hysteria2. " +
+    "Name and hostname are optional and will be auto-generated if omitted.",
+  parameters: CreateNodeInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Node display name (auto-generated if omitted)" },
+      hostname: { type: "string", description: "Server hostname or IP (placeholder assigned if omitted)" },
+      region: { type: "string", description: "Region / datacenter" },
+      listenAddr: { type: "string", default: ":443", description: "Listen address:port" },
+      tags: { type: "array", items: { type: "string" }, description: "Tags" },
+      provider: { type: "string", description: "Cloud provider name" },
+    },
+    required: [],
+  },
+  async run(input) {
+    const ts = Date.now()
+    const name = input.name?.trim() || `node-${ts}`
+    const hostname = input.hostname?.trim() || `pending-${ts}.local`
+
+    const node = await createNode({
+      name,
+      hostname,
+      region: input.region,
+      listenAddr: input.listenAddr,
+      tags: input.tags,
+      provider: input.provider,
+    })
+    return {
+      nodeId: node.id,
+      name: node.name,
+      status: node.status,
+      message: `Node "${node.name}" registered with ID ${node.id}`,
+      defaultsApplied: input.name ? undefined : { name, hostname },
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: update_node                                                 */
+/* ------------------------------------------------------------------ */
+
+const UpdateNodeInput = z.object({
+  nodeId: z.string().min(1).describe("Node ID to update"),
+  name: z.string().min(1).max(120).optional().describe("New display name"),
+  hostname: z.string().min(1).optional().describe("New hostname or IP"),
+  region: z.string().optional().describe("New region"),
+  listenAddr: z.string().optional().describe("New listen address:port"),
+  status: z.enum(["stopped", "starting", "running", "stopping", "errored"]).optional().describe("New status"),
+  tags: z.array(z.string().max(40)).optional().describe("Replace tags"),
+  provider: z.string().optional().describe("New provider name"),
+  profileId: z.string().optional().describe("Config profile ID to apply to this node"),
+})
+
+export const updateNodeTool: AgentTool<
+  z.infer<typeof UpdateNodeInput>,
+  { success: boolean; nodeId: string; message: string }
+> = {
+  name: "update_node",
+  description: "Update an existing Hysteria2 node's properties (name, hostname, region, listen address, status, tags, provider, profileId). Only provided fields are changed.",
+  parameters: UpdateNodeInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      nodeId: { type: "string", description: "Node ID" },
+      name: { type: "string", description: "New display name" },
+      hostname: { type: "string", description: "New hostname or IP" },
+      region: { type: "string", description: "New region" },
+      listenAddr: { type: "string", description: "New listen address:port" },
+      status: { type: "string", enum: ["stopped", "starting", "running", "stopping", "errored"], description: "New status" },
+      tags: { type: "array", items: { type: "string" }, description: "Replace tags" },
+      provider: { type: "string", description: "New provider name" },
+      profileId: { type: "string", description: "Config profile ID to apply" },
+    },
+    required: ["nodeId"],
+  },
+  async run(input) {
+    const patch: Record<string, unknown> = {}
+    if (input.name !== undefined) patch.name = input.name
+    if (input.hostname !== undefined) patch.hostname = input.hostname
+    if (input.region !== undefined) patch.region = input.region
+    if (input.listenAddr !== undefined) patch.listenAddr = input.listenAddr
+    if (input.status !== undefined) patch.status = input.status
+    if (input.tags !== undefined) patch.tags = input.tags
+    if (input.provider !== undefined) patch.provider = input.provider
+    if (input.profileId !== undefined) patch.profileId = input.profileId
+    const updated = await updateNode(input.nodeId, patch)
+    if (!updated) {
+      return { success: false, nodeId: input.nodeId, message: "Node not found" }
+    }
+    return { success: true, nodeId: updated.id, message: `Node "${updated.name}" updated` }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: delete_node                                                 */
+/* ------------------------------------------------------------------ */
+
+const DeleteNodeInput = z.object({
+  nodeId: z.string().min(1).describe("Node ID to delete"),
+})
+
+export const deleteNodeTool: AgentTool<
+  z.infer<typeof DeleteNodeInput>,
+  { success: boolean; message: string }
+> = {
+  name: "delete_node",
+  description: "Delete a Hysteria2 node from the inventory. This removes the database entry only — it does not tear down the underlying VPS.",
+  parameters: DeleteNodeInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      nodeId: { type: "string", description: "Node ID to delete" },
+    },
+    required: ["nodeId"],
+  },
+  async run(input) {
+    const ok = await deleteNode(input.nodeId)
+    return {
+      success: ok,
+      message: ok ? "Node deleted from inventory" : "Node not found",
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: apply_node_config                                           */
+/* ------------------------------------------------------------------ */
+
+const ApplyNodeConfigInput = z.object({
+  nodeId: z.string().min(1).describe("Node ID to apply config to"),
+  profileId: z.string().min(1).describe("Config profile ID to apply"),
+  sshPrivateKey: z.string().min(1).describe("SSH private key (PEM format) for accessing the node"),
+  restartService: z.boolean().default(true).describe("Restart hysteria-server service after applying config"),
+})
+
+export const applyNodeConfigTool: AgentTool<
+  z.infer<typeof ApplyNodeConfigInput>,
+  {
+    success: boolean
+    nodeId: string
+    message: string
+    steps: Array<{ step: string; status: "ok" | "error"; output?: string; error?: string }>
+  }
+> = {
+  name: "apply_node_config",
+  description: "Apply a Hysteria2 config profile to a remote node via SSH. This writes the config file and optionally restarts the service. Requires the node's SSH private key.",
+  parameters: ApplyNodeConfigInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      nodeId: { type: "string", description: "Node ID to apply config to" },
+      profileId: { type: "string", description: "Config profile ID to apply" },
+      sshPrivateKey: { type: "string", description: "SSH private key (PEM format) for node access" },
+      restartService: { type: "boolean", default: true, description: "Restart service after config update" },
+    },
+    required: ["nodeId", "profileId", "sshPrivateKey"],
+  },
+  async run(input, ctx) {
+    const steps: Array<{ step: string; status: "ok" | "error"; output?: string; error?: string }> = []
+
+    // Step 1: Get node
+    const node = await getNodeById(input.nodeId)
+    if (!node) {
+      return { success: false, nodeId: input.nodeId, message: "Node not found", steps: [{ step: "lookup_node", status: "error", error: "Node not found" }] }
+    }
+    steps.push({ step: "lookup_node", status: "ok", output: `Found node ${node.name} at ${node.hostname}` })
+
+    // Step 2: Get profile and resolve config
+    const profile = await getProfileById(input.profileId)
+    if (!profile) {
+      return { success: false, nodeId: input.nodeId, message: "Profile not found", steps }
+    }
+    const resolved = resolveProfileConfig(profile)
+    steps.push({ step: "resolve_profile", status: "ok", output: `Resolved profile "${profile.name}"` })
+
+    // Step 3: Generate config YAML
+    const configYaml = renderHysteriaYaml(resolved)
+    steps.push({ step: "generate_config", status: "ok", output: "Generated config YAML" })
+
+    // Step 4: SSH and write config
+    const escapedYaml = configYaml.replace(/'/g, "'\"'\"'")
+    const writeCmd = `mkdir -p /etc/hysteria && echo '${escapedYaml}' > /etc/hysteria/config.yaml && chmod 600 /etc/hysteria/config.yaml`
+
+    try {
+      const writeResult = await sshExec({
+        host: node.hostname,
+        privateKey: input.sshPrivateKey,
+        command: writeCmd,
+        timeoutMs: 30_000,
+      })
+
+      if (writeResult.code !== 0) {
+        steps.push({ step: "write_config", status: "error", error: writeResult.stderr || `Exit code ${writeResult.code}` })
+        return { success: false, nodeId: input.nodeId, message: "Failed to write config", steps }
+      }
+      steps.push({ step: "write_config", status: "ok", output: "Config written to /etc/hysteria/config.yaml" })
+    } catch (err) {
+      steps.push({ step: "write_config", status: "error", error: err instanceof Error ? err.message : String(err) })
+      return { success: false, nodeId: input.nodeId, message: "SSH connection failed", steps }
+    }
+
+    // Step 5: Restart service if requested
+    if (input.restartService) {
+      try {
+        const restartResult = await sshExec({
+          host: node.hostname,
+          privateKey: input.sshPrivateKey,
+          command: "systemctl daemon-reload && systemctl restart hysteria-server && systemctl is-active hysteria-server",
+          timeoutMs: 30_000,
+        })
+
+        if (restartResult.stdout.includes("active")) {
+          steps.push({ step: "restart_service", status: "ok", output: "Service restarted and is active" })
+        } else if (restartResult.code === 0) {
+          steps.push({ step: "restart_service", status: "ok", output: "Service restart command executed" })
+        } else {
+          steps.push({ step: "restart_service", status: "error", error: restartResult.stderr || "Service restart failed" })
+          return { success: false, nodeId: input.nodeId, message: "Service restart failed", steps }
+        }
+      } catch (err) {
+        steps.push({ step: "restart_service", status: "error", error: err instanceof Error ? err.message : String(err) })
+        return { success: false, nodeId: input.nodeId, message: "Service restart failed", steps }
+      }
+    }
+
+    // Step 6: Update node in DB with profileId
+    await updateNode(input.nodeId, { profileId: input.profileId })
+    steps.push({ step: "update_database", status: "ok", output: "Node updated with profileId" })
+
+    return {
+      success: true,
+      nodeId: input.nodeId,
+      message: `Config applied to node "${node.name}" from profile "${profile.name}"`,
+      steps,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: list_beacons                                                */
+/* ------------------------------------------------------------------ */
+
+const ListBeaconsInput = z.object({
+  status: z.enum(["online", "idle", "stale", "offline"]).optional().describe("Filter by beacon status"),
+  osFamily: z.string().optional().describe("Filter by OS (windows, linux, macos)"),
+  domain: z.string().optional().describe("Filter by domain"),
+  search: z.string().optional().describe("Search hostname or IP"),
+  limit: z.coerce.number().int().min(1).max(100).default(50).describe("Max beacons to return"),
+})
+
+export const listBeaconsTool: AgentTool<
+  z.infer<typeof ListBeaconsInput>,
+  {
+    beacons: Array<{
+      id: string
+      implantId: string
+      hostname: string
+      ipAddress: string
+      os: string
+      domain: string | null
+      privileges: string
+      status: string
+      lastCheckin: number
+      firstSeen: number
+    }>
+    count: number
+  }
+> = {
+  name: "list_beacons",
+  description: "List all active beacons / compromised hosts. Filter by status, OS family, domain, or search hostname/IP. Returns beacon inventory with status and metadata.",
+  parameters: ListBeaconsInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["online", "idle", "stale", "offline"], description: "Filter by status" },
+      osFamily: { type: "string", description: "Filter by OS family" },
+      domain: { type: "string", description: "Filter by domain" },
+      search: { type: "string", description: "Search hostname or IP" },
+      limit: { type: "integer", default: 50, description: "Max results (1-100)" },
+    },
+  },
+  async run(input) {
+    const beacons = await listBeacons({
+      status: input.status,
+      osFamily: input.osFamily,
+      domain: input.domain,
+      search: input.search,
+      take: input.limit,
+    })
+    return {
+      beacons: beacons.map((b) => ({
+        id: b.id,
+        implantId: b.implantId,
+        hostname: b.hostname,
+        ipAddress: b.ipAddress,
+        os: b.os,
+        domain: b.domain ?? null,
+        privileges: b.privileges,
+        status: b.status,
+        lastCheckin: b.lastCheckin,
+        firstSeen: b.firstSeen,
+      })),
+      count: beacons.length,
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tool: get_beacon                                                  */
+/* ------------------------------------------------------------------ */
+
+const GetBeaconInput = z.object({
+  beaconId: z.string().min(1).describe("Beacon ID to retrieve"),
+})
+
+export const getBeaconTool: AgentTool<
+  z.infer<typeof GetBeaconInput>,
+  {
+    found: boolean
+    beacon?: {
+      id: string
+      implantId: string
+      hostname: string
+      ipAddress: string
+      os: string
+      domain: string | null
+      privileges: string
+      status: string
+      lastCheckin: number
+      firstSeen: number
+      nodeId: string | null
+    }
+  }
+> = {
+  name: "get_beacon",
+  description: "Get detailed information about a specific beacon / compromised host by ID. Returns full beacon status, host info, and check-in history.",
+  parameters: GetBeaconInput,
+  jsonSchema: {
+    type: "object",
+    properties: {
+      beaconId: { type: "string", description: "Beacon ID" },
+    },
+    required: ["beaconId"],
+  },
+  async run(input) {
+    const beacon = await getBeaconById(input.beaconId)
+    if (!beacon) return { found: false }
+    return {
+      found: true,
+      beacon: {
+        id: beacon.id,
+        implantId: beacon.implantId,
+        hostname: beacon.hostname,
+        ipAddress: beacon.ipAddress,
+        os: beacon.os,
+        domain: beacon.domain ?? null,
+        privileges: beacon.privileges,
+        status: beacon.status,
+        lastCheckin: beacon.lastCheckin,
+        firstSeen: beacon.firstSeen,
+        nodeId: beacon.nodeId ?? null,
+      },
+    }
+  },
+}
+
+/* ------------------------------------------------------------------ */
 /*  Registry of all AI chat tools                                     */
 /* ------------------------------------------------------------------ */
 
@@ -1802,6 +2482,14 @@ export const AI_TOOLS = {
   [listDeploymentsTool.name]: listDeploymentsTool,
   [getDeploymentStatusTool.name]: getDeploymentStatusTool,
   [listProviderPresetsTool.name]: listProviderPresetsTool,
+  [listNodesTool.name]: listNodesTool,
+  [getNodeTool.name]: getNodeTool,
+  [createNodeTool.name]: createNodeTool,
+  [updateNodeTool.name]: updateNodeTool,
+  [deleteNodeTool.name]: deleteNodeTool,
+  [applyNodeConfigTool.name]: applyNodeConfigTool,
+  [listBeaconsTool.name]: listBeaconsTool,
+  [getBeaconTool.name]: getBeaconTool,
   [securityAnalysisTool.name]: securityAnalysisTool,
   [performanceOptimizationTool.name]: performanceOptimizationTool,
   [incidentResponseTool.name]: incidentResponseTool,

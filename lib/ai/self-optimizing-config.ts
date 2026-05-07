@@ -610,7 +610,9 @@ interface OptimizationRule {
   rollback: (value: number | string | boolean) => Promise<void>
 }
 
-// Global singleton instance
-const selfOptimizingConfig = new SelfOptimizingConfig()
+// Global singleton instance (globalThis-guarded to survive HMR)
+const gSOC = globalThis as typeof globalThis & { __selfOptimizingConfig?: SelfOptimizingConfig }
+const selfOptimizingConfig = gSOC.__selfOptimizingConfig ?? new SelfOptimizingConfig()
+if (!gSOC.__selfOptimizingConfig) gSOC.__selfOptimizingConfig = selfOptimizingConfig
 
 export { SelfOptimizingConfig, selfOptimizingConfig }

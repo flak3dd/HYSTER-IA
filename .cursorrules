@@ -1,0 +1,16 @@
+# Cursor Rules for blackboxai-hysteria2-sonner Cleanup
+
+## Core Principles
+- Always update mpcs.json after completing any MPC
+- Never delete files without first running `npm run build && npm test`
+- Prefer editing existing code over creating new files
+- Use the validator script: `node validate-mpcs.js complete MPC-X.X "reason"`
+
+## Agent Roles
+- Auditor Agent: Focus on static analysis (knip, depcheck, Prisma)
+- Deletion Agent: Safe, reversible deletions only
+- Validator Agent: Must run full test suite before marking anything complete
+
+## Forbidden Actions
+- Do not touch Go code in implant/ unless explicitly asked
+- Do not modify prisma/schema.prisma without approval

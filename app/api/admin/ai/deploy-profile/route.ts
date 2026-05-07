@@ -7,10 +7,10 @@ import { join } from "node:path"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-type DeployProfileId = "docker_compose" | "docker" | "node_runtime" | "static"
+type OpProfileId = "node_setup" | "beacon_build" | "deployment" | "post_exploit" | "monitoring"
 
 type ProfileDetection = {
-  id: DeployProfileId
+  id: OpProfileId
   label: string
   detected: boolean
   evidence: string[]
@@ -25,21 +25,18 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-async function readPackageScripts(cwd: string): Promise<Record<string, string>> {
+async function readEnvFile(cwd: string): Promise<Record<string, string>> {
   try {
-    const raw = await readFile(join(cwd, "package.json"), "utf8")
-    const parsed = JSON.parse(raw) as { scripts?: Record<string, string> }
-    return parsed.scripts ?? {}
+    const raw = await readFile(join(cwd, ".env.local"), "utf8")
+    const env: Record<string, string> = {}
+    for (const line of raw.split("\n")) {
+      const match = line.match(/^([A-Za-z0-9_]+)=(.*)$/)
+      if (match) env[match[1]] = match[2]
+    }
+    return env
   } catch {
     return {}
   }
-}
-
-function pickPrimaryProfile(detections: ProfileDetection[]): DeployProfileId {
-  if (detections.find((d) => d.id === "docker_compose")?.detected) return "docker_compose"
-  if (detections.find((d) => d.id === "docker")?.detected) return "docker"
-  if (detections.find((d) => d.id === "node_runtime")?.detected) return "node_runtime"
-  return "static"
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -47,64 +44,70 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     await verifyAdmin(req)
 
     const cwd = process.cwd()
-    const scripts = await readPackageScripts(cwd)
+    const env = await readEnvFile(cwd)
 
-    const hasDockerfile = await fileExists(join(cwd, "Dockerfile"))
-    const hasCompose =
-      (await fileExists(join(cwd, "docker-compose.yml"))) ||
-      (await fileExists(join(cwd, "docker-compose.yaml"))) ||
-      (await fileExists(join(cwd, "config", "docker-compose.prod.yml")))
-
-    const hasBuildScript = Boolean(scripts.build)
-    const hasStartScript = Boolean(scripts.start)
+    const hasHysteriaTrafficApi = Boolean(env.HYSTERIA_TRAFFIC_API_BASE_URL)
+    const hasShadowGrok = env.SHADOWGROK_ENABLED === "true"
+    const hasMail = Boolean(env.RESEND_API_KEY || env.MYSMTP_API_KEY)
+    const hasThreatIntel = Boolean(env.VIRUSTOTAL_API_KEY || env.ALIENVAULT_OTX_KEY)
 
     const detections: ProfileDetection[] = [
       {
-        id: "docker_compose",
-        label: "Docker Compose",
-        detected: hasCompose,
-        evidence: hasCompose
-          ? ["config/docker-compose.prod.yml or docker-compose file detected"]
+        id: "node_setup",
+        label: "Node Setup",
+        detected: hasHysteriaTrafficApi,
+        evidence: hasHysteriaTrafficApi
+          ? ["HYSTERIA_TRAFFIC_API_BASE_URL configured in .env.local"]
           : [],
       },
       {
-        id: "docker",
-        label: "Docker",
-        detected: hasDockerfile,
-        evidence: hasDockerfile ? ["Dockerfile detected at repository root"] : [],
+        id: "beacon_build",
+        label: "Beacon Build",
+        detected: true,
+        evidence: ["Implant builder module available in /admin/implants"],
       },
       {
-        id: "node_runtime",
-        label: "Node Runtime",
-        detected: hasBuildScript && hasStartScript,
-        evidence:
-          hasBuildScript && hasStartScript
-            ? ["package.json contains build/start scripts"]
-            : [],
+        id: "deployment",
+        label: "Deployment",
+        detected: hasMail,
+        evidence: hasMail
+          ? ["Mail provider configured (Resend or mySMTP)"]
+          : [],
       },
       {
-        id: "static",
-        label: "Static Hosting",
-        detected: false,
-        evidence: [],
+        id: "post_exploit",
+        label: "Post-Exploitation",
+        detected: hasShadowGrok,
+        evidence: hasShadowGrok
+          ? ["ShadowGrok enabled in .env.local"]
+          : [],
+      },
+      {
+        id: "monitoring",
+        label: "Monitoring",
+        detected: true,
+        evidence: ["Dashboard and analytics modules available"],
       },
     ]
 
-    const primaryProfile = pickPrimaryProfile(detections)
+    const primaryProfile: OpProfileId =
+      detections.find((d) => d.id === "node_setup")?.detected
+        ? "node_setup"
+        : detections.find((d) => d.id === "beacon_build")?.detected
+          ? "beacon_build"
+          : "monitoring"
 
     return NextResponse.json({
       primaryProfile,
       profiles: detections,
-      scripts: {
-        install: "npm ci",
-        lint: scripts.lint ? "npm run lint" : null,
-        test: scripts.test ? "npm run test" : null,
-        build: scripts.build ? "npm run build" : null,
-        start: scripts.start ? "npm run start" : null,
+      env: {
+        hysteriaConfigured: hasHysteriaTrafficApi,
+        shadowGrokEnabled: hasShadowGrok,
+        mailConfigured: hasMail,
+        threatIntelConfigured: hasThreatIntel,
       },
     })
   } catch (err) {
     return toErrorResponse(err)
   }
 }
-

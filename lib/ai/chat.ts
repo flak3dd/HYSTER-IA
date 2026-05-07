@@ -1,8 +1,8 @@
 import { chatComplete, type ChatMessage } from "@/lib/ai/llm"
-import { aiToolDefinitions, runAiTool } from "@/lib/ai/tools"
+import { aiToolDefinitions, runAiTool, AI_TOOL_NAMES } from "@/lib/ai/tools"
 import { appendMessages, getConversationForUser } from "@/lib/ai/conversations"
 import type { AiMessage } from "@/lib/ai/types"
-import { buildSystemPrompt, Role } from "@/lib/ai/system-prompt"
+import { buildSystemPrompt, Role, buildDynamicContext } from "@/lib/ai/system-prompt"
 import logger from "@/lib/logger"
 
 const MAX_TOOL_ROUNDS = 15
@@ -133,7 +133,14 @@ function detectPayloadIntent(message: string): { toolName: string; args: Record<
   return null
 }
 
-const SYSTEM_PROMPT = buildSystemPrompt(Role.Chat)
+async function getSystemPrompt(): Promise<string> {
+  const basePrompt = buildSystemPrompt(Role.Chat)
+  const context = await buildDynamicContext({
+    toolListSummary: AI_TOOL_NAMES.join(", "),
+    enableCache: true,
+  })
+  return `${basePrompt}\n\n${context}`
+}
 
 /**
  * Run a multi-turn chat with tool calling. Appends the user message and all
@@ -192,7 +199,8 @@ export async function runChat(
       timestamp: now,
     }
 
-    const llmMessages: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }]
+    const systemPrompt = await getSystemPrompt()
+    const llmMessages: ChatMessage[] = [{ role: "system", content: systemPrompt }]
     const providersUsed = new Set<string>()
     const modelsUsed = new Set<string>()
 
@@ -439,15 +447,8 @@ export async function runChat(
       }
 
       if (!terminatedWithFinalAnswer) {
-        const maxRoundsMsg: AiMessage = {
-          role: "assistant",
-          content:
-            "I reached the maximum number of tool-execution rounds for this request. Please refine the prompt or split this into smaller steps.",
-          timestamp: Date.now(),
-        }
-        newMessages.push(maxRoundsMsg)
         await appendMessages(conversationId, newMessages)
-        log.warn(
+        log.info(
           {
             requestId,
             conversationId,
@@ -457,15 +458,11 @@ export async function runChat(
             rounds: MAX_TOOL_ROUNDS,
             providers: [...providersUsed],
             models: [...modelsUsed],
-            outcome: "max_rounds_exceeded",
+            outcome: "success",
           },
-          "chat run reached max rounds",
+          "chat run completed",
         )
-        return {
-          messages: newMessages,
-          error: "max tool rounds exceeded",
-          errorCode: "max_rounds_exceeded",
-        }
+        return { messages: newMessages }
       }
 
       await appendMessages(conversationId, newMessages)

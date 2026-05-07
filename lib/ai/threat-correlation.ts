@@ -731,7 +731,9 @@ interface CorrelationRule {
   confidence: number
 }
 
-// Global singleton instance
-const threatCorrelationEngine = new ThreatCorrelationEngine()
+// Global singleton instance (globalThis-guarded to survive HMR)
+const gTC = globalThis as typeof globalThis & { __threatCorrelationEngine?: ThreatCorrelationEngine }
+const threatCorrelationEngine = gTC.__threatCorrelationEngine ?? new ThreatCorrelationEngine()
+if (!gTC.__threatCorrelationEngine) gTC.__threatCorrelationEngine = threatCorrelationEngine
 
 export { ThreatCorrelationEngine, threatCorrelationEngine }

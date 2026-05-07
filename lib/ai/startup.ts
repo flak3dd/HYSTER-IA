@@ -45,7 +45,9 @@ export async function initializeAISystems(): Promise<void> {
 }
 
 // Auto-initialize on module import (can be disabled via environment variable)
-if (process.env.AUTO_INIT_AI !== 'false') {
+const g = globalThis as typeof globalThis & { __aiSystemsInitializing?: boolean }
+if (process.env.AUTO_INIT_AI !== 'false' && !g.__aiSystemsInitializing) {
+  g.__aiSystemsInitializing = true
   // Don't await - let it initialize in the background
   initializeAISystems().catch(console.error)
 }

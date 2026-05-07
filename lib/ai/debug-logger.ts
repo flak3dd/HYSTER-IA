@@ -303,10 +303,14 @@ class DebugLogger {
   }
 }
 
-// Singleton instance
-export const debugLogger = new DebugLogger();
+// Singleton instance (globalThis-guarded to survive HMR)
+const gDL = globalThis as typeof globalThis & { __debugLogger?: DebugLogger; __debugLoggerCleanupInterval?: NodeJS.Timeout }
+export const debugLogger = gDL.__debugLogger ?? new DebugLogger()
+if (!gDL.__debugLogger) gDL.__debugLogger = debugLogger
 
-// Auto-cleanup old sessions every hour
-setInterval(() => {
-  debugLogger.clearOldSessions();
-}, 60 * 60 * 1000);
+// Auto-cleanup old sessions every hour (only once per process)
+if (!gDL.__debugLoggerCleanupInterval) {
+  gDL.__debugLoggerCleanupInterval = setInterval(() => {
+    debugLogger.clearOldSessions()
+  }, 60 * 60 * 1000)
+}

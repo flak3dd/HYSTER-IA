@@ -223,7 +223,9 @@ class AIInitializer {
   }
 }
 
-// Global singleton instance
-const aiInitializer = new AIInitializer()
+// Global singleton instance (globalThis-guarded to survive HMR)
+const gAI = globalThis as typeof globalThis & { __aiInitializer?: AIInitializer }
+const aiInitializer = gAI.__aiInitializer ?? new AIInitializer()
+if (!gAI.__aiInitializer) gAI.__aiInitializer = aiInitializer
 
 export { AIInitializer, aiInitializer }

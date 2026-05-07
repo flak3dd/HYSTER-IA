@@ -26,9 +26,10 @@ const RATE_LIMIT_CONFIG = {
 }
 
 // Redis client (optional - falls back to memory if not configured)
-let redisClient: Redis | null = null
+const gRL = globalThis as typeof globalThis & { __rateLimiterRedis?: Redis | null }
+let redisClient: Redis | null = gRL.__rateLimiterRedis ?? null
 
-if (process.env.REDIS_URL) {
+if (!redisClient && process.env.REDIS_URL) {
   try {
     redisClient = new Redis(process.env.REDIS_URL, {
       maxRetriesPerRequest: 3,
@@ -37,10 +38,13 @@ if (process.env.REDIS_URL) {
     redisClient.on('error', (err) => {
       console.error('Redis connection error:', err)
       redisClient = null
+      gRL.__rateLimiterRedis = null
     })
+    gRL.__rateLimiterRedis = redisClient
   } catch {
     console.warn('Failed to connect to Redis, falling back to memory rate limiting')
     redisClient = null
+    gRL.__rateLimiterRedis = null
   }
 }
 

@@ -599,7 +599,9 @@ class AnomalyDetectionEngine {
   }
 }
 
-// Global singleton instance
-const anomalyDetectionEngine = new AnomalyDetectionEngine()
+// Global singleton instance (globalThis-guarded to survive HMR)
+const gAD = globalThis as typeof globalThis & { __anomalyDetectionEngine?: AnomalyDetectionEngine }
+const anomalyDetectionEngine = gAD.__anomalyDetectionEngine ?? new AnomalyDetectionEngine()
+if (!gAD.__anomalyDetectionEngine) gAD.__anomalyDetectionEngine = anomalyDetectionEngine
 
 export { AnomalyDetectionEngine, anomalyDetectionEngine }

@@ -124,26 +124,62 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
     async createServer(opts): Promise<VpsCreateResult> {
       const token = await getAccessToken(auth)
       const safeName = sanitizeName(opts.name)
-      // Use provided resource group or create a new one
-      const rgName = opts.resourceGroup || `hysteria-${safeName}`
       const location = opts.region
 
-      // 1. Create Resource Group (only if not using existing one)
-      if (!opts.resourceGroup) {
-        await armPut(
-          token,
-          `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}?api-version=${ARM_API_VERSION_RESOURCES}`,
-          { location },
-        )
-      } else {
-        // Verify the existing resource group exists and is in the correct location
+      // Resolve resource group:
+      // 1. If user provided one → verify it exists
+      // 2. Otherwise → try to find an existing RG in the target location
+      //    (creating RGs requires subscription-level write permissions which
+      //     many service principals do not have)
+      let rgName: string
+
+      if (opts.resourceGroup) {
         try {
           await armGet(
             token,
-            `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}?api-version=${ARM_API_VERSION_RESOURCES}`,
+            `${ARM_API}/subscriptions/${sub}/resourceGroups/${opts.resourceGroup}?api-version=${ARM_API_VERSION_RESOURCES}`,
           )
-        } catch (error) {
-          throw new Error(`Resource group "${rgName}" not found or inaccessible. Please create it first or omit resourceGroup parameter.`)
+          rgName = opts.resourceGroup
+        } catch {
+          throw new Error(
+            `Resource group "${opts.resourceGroup}" not found or inaccessible. ` +
+            `Please create it first in region "${location}" or pick a different one.`
+          )
+        }
+      } else {
+        // List existing resource groups and pick one in the target location
+        try {
+          const listRes = await fetch(
+            `${ARM_API}/subscriptions/${sub}/resourceGroups?api-version=${ARM_API_VERSION_RESOURCES}`,
+            { headers: headers(token) }
+          )
+          if (listRes.ok) {
+            const listData = (await listRes.json()) as {
+              value?: Array<{ name: string; location: string }>
+            }
+            const match = listData.value?.find(
+              (rg) => rg.location.toLowerCase() === location.toLowerCase()
+            )
+            if (match) {
+              rgName = match.name
+            } else {
+              const anyRg = listData.value?.[0]
+              if (anyRg) {
+                rgName = anyRg.name
+              } else {
+                throw new Error("no_resource_groups")
+              }
+            }
+          } else {
+            throw new Error("list_failed")
+          }
+        } catch {
+          throw new Error(
+            `Azure deployment requires an existing resource group, and none was found in region "${location}".\n\n` +
+            `Action required — choose one:\n` +
+            `1. Create a resource group in "${location}" via Azure Portal / CLI, then pass its name as "resourceGroup".\n` +
+            `2. Grant this service principal "Contributor" role at the subscription scope so it can create resource groups automatically.`
+          )
         }
       }
 
