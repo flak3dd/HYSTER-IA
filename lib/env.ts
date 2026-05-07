@@ -81,6 +81,7 @@ const ServerEnvSchema = z.object({
 
   // Anthropic Configuration
   ANTHROPIC_API_KEY: z.string().min(1).or(z.literal("")).optional(),
+  ANTHROPIC_MODEL: z.string().min(1).or(z.literal("")).default("claude-haiku-4-5-20251001"),
 
   // Google AI Configuration
   GOOGLE_API_KEY: z.string().min(1).or(z.literal("")).optional(),

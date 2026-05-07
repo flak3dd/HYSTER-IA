@@ -441,7 +441,7 @@ export async function withDegradation<T>(
         // Note: This is a simplified implementation
         // In practice, each strategy would have a specific apply signature
         // and you'd need to adapt the primaryFn accordingly
-        const result = await strategy.apply(primaryFn as any, fullContext);
+        const result = await strategy.apply<T>(primaryFn as () => Promise<T>, fullContext);
 
         return {
           success: true,

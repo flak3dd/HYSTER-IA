@@ -139,17 +139,42 @@ function orderProviders(
 /**
  * Get available AI providers in priority order
  * Enhanced with health monitoring integration
+ * ANTHROPIC/CLAUDE is PRIMARY (priority 1)
  */
 export function getAvailableProviders(): ProviderConfig[] {
   const env = serverEnv();
   const providers: ProviderConfig[] = [];
   const healthMonitor = getGlobalHealthMonitor();
 
-  // ShadowGrok/xAI (highest priority for ShadowGrok operations)
+  // ANTHROPIC/CLAUDE - PRIMARY PROVIDER (highest priority)
+  if (hasConfigValue(env.ANTHROPIC_API_KEY)) {
+    providers.push({
+      name: 'anthropic',
+      priority: 1,
+      isEnabled: true,
+      model: env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
+      client: anthropic,
+    });
+  }
+
+  // OpenAI (secondary priority)
+  if (hasConfigValue(env.OPENAI_API_KEY)) {
+    providers.push({
+      name: 'openai',
+      priority: 2,
+      isEnabled: true,
+      model: 'gpt-4o',
+      client: createOpenAI({
+        apiKey: env.OPENAI_API_KEY,
+      }),
+    });
+  }
+
+  // ShadowGrok/xAI (third priority for ShadowGrok operations)
   if (env.SHADOWGROK_ENABLED && hasConfigValue(env.XAI_API_KEY)) {
     providers.push({
       name: 'xai',
-      priority: 1,
+      priority: 3,
       isEnabled: true,
       model: env.XAI_MODEL,
       client: createOpenAI({
@@ -159,11 +184,11 @@ export function getAvailableProviders(): ProviderConfig[] {
     });
   }
 
-  // Azure OpenAI (high priority)
+  // Azure OpenAI (fourth priority)
   if (hasConfigValue(env.AZURE_OPENAI_ENDPOINT) && hasConfigValue(env.AZURE_OPENAI_API_KEY)) {
     providers.push({
       name: 'azure',
-      priority: 2,
+      priority: 4,
       isEnabled: true,
       model: env.AZURE_OPENAI_DEPLOYMENT,
       client: createOpenAI({
@@ -173,11 +198,22 @@ export function getAvailableProviders(): ProviderConfig[] {
     });
   }
 
-  // OpenRouter (medium priority)
+  // Google (fifth priority)
+  if (hasConfigValue(env.GOOGLE_API_KEY)) {
+    providers.push({
+      name: 'google',
+      priority: 5,
+      isEnabled: true,
+      model: 'gemini-1.5-pro',
+      client: google,
+    });
+  }
+
+  // OpenRouter (sixth priority)
   if (hasConfigValue(env.OPENROUTER_API_KEY)) {
     providers.push({
       name: 'openrouter',
-      priority: 3,
+      priority: 6,
       isEnabled: true,
       model: env.OPENROUTER_MODEL,
       client: createOpenAI({
@@ -191,7 +227,7 @@ export function getAvailableProviders(): ProviderConfig[] {
   if (hasConfigValue(env.LLM_PROVIDER_API_KEY)) {
     providers.push({
       name: 'legacy',
-      priority: 4,
+      priority: 7,
       isEnabled: true,
       model: env.LLM_MODEL,
       client: createOpenAI({
@@ -201,30 +237,11 @@ export function getAvailableProviders(): ProviderConfig[] {
     });
   }
 
-  if (hasConfigValue(env.ANTHROPIC_API_KEY)) {
-    providers.push({
-      name: 'anthropic',
-      priority: 5,
-      isEnabled: true,
-      model: 'claude-3-5-sonnet-20241022',
-      client: anthropic,
-    });
-  }
-
-  if (hasConfigValue(env.GOOGLE_API_KEY)) {
-    providers.push({
-      name: 'google',
-      priority: 6,
-      isEnabled: true,
-      model: 'gemini-1.5-pro',
-      client: google,
-    });
-  }
-
+  // Grok as final fallback (non-ShadowGrok mode)
   if (!env.SHADOWGROK_ENABLED && hasConfigValue(env.XAI_API_KEY)) {
     providers.push({
       name: 'grok',
-      priority: 7,
+      priority: 8,
       isEnabled: true,
       model: env.XAI_MODEL,
       client: createGrokClient(),
@@ -463,7 +480,6 @@ export async function getProviderHealthStatus(): Promise<Record<string, { health
             await generateText({
               model: provider.client(provider.model),
               messages: [{ role: 'user', content: 'Hi' }],
-              maxTokens: 10,
             });
           },
           RetryStrategies.fast(),

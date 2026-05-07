@@ -148,7 +148,7 @@ export class IntentAnalyzer {
       }
 
       // Enhanced fallback with pattern matching and multi-step detection
-      return this.enhancedFallbackAnalysis(userText, availableFunctions, context)
+      return this.enhancedFallbackAnalysisStructured(userText, availableFunctions, context)
     }
   }
 
@@ -278,10 +278,20 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
       })
 
       const parsed = result.object
+
+      // Reconstruct extractedParameters from parameterKeys/parameterValues
+      // (OpenAI-compatible schema uses arrays instead of z.record())
+      const extractedParameters: Record<string, unknown> = {}
+      if (parsed.parameterKeys?.length && parsed.parameterValues?.length) {
+        for (let i = 0; i < parsed.parameterKeys.length; i++) {
+          extractedParameters[parsed.parameterKeys[i]] = parsed.parameterValues[i] ?? ''
+        }
+      }
+
       return {
         intent: parsed.intent || 'Unknown intent',
         confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.5,
-        extractedParameters: parsed.extractedParameters || {},
+        extractedParameters,
         suggestedFunction: parsed.suggestedFunction || undefined,
         requiresClarification: parsed.requiresConfirmation || false,
         clarificationQuestions: [],
@@ -289,7 +299,7 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
         alternativeApproaches: undefined,
         dependencies: undefined,
         estimatedSteps: undefined,
-        riskLevel: parsed.riskLevel || undefined,
+        riskLevel: parsed.riskLevel === 'critical' ? 'high' : (parsed.riskLevel || undefined),
       }
     } catch {
       // Fallback to simple text-based parsing
@@ -427,8 +437,8 @@ Be precise but flexible. If multiple approaches exist, suggest the most appropri
         suggestedFunction: bestMatch.function,
         requiresClarification: Object.keys(extractedParams).length < 2,
         clarificationQuestions: this.generateClarificationQuestions(bestMatch.category, extractedParams),
-        suggestedChaining: isMultiStep ? bestMatch.chaining : undefined,
-        estimatedSteps: isMultiStep && bestMatch.chaining ? bestMatch.chaining.length : undefined,
+        suggestedChaining: isMultiStep ? intentCategories[bestMatch.category as keyof typeof intentCategories]?.functions : undefined,
+        estimatedSteps: isMultiStep ? intentCategories[bestMatch.category as keyof typeof intentCategories]?.functions?.length : undefined,
         riskLevel: bestMatch.category === 'threat_intel' || bestMatch.category === 'complex_operations' ? 'medium' : 'low',
       }
     }

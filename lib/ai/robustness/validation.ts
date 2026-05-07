@@ -181,15 +181,60 @@ export function validateAllowedChars(
 }
 
 /**
- * Validate that a string does not contain control characters
+ * Check if a character code is a control character
+ * Includes C0 (0-31, 127), C1 (128-159), surrogates (0xD800-0xDFFF),
+ * and other Unicode control/formatting characters
  */
-export function validateNoControlChars(value: string, fieldName: string): ValidationResult {
+function isControlCharCode(charCode: number): boolean {
+  // C0 control characters (NUL through US, and DEL)
+  if (charCode >= 0 && charCode <= 31) return true;
+  if (charCode === 127) return true;
+  // C1 control characters
+  if (charCode >= 128 && charCode <= 159) return true;
+  return false;
+}
+
+/**
+ * Validate that a string does not contain control characters
+ * Uses character code checking to properly handle all Unicode ranges
+ *
+ * @param allowWhitespace - If true, allow common whitespace control chars
+ *   (\n=10, \r=13, \t=9) which are legitimate in message content.
+ */
+export function validateNoControlChars(value: string, fieldName: string, allowWhitespace: boolean = false): ValidationResult {
   const errors: string[] = [];
 
   for (let i = 0; i < value.length; i++) {
     const charCode = value.charCodeAt(i);
-    // Control characters are 0-31 and 127
-    if ((charCode >= 0 && charCode <= 31) || charCode === 127) {
+
+    // Allow common whitespace control chars when allowWhitespace is true
+    if (allowWhitespace && (charCode === 9 || charCode === 10 || charCode === 13)) {
+      continue;
+    }
+
+    // Check for surrogate pairs - if we find a high surrogate, check the full code point
+    if (charCode >= 0xD800 && charCode <= 0xDBFF) {
+      // High surrogate - check if followed by low surrogate
+      const lowSurrogate = value.charCodeAt(i + 1);
+      if (lowSurrogate >= 0xDC00 && lowSurrogate <= 0xDFFF) {
+        // Valid surrogate pair, skip the low surrogate in next iteration
+        i++;
+        continue;
+      }
+      // Lone high surrogate is a control character
+      errors.push(`${fieldName} contains invalid surrogate characters`);
+      break;
+    }
+
+    // Check for lone low surrogate
+    if (charCode >= 0xDC00 && charCode <= 0xDFFF) {
+      errors.push(`${fieldName} contains invalid surrogate characters`);
+      break;
+    }
+
+    // Check standard control characters using codePointAt for full Unicode support
+    const codePoint = value.codePointAt(i) ?? charCode;
+    if (isControlCharCode(codePoint) || isControlCharCode(charCode)) {
       errors.push(`${fieldName} contains control characters`);
       break;
     }
@@ -297,7 +342,7 @@ export function validateMessageContent(content: string, maxLength: number = 2000
   const results = [
     validateNonEmpty(content, 'Message'),
     validateLength(content, 'Message', { min: 1, max: maxLength }),
-    validateNoControlChars(content, 'Message'),
+    validateNoControlChars(content, 'Message', true),  // allowWhitespace=true: \n, \r, \t are valid
   ];
 
   return combineResults(results);
@@ -555,15 +600,73 @@ export function validateNoExtraFields(
 
 /**
  * Sanitize a string by removing control characters
+ * Uses character code checking to properly handle all Unicode ranges including:
+ * - C0 controls (0-31, DEL 127) — except \n, \r, \t which are preserved
+ * - C1 controls (128-159)
+ * - Surrogate pairs (0xD800-0xDFFF)
+ * - Other Unicode control/formatting characters
+ *
+ * @param preserveWhitespace - If true, keep \n (10), \r (13), \t (9) which are
+ *   legitimate whitespace in message content. Default: true.
  */
-export function sanitizeRemoveControlChars(value: string): string {
+export function sanitizeRemoveControlChars(value: string, preserveWhitespace: boolean = true): string {
   let result = '';
   for (let i = 0; i < value.length; i++) {
     const charCode = value.charCodeAt(i);
-    if ((charCode >= 0 && charCode <= 31) || charCode === 127) {
-      // Skip control characters
+
+    // Preserve common whitespace chars (\n, \r, \t) when preserveWhitespace is true
+    if (preserveWhitespace && (charCode === 9 || charCode === 10 || charCode === 13)) {
+      result += value[i];
       continue;
     }
+
+    // Check for high surrogate
+    if (charCode >= 0xD800 && charCode <= 0xDBFF) {
+      const lowSurrogate = value.charCodeAt(i + 1);
+      if (lowSurrogate >= 0xDC00 && lowSurrogate <= 0xDFFF) {
+        // Valid surrogate pair - keep it (it's a legitimate Unicode character)
+        result += value[i] + value[i + 1];
+        i++; // Skip the low surrogate
+        continue;
+      }
+      // Lone high surrogate - skip (invalid/control character)
+      continue;
+    }
+
+    // Skip lone low surrogates
+    if (charCode >= 0xDC00 && charCode <= 0xDFFF) {
+      continue;
+    }
+
+    // Check for control characters using codePointAt for full Unicode support
+    const codePoint = value.codePointAt(i) ?? charCode;
+
+    // Skip C0 controls (0-31, 127) and C1 controls (128-159)
+    if (isControlCharCode(codePoint) || isControlCharCode(charCode)) {
+      continue;
+    }
+
+    // Skip supplementary plane control characters (above 0xFFFF)
+    if (codePoint > 0xFFFF) {
+      // Check if it's a control/formatting character in supplementary planes
+      // General category Cc (Other, Control) covers most controls
+      // Range: U+FFF9-U+FFFB (interlinear annotations), U+2060-U+206F (formatting),
+      // U+FE00-U+FE0F (variation selectors), etc.
+      if ((codePoint >= 0x2060 && codePoint <= 0x206F) || // General Punctuation formatting
+          (codePoint >= 0xFFF9 && codePoint <= 0xFFFB) || // Interlinear annotation
+          (codePoint >= 0xE0000 && codePoint <= 0xE007F)) { // Tags block
+        continue;
+      }
+      // For legitimate supplementary characters, add them
+      // Note: supplementary characters use 2 UTF-16 code units
+      result += value[i];
+      if (i + 1 < value.length) {
+        result += value[i + 1];
+        i++; // Skip the second code unit
+      }
+      continue;
+    }
+
     result += value[i];
   }
   return result;

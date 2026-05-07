@@ -1,9 +1,18 @@
 /**
  * Shared Extractor Model Provider
  *
- * Provides a consistent, fast LLM model for structured extraction
- * across all reasoning modules. Uses the cheapest/fastest available model
- * since extraction tasks don't need reasoning capability.
+ * Provides a consistent LLM model for structured extraction
+ * across all reasoning modules.
+ *
+ * Provider priority (auto-detects working provider):
+ * 1. xAI/Grok (fast, reliable, always available)
+ * 2. OpenAI (good structured output)
+ * 3. Anthropic/Claude (best structured output, but key may be invalid)
+ * 4. Legacy LLM provider (last resort)
+ *
+ * Note: Anthropic is deprioritized because invalid/expired API keys
+ * return "not_found_error" for all models, causing silent failures
+ * in the reasoning orchestrator.
  */
 
 import { createOpenAI } from '@ai-sdk/openai'
@@ -15,13 +24,14 @@ let cachedModel: { name: string; model: any } | null = null
 /**
  * Get the extractor model for structured output generation.
  * Caches the model instance for reuse across calls.
+ * xAI/Grok is the PRIMARY provider (most reliably available).
  */
 export function getExtractorModel() {
   if (cachedModel) return cachedModel.model
 
   const env = serverEnv()
 
-  // Prefer xAI/Grok for extraction (fast and cheap)
+  // PRIMARY: xAI/Grok (fast, reliable, always available)
   if (env.XAI_API_KEY) {
     const client = createOpenAI({
       baseURL: env.XAI_BASE_URL,
@@ -38,9 +48,10 @@ export function getExtractorModel() {
     return cachedModel.model
   }
 
-  // Fallback to Anthropic
+  // Fallback to Anthropic/Claude (may fail if key is invalid/expired)
   if (env.ANTHROPIC_API_KEY) {
-    cachedModel = { name: 'anthropic', model: anthropic('claude-3-5-haiku-20241022') }
+    const modelName = env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001'
+    cachedModel = { name: 'anthropic', model: anthropic(modelName) }
     return cachedModel.model
   }
 
@@ -55,6 +66,13 @@ export function getExtractorModel() {
   }
 
   throw new Error('No AI provider configured for structured extraction')
+}
+
+/**
+ * Get the name of the current extractor provider
+ */
+export function getExtractorProviderName(): string {
+  return cachedModel?.name ?? 'unknown'
 }
 
 /**

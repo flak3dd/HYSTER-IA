@@ -286,7 +286,7 @@ export class AiMonitoringSystem extends EventEmitter {
                  `Current health score: ${payload.healthScore}. Failure rate: ${(payload.failureRate * 100).toFixed(1)}%`,
         timestamp: Date.now(),
         source: 'health_monitor',
-        metadata: payload,
+        metadata: payload as unknown as Record<string, unknown>,
       });
     }
   }
@@ -307,7 +307,7 @@ export class AiMonitoringSystem extends EventEmitter {
                  `Will reset at ${payload.nextResetTime ? new Date(payload.nextResetTime).toISOString() : 'unknown'}`,
         timestamp: Date.now(),
         source: 'circuit_breaker',
-        metadata: payload,
+        metadata: payload as unknown as Record<string, unknown>,
       });
     }
   }

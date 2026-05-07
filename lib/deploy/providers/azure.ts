@@ -64,17 +64,68 @@ async function armPut(
   token: string,
   url: string,
   body: unknown,
+  options?: { maxRetries?: number; retryDelayMs?: number },
 ): Promise<unknown> {
-  const res = await fetch(url, {
-    method: "PUT",
-    headers: headers(token),
-    body: JSON.stringify(body),
-  })
-  if (!res.ok && res.status !== 201 && res.status !== 200) {
+  const maxRetries = options?.maxRetries ?? 3
+  const retryDelayMs = options?.retryDelayMs ?? 5000
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: headers(token),
+      body: JSON.stringify(body),
+    })
+
+    // Success or already exists
+    if (res.ok || res.status === 201 || res.status === 200) {
+      return res.json()
+    }
+
+    // Retryable errors: 429 (rate limit), 409 with specific error codes
     const text = await res.text()
+
+    // Check for retryable conditions
+    const isRetryable = res.status === 429 ||
+      (res.status === 400 && text.includes("ReferencedResourceNotProvisioned")) ||
+      (res.status === 409 && (text.includes("Creating") || text.includes("Updating"))) ||
+      (res.status >= 500)
+
+    if (isRetryable && attempt < maxRetries) {
+      console.log(`Azure PUT retry ${attempt}/${maxRetries} for ${url.split("/").pop()} (status ${res.status})`)
+      await new Promise((r) => setTimeout(r, retryDelayMs * attempt)) // Exponential backoff
+      continue
+    }
+
     throw new Error(`Azure PUT failed (${res.status}): ${text.slice(0, 400)}`)
   }
-  return res.json()
+
+  throw new Error(`Azure PUT failed after ${maxRetries} retries`)
+}
+
+async function waitForResourceProvisioning(
+  token: string,
+  url: string,
+  maxWaitMs = 120_000,
+  intervalMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + maxWaitMs
+
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { headers: headers(token) })
+      if (res.ok) {
+        const data = (await res.json()) as { properties?: { provisioningState?: string } }
+        if (data.properties?.provisioningState === "Succeeded") {
+          return
+        }
+      }
+    } catch {
+      // Ignore errors during polling
+    }
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+
+  throw new Error(`Timeout waiting for resource provisioning at ${url}`)
 }
 
 function extractAzureError(text: string): string {
@@ -154,7 +205,36 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
         }
       }
 
-      // 2. Check region is valid
+      // 2. Check provider registrations
+      try {
+        const providersRes = await fetch(
+          `${ARM_API}/subscriptions/${sub}/providers?api-version=${ARM_API_VERSION_RESOURCES}`,
+          { headers: headers(token) },
+        )
+        if (providersRes.ok) {
+          const providersData = (await providersRes.json()) as {
+            value?: Array<{ namespace: string; registrationState: string }>
+          }
+          const requiredProviders = ["Microsoft.Compute", "Microsoft.Network"]
+          const unregistered = requiredProviders.filter((rp) => {
+            const provider = providersData.value?.find((p) => p.namespace === rp)
+            return !provider || provider.registrationState !== "Registered"
+          })
+          if (unregistered.length > 0) {
+            issues.push({
+              severity: "error",
+              code: "azure_provider_not_registered",
+              message: `Azure subscription not registered for: ${unregistered.join(", ")}`,
+              suggestion: `Register providers with: az provider register --namespace ${unregistered.join(" && az provider register --namespace ")}`,
+            })
+            valid = false
+          }
+        }
+      } catch {
+        // Best effort check - don't fail validation if we can't check providers
+      }
+
+      // 3. Check region is valid
       const preset = this.presets()
       const validRegions = preset.regions.map((r) => r.id.toLowerCase())
       if (!validRegions.includes(location.toLowerCase())) {
@@ -333,6 +413,9 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
         }
       }
 
+      // Small delay to ensure resource group context is ready
+      await new Promise((r) => setTimeout(r, 3000))
+
       // 2. Create Network Security Group (allow SSH + Hysteria port)
       const nsgName = `${safeName}-nsg`
       await armPut(
@@ -386,6 +469,13 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
         },
       )
 
+      // Wait for NSG to be fully provisioned before creating VNet
+      await waitForResourceProvisioning(
+        token,
+        `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}/providers/Microsoft.Network/networkSecurityGroups/${nsgName}?api-version=${ARM_API_VERSION_NETWORK}`,
+        60_000,
+      )
+
       // 3. Create Virtual Network + Subnet
       const vnetName = `${safeName}-vnet`
       await armPut(
@@ -410,6 +500,13 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
         },
       )
 
+      // Wait for VNet to be fully provisioned
+      await waitForResourceProvisioning(
+        token,
+        `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}/providers/Microsoft.Network/virtualNetworks/${vnetName}?api-version=${ARM_API_VERSION_NETWORK}`,
+        60_000,
+      )
+
       // 4. Create Public IP
       const pipName = `${safeName}-pip`
       await armPut(
@@ -423,6 +520,13 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
             publicIPAddressVersion: "IPv4",
           },
         },
+      )
+
+      // Wait for Public IP to be fully provisioned
+      await waitForResourceProvisioning(
+        token,
+        `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}/providers/Microsoft.Network/publicIPAddresses/${pipName}?api-version=${ARM_API_VERSION_NETWORK}`,
+        60_000,
       )
 
       // 5. Create Network Interface
@@ -449,6 +553,13 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
             ],
           },
         },
+      )
+
+      // Wait for NIC to be fully provisioned
+      await waitForResourceProvisioning(
+        token,
+        `${ARM_API}/subscriptions/${sub}/resourceGroups/${rgName}/providers/Microsoft.Network/networkInterfaces/${nicName}?api-version=${ARM_API_VERSION_NETWORK}`,
+        60_000,
       )
 
       // 6. Create Virtual Machine

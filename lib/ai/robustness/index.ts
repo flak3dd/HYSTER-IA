@@ -316,6 +316,6 @@ export function initializeRobustness(options: {
   }
 }
 
-// Import for use in initializeRobustness
-import { createConsoleAlertHandler } from './monitoring';
-export { createConsoleAlertHandler };
+// Import createConsoleAlertHandler for internal use
+import { createConsoleAlertHandler as _createConsoleAlertHandler } from './monitoring';
+const createConsoleAlertHandler = _createConsoleAlertHandler;

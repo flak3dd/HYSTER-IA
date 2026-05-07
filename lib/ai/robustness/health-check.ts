@@ -162,7 +162,7 @@ export function getAvailableProviders(): ProviderConfig[] {
       name: 'anthropic',
       priority: 5,
       isEnabled: true,
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-haiku-4-5-20251001',
       client: anthropic,
     });
   }
@@ -211,7 +211,6 @@ export async function checkProviderHealth(
       model: provider.client(provider.healthCheckModel || provider.model),
       messages: [{ role: 'user', content: HEALTH_CHECK_PROMPT }],
       temperature: 0,
-      maxTokens: 10,
     });
 
     const result = await Promise.race([

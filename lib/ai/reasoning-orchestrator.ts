@@ -16,6 +16,8 @@
  */
 
 import { generateObject } from 'ai'
+import { anthropic } from '@ai-sdk/anthropic'
+import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { chatComplete, type ChatMessage } from '@/lib/ai/llm'
 import { aiToolDefinitions, runAiTool, AI_TOOL_NAMES, AI_TOOLS } from '@/lib/ai/tools'
@@ -28,11 +30,70 @@ import {
   VerificationSchema,
 } from '@/lib/ai/reasoning/schemas'
 import logger from '@/lib/logger'
+import { sanitizeMessageContent } from '@/lib/ai/robustness'
+import { serverEnv } from '@/lib/env'
 
 const log = logger.child({ module: 'ai-reasoning-orchestrator' })
 
 // ============================================================
+// MODEL PROVIDER - xAI/Grok as primary (Anthropic may have invalid keys)
+// ============================================================
+
+function getReasoningOrchestratorModel() {
+  const env = serverEnv()
+  // Primary: xAI/Grok (most reliably available — Anthropic keys may be invalid/expired)
+  if (env.XAI_API_KEY) {
+    const client = createOpenAI({
+      baseURL: env.XAI_BASE_URL,
+      apiKey: env.XAI_API_KEY,
+    })
+    return client(env.XAI_MODEL)
+  }
+  // Fallback to getExtractorModel for other providers (OpenAI, Anthropic, etc.)
+  return getExtractorModel()
+}
+
+// Also provide Anthropic as an option for the extractor when xAI is unavailable
+function getAnthropicFallbackModel() {
+  const env = serverEnv()
+  if (env.ANTHROPIC_API_KEY) {
+    return anthropic(env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001')
+  }
+  return getExtractorModel()
+}
+
+// ============================================================
+// CONTROL CHARACTER SANITIZER
+// The Vercel AI SDK validates message content and rejects
+// control characters (\n, \t, \r, etc.). Tool results often
+// contain JSON with these characters, so we must sanitize
+// before passing content to the AI SDK.
+// Uses the project's existing sanitizeMessageContent from
+// the robustness module.
+// ============================================================
+
+/**
+ * Safely stringify a tool result for AI SDK message content.
+ * Handles objects by first JSON-stringifying, then sanitizing
+ * control characters that would cause validation failures.
+ */
+function safeStringifyForContent(value: unknown): string {
+  if (typeof value === 'string') {
+    return sanitizeMessageContent(value)
+  }
+  try {
+    return sanitizeMessageContent(JSON.stringify(value))
+  } catch {
+    return sanitizeMessageContent(String(value))
+  }
+}
+
+// ============================================================
 // REASONING SCHEMAS
+// All schemas are designed for OpenAI structured output compatibility:
+// - NO .optional() — use defaults (empty arrays/strings) instead
+// - NO z.record() — use explicit object properties instead
+// - ALL fields have .describe() — required by OpenAI
 // ============================================================
 
 const TaskClassificationSchema = z.object({
@@ -43,26 +104,29 @@ const TaskClassificationSchema = z.object({
     'ambiguous',          // Needs clarification before proceeding
     'destructive',        // Needs confirmation before proceeding
   ]).describe('Classification of the task type'),
-  confidence: z.number().min(0).max(1).describe('Confidence in classification'),
+  confidence: z.number().min(0).max(1).describe('Confidence in classification from 0 to 1'),
   reasoning: z.string().describe('Why this classification was chosen'),
-  requiredTools: z.array(z.string()).describe('Tools that will likely be needed'),
+  requiredTools: z.array(z.string()).describe('Tools that will likely be needed. Empty array if no tools needed.'),
   dependencies: z.array(z.object({
     tool: z.string().describe('Tool name'),
-    dependsOn: z.array(z.string()).describe('Tools that must run first'),
-  })).optional().describe('Tool execution dependencies'),
-  clarificationNeeded: z.array(z.string()).optional().describe('Questions to ask if ambiguous'),
+    dependsOn: z.array(z.string()).describe('Tools that must run first. Empty array if no dependencies.'),
+  })).describe('Tool execution dependencies. Empty array if no dependencies.'),
+  clarificationNeeded: z.array(z.string()).describe('Questions to ask if ambiguous. Empty array if not ambiguous.'),
   riskLevel: z.enum(['none', 'low', 'medium', 'high', 'critical']).describe('Risk level of the operation'),
 })
 
+const ExecutionPlanStepSchema = z.object({
+  order: z.number().describe('Execution order (1-based)'),
+  tool: z.string().describe('Tool name to call'),
+  purpose: z.string().describe('Why this tool is needed'),
+  expectedOutput: z.string().describe('What we expect to learn from this tool'),
+  dependsOn: z.array(z.number()).describe('Step numbers this depends on. Empty array if no dependencies.'),
+  argKeys: z.array(z.string()).describe('Names of known argument keys. Empty array if no args known.'),
+  argValues: z.array(z.string()).describe('String values for known arguments (same order as argKeys). Empty array if no args known.'),
+})
+
 const ExecutionPlanSchema = z.object({
-  steps: z.array(z.object({
-    order: z.number().describe('Execution order (1-based)'),
-    tool: z.string().describe('Tool name to call'),
-    purpose: z.string().describe('Why this tool is needed'),
-    expectedOutput: z.string().describe('What we expect to learn from this tool'),
-    dependsOn: z.array(z.number()).optional().describe('Step numbers this depends on'),
-    args: z.record(z.string(), z.unknown()).optional().describe('Pre-filled arguments if known'),
-  })).describe('Ordered execution steps'),
+  steps: z.array(ExecutionPlanStepSchema).describe('Ordered execution steps. Empty array if no tools needed.'),
   estimatedRounds: z.number().min(1).describe('Estimated number of LLM rounds needed'),
   verificationStrategy: z.string().describe('How to verify the results are correct'),
 })
@@ -70,9 +134,9 @@ const ExecutionPlanSchema = z.object({
 const VerificationResultSchema = z.object({
   isComplete: z.boolean().describe('Whether the task is fully complete'),
   allToolsSucceeded: z.boolean().describe('Whether all tool calls succeeded'),
-  contradictions: z.array(z.string()).describe('Any contradictions found between tool results'),
-  missingInformation: z.array(z.string()).describe('Information still needed'),
-  confidence: z.number().min(0).max(1).describe('Confidence in the results'),
+  contradictions: z.array(z.string()).describe('Any contradictions found between tool results. Empty array if none.'),
+  missingInformation: z.array(z.string()).describe('Information still needed. Empty array if none.'),
+  confidence: z.number().min(0).max(1).describe('Confidence in the results from 0 to 1'),
   recommendation: z.enum(['accept', 'retry_failed', 'gather_more', 'ask_user']).describe('What to do next'),
 })
 
@@ -280,8 +344,15 @@ export async function runReasoningChat(
       plan,
     })
 
-    // Extract arguments using AI-powered extraction (no regex)
-    let args = step.args ?? {}
+    // Reconstruct args from argKeys/argValues (OpenAI-compatible schema format)
+    let args: Record<string, unknown> = {}
+    if (step.argKeys?.length && step.argValues?.length) {
+      for (let i = 0; i < step.argKeys.length; i++) {
+        args[step.argKeys[i]] = step.argValues[i] ?? ''
+      }
+    }
+
+    // Extract additional arguments using AI-powered extraction (no regex)
     try {
       const extractionResult = await extractToolArgs(step.tool, args, userMessage, signal)
       args = extractionResult.args
@@ -312,7 +383,7 @@ export async function runReasoningChat(
         toolResult: {
           toolCallId,
           name: step.tool,
-          content: JSON.stringify(toolResult),
+          content: safeStringifyForContent(toolResult),
         },
       })
 
@@ -337,7 +408,7 @@ export async function runReasoningChat(
         toolResult: {
           toolCallId,
           name: step.tool,
-          content: JSON.stringify({ error: errorMsg }),
+          content: safeStringifyForContent({ error: errorMsg }),
         },
       })
 
@@ -378,7 +449,7 @@ export async function runReasoningChat(
     .map(([step, result]) => {
       const stepInfo = plan.steps[step - 1]
       return result.success
-        ? `Step ${step} (${stepInfo?.tool ?? 'unknown'}): SUCCESS — ${JSON.stringify(result.result).slice(0, 500)}`
+        ? `Step ${step} (${stepInfo?.tool ?? 'unknown'}): SUCCESS — ${safeStringifyForContent(result.result).slice(0, 500)}`
         : `Step ${step} (${stepInfo?.tool ?? 'unknown'}): FAILED — ${result.error}`
     })
     .join('\n')
@@ -407,9 +478,9 @@ Format your response with these sections:
   const reportResult = await chatComplete({
     messages: [
       ...conversationMessages,
-      { role: 'user', content: userMessage },
-      { role: 'assistant', content: `I've analyzed your request and executed the following plan:\n${plan.steps.map(s => `${s.order}. ${s.tool} — ${s.purpose}`).join('\n')}\n\nNow synthesizing the results...` },
-      { role: 'user', content: reportPrompt },
+      { role: 'user', content: sanitizeMessageContent(userMessage) },
+      { role: 'assistant', content: sanitizeMessageContent(`I've analyzed your request and executed the following plan:\n${plan.steps.map(s => `${s.order}. ${s.tool} — ${s.purpose}`).join('\n')}\n\nNow synthesizing the results...`) },
+      { role: 'user', content: sanitizeMessageContent(reportPrompt) },
     ],
     temperature: 0.3,
     signal,
@@ -445,11 +516,11 @@ async function classifyTask(
   try {
     const recentContext = conversationMessages
       .slice(-6)
-      .map(m => `${m.role}: ${m.content?.slice(0, 200)}`)
-      .join('\n')
+      .map(m => `${m.role}: ${sanitizeMessageContent(m.content?.slice(0, 200) ?? '')}`)
+      .join('\\n')
 
     const result = await generateObject({
-      model: getExtractorModel(),
+      model: getReasoningOrchestratorModel(),
       schema: TaskClassificationSchema,
       system: `You are a task classifier for an AI assistant that manages Hysteria2 C2 infrastructure.
 Available tools: ${AI_TOOL_NAMES.join(', ')}
@@ -465,7 +536,7 @@ Rules:
 - If provider/region/size are not specified for deployment, classify as "ambiguous"
 - If the request involves deletion, stopping, or wiping, classify as "destructive"
 - Be conservative — when in doubt, prefer higher specificity`,
-      prompt: `Recent conversation:\n${recentContext}\n\nUser's latest message: "${userMessage}"`,
+      prompt: sanitizeMessageContent(`Recent conversation:\n${recentContext}\n\nUser's latest message: "${userMessage}"`),
       temperature: 0,
       abortSignal: signal,
     })
@@ -478,6 +549,8 @@ Rules:
       confidence: 0.5,
       reasoning: 'Classification failed, defaulting to single tool assumption',
       requiredTools: [],
+      dependencies: [],
+      clarificationNeeded: [],
       riskLevel: 'none',
     }
   }
@@ -495,7 +568,7 @@ async function createExecutionPlan(
 ): Promise<ExecutionPlan> {
   try {
     const result = await generateObject({
-      model: getExtractorModel(),
+      model: getReasoningOrchestratorModel(),
       schema: ExecutionPlanSchema,
       system: `You are an execution planner for an AI assistant that manages Hysteria2 C2 infrastructure.
 Available tools: ${AI_TOOL_NAMES.join(', ')}
@@ -508,12 +581,12 @@ Create a step-by-step execution plan for the user's request.
 - For multi-step operations, include a generate_plan step if the task is complex
 - Estimate the number of LLM rounds needed
 - Describe a verification strategy to confirm the results are correct`,
-      prompt: `User's request: "${userMessage}"
+      prompt: sanitizeMessageContent(`User's request: "${userMessage}"
 
 Task classification: ${classification.taskType}
 Required tools: ${classification.requiredTools.join(', ')}
 Risk level: ${classification.riskLevel}
-Reasoning: ${classification.reasoning}`,
+Reasoning: ${classification.reasoning}`),
       temperature: 0,
       abortSignal: signal,
     })
@@ -529,7 +602,9 @@ Reasoning: ${classification.reasoning}`,
         tool,
         purpose: `Execute ${tool} as part of the requested operation`,
         expectedOutput: `Result from ${tool}`,
-        dependsOn: index > 0 ? [index] : undefined,
+        dependsOn: index > 0 ? [index] : [] as number[],
+        argKeys: [] as string[],
+        argValues: [] as string[],
       })),
       estimatedRounds: classification.requiredTools.length,
       verificationStrategy: 'Check that all tool calls returned successful results',
@@ -553,7 +628,7 @@ async function verifyResults(
       .join('\n')
 
     const result = await generateObject({
-      model: getExtractorModel(),
+      model: getReasoningOrchestratorModel(),
       schema: VerificationResultSchema,
       system: `You are a results verifier for an AI assistant. Given the original request, the execution plan, and the tool results, verify whether the task is complete and the results are correct.`,
       prompt: `Original request: "${userMessage}"

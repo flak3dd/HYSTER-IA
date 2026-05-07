@@ -10,62 +10,53 @@
 
 import { generateObject } from 'ai'
 import { z } from 'zod'
-import { serverEnv } from '@/lib/env'
-import { createOpenAI } from '@ai-sdk/openai'
-import { anthropic } from '@ai-sdk/anthropic'
+import { getExtractorModel, getExtractorProviderName } from '@/lib/ai/reasoning/extractor-provider'
 import logger from '@/lib/logger'
 
 const log = logger.child({ module: 'ai-argument-extractor' })
 
 // ============================================================
 // EXTRACTION SCHEMAS — one per tool that needs argument extraction
+// All schemas are designed for cross-provider structured output compatibility:
+// - NO .optional() — use empty string defaults instead
+// - NO z.record() — use explicit object properties instead
+// - ALL fields have .describe() — required by OpenAI
 // ============================================================
 
 const DeployNodeArgsSchema = z.object({
   provider: z
-    .enum(['azure', 'hetzner', 'digitalocean', 'vultr', 'lightsail'])
-    .optional()
-    .describe('Cloud provider name'),
+    .enum(['azure', 'hetzner', 'digitalocean', 'vultr', 'lightsail', ''])
+    .describe('Cloud provider name. Empty string if not specified.'),
   region: z
     .string()
-    .optional()
-    .describe('Cloud region (e.g., eastus, westeurope, fsn1, nyc3)'),
+    .describe('Cloud region (e.g., eastus, westeurope, fsn1, nyc3). Empty string if not specified.'),
   size: z
     .string()
-    .optional()
-    .describe('Server size SKU (e.g., Standard_B2s, cx22, s-1vcpu-1gb)'),
+    .describe('Server size SKU (e.g., Standard_B2s, cx22, s-1vcpu-1gb). Empty string if not specified.'),
   name: z
     .string()
-    .optional()
-    .describe('Node name/label'),
+    .describe('Node name/label. Empty string if not specified.'),
   resourceGroup: z
     .string()
-    .optional()
-    .describe('Azure resource group name (Azure only)'),
+    .describe('Azure resource group name (Azure only). Empty string if not specified.'),
   panelUrl: z
     .string()
-    .url()
-    .optional()
-    .describe('Publicly reachable panel URL (HTTPS preferred)'),
+    .describe('Publicly reachable panel URL (HTTPS preferred). Empty string if not specified.'),
 })
 
 const CheckPrerequisitesArgsSchema = z.object({
   operation: z
-    .enum(['deploy_node', 'generate_payload', 'send_email', 'apply_config', 'start_server', 'general'])
-    .optional()
-    .describe('The operation to check prerequisites for'),
+    .enum(['deploy_node', 'generate_payload', 'send_email', 'apply_config', 'start_server', 'general', ''])
+    .describe('The operation to check prerequisites for. Empty string if not specified.'),
   provider: z
-    .enum(['azure', 'hetzner', 'digitalocean', 'vultr', 'lightsail'])
-    .optional()
-    .describe('Cloud provider (for deploy_node prerequisite)'),
+    .enum(['azure', 'hetzner', 'digitalocean', 'vultr', 'lightsail', ''])
+    .describe('Cloud provider (for deploy_node prerequisite). Empty string if not specified.'),
   region: z
     .string()
-    .optional()
-    .describe('Cloud region (for deploy_node prerequisite)'),
+    .describe('Cloud region (for deploy_node prerequisite). Empty string if not specified.'),
   resourceGroup: z
     .string()
-    .optional()
-    .describe('Azure resource group (for deploy_node prerequisite)'),
+    .describe('Azure resource group (for deploy_node prerequisite). Empty string if not specified.'),
 })
 
 const GeneratePlanArgsSchema = z.object({
@@ -80,7 +71,7 @@ const PromptUserArgsSchema = z.object({
   options: z.array(z.object({
     label: z.string().describe('Display label'),
     value: z.string().describe('Value to return if selected'),
-  })).optional().describe('Multiple-choice options'),
+  })).describe('Multiple-choice options. Empty array if no options.'),
 })
 
 const PayloadIntentSchema = z.object({
@@ -89,16 +80,13 @@ const PayloadIntentSchema = z.object({
     .describe('Detected payload-related intent'),
   description: z
     .string()
-    .optional()
-    .describe('Natural language description for payload generation'),
+    .describe('Natural language description for payload generation. Empty string if not applicable.'),
   buildId: z
     .string()
-    .optional()
-    .describe('Specific build ID if referenced'),
+    .describe('Specific build ID if referenced. Empty string if not specified.'),
   limit: z
     .number()
-    .optional()
-    .describe('Number of items to list'),
+    .describe('Number of items to list. 0 if not applicable.'),
 })
 
 // Map tool names to their extraction schemas
@@ -179,9 +167,8 @@ export async function extractToolArgs(
   }
 
   try {
-    const provider = getExtractorProvider()
     const result = await generateObject({
-      model: provider.model,
+      model: getExtractorModel(),
       schema: schema as z.ZodObject<any>,
       system: EXTRACTION_SYSTEM_PROMPT,
       prompt: `Tool: ${toolName}\nMissing parameters: ${missingFields.join(', ')}\nUser message: "${userMessage}"\n\nExtract the missing arguments from the user's message. Only fill in values that are clearly stated or implied.`,
@@ -190,19 +177,28 @@ export async function extractToolArgs(
     })
 
     const extractedArgs = result.object as Record<string, unknown>
-    const extractedFields = Object.keys(extractedArgs).filter(
-      (key) => extractedArgs[key] !== undefined && extractedArgs[key] !== null
-    )
+
+    // Filter out empty-string values (they represent "not specified" in our schema)
+    const meaningfulArgs: Record<string, unknown> = {}
+    const extractedFields: string[] = []
+    for (const [key, value] of Object.entries(extractedArgs)) {
+      // Skip empty strings (our "not specified" marker), empty arrays, and 0 for limit
+      if (value === '' || value === undefined || value === null) continue
+      if (Array.isArray(value) && value.length === 0) continue
+      if (key === 'limit' && value === 0) continue
+      meaningfulArgs[key] = value
+      extractedFields.push(key)
+    }
 
     // Merge extracted args with existing args (existing takes precedence)
-    const mergedArgs = { ...extractedArgs, ...existingArgs }
+    const mergedArgs = { ...meaningfulArgs, ...existingArgs }
 
     log.info(
       {
         toolName,
         missingFields,
         extractedFields,
-        provider: provider.name,
+        provider: getExtractorProviderName(),
       },
       'AI argument extraction completed',
     )
@@ -259,9 +255,8 @@ export async function detectIntent(
   signal?: AbortSignal,
 ): Promise<{ toolName: string; args: Record<string, unknown> } | null> {
   try {
-    const provider = getExtractorProvider()
     const result = await generateObject({
-      model: provider.model,
+      model: getExtractorModel(),
       schema: PayloadIntentSchema,
       system: INTENT_SYSTEM_PROMPT,
       prompt: `User message: "${userMessage}"`,
@@ -280,10 +275,10 @@ export async function detectIntent(
 
     switch (intent.intent) {
       case 'list_payloads':
-        args.limit = intent.limit ?? 20
+        args.limit = intent.limit > 0 ? intent.limit : 20
         break
       case 'generate_payload':
-        args.description = intent.description ?? userMessage
+        args.description = intent.description || userMessage
         break
       case 'get_payload_status':
         if (intent.buildId) args.buildId = intent.buildId
@@ -291,7 +286,7 @@ export async function detectIntent(
     }
 
     log.info(
-      { intent: intent.intent, toolName, provider: provider.name },
+      { intent: intent.intent, toolName, provider: getExtractorProviderName() },
       'AI intent detection completed',
     )
 
@@ -306,47 +301,4 @@ export async function detectIntent(
   }
 }
 
-// ============================================================
-// PROVIDER SELECTION — uses fastest available model for extraction
-// ============================================================
 
-type ExtractorProvider = {
-  name: string
-  model: any
-}
-
-function getExtractorProvider(): ExtractorProvider {
-  const env = serverEnv()
-
-  // Prefer Grok/xAI for extraction (fast and cheap)
-  if (env.XAI_API_KEY) {
-    const client = createOpenAI({
-      baseURL: env.XAI_BASE_URL,
-      apiKey: env.XAI_API_KEY,
-    })
-    return { name: 'xai', model: client(env.XAI_MODEL) }
-  }
-
-  // Fallback to OpenAI
-  if (env.OPENAI_API_KEY) {
-    const client = createOpenAI({ apiKey: env.OPENAI_API_KEY })
-    return { name: 'openai', model: client('gpt-4o-mini') }
-  }
-
-  // Fallback to Anthropic
-  if (env.ANTHROPIC_API_KEY) {
-    return { name: 'anthropic', model: anthropic('claude-3-5-haiku-20241022') }
-  }
-
-  // Last resort: use whatever LLM_PROVIDER is configured
-  if (env.LLM_PROVIDER_API_KEY) {
-    const client = createOpenAI({
-      baseURL: env.LLM_PROVIDER_BASE_URL,
-      apiKey: env.LLM_PROVIDER_API_KEY,
-    })
-    return { name: 'legacy', model: client(env.LLM_MODEL) }
-  }
-
-  // This should never happen in production
-  throw new Error('No AI provider configured for argument extraction')
-}

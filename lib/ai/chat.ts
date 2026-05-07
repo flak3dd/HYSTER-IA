@@ -6,6 +6,7 @@ import type { AiMessage } from "@/lib/ai/types"
 import { buildSystemPrompt, Role, buildDynamicContext } from "@/lib/ai/system-prompt"
 import { extractToolArgs, detectIntent } from "@/lib/ai/argument-extractor"
 import { runReasoningChat, type ReasoningProgress } from "@/lib/ai/reasoning-orchestrator"
+import { sanitizeMessageContent } from "@/lib/ai/robustness"
 import logger from "@/lib/logger"
 import { serverEnv } from "@/lib/env"
 
@@ -439,7 +440,7 @@ export async function runChat(
       if (msg.role === "user" || msg.role === "assistant") {
         const chatMsg: ChatMessage = {
           role: msg.role,
-          content: msg.content ?? "",
+          content: sanitizeMessageContent(msg.content ?? ""),
         }
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           chatMsg.tool_calls = msg.toolCalls.map((tc) => ({
@@ -452,13 +453,13 @@ export async function runChat(
       } else if (msg.role === "tool" && msg.toolResult) {
         llmMessages.push({
           role: "tool",
-          content: msg.toolResult.content,
+          content: sanitizeMessageContent(msg.toolResult.content),
           tool_call_id: msg.toolResult.toolCallId,
         })
       }
     }
 
-    llmMessages.push({ role: "user", content: userMessage })
+    llmMessages.push({ role: "user", content: sanitizeMessageContent(userMessage) })
     const tools = aiToolDefinitions()
     const newMessages: AiMessage[] = [userMsg]
     const turnSignal = AbortSignal.timeout(timeoutMs)
@@ -490,10 +491,17 @@ export async function runChat(
                       s => progress.detail.includes(s.tool)
                     )
                     if (currentStep) {
+                      // Reconstruct args from argKeys/argValues (OpenAI-compatible schema)
+                      const stepArgs: Record<string, unknown> = {}
+                      if (currentStep.argKeys?.length && currentStep.argValues?.length) {
+                        for (let i = 0; i < currentStep.argKeys.length; i++) {
+                          stepArgs[currentStep.argKeys[i]] = currentStep.argValues[i] ?? ''
+                        }
+                      }
                       return onProgress({
                         type: 'tool_start',
                         toolName: currentStep.tool,
-                        toolArgs: JSON.stringify(currentStep.args ?? {}),
+                        toolArgs: JSON.stringify(stepArgs),
                       })
                     }
                   }
@@ -735,7 +743,7 @@ export async function runChat(
             const toolStartedAt = Date.now()
             const parsedArgs = parseToolArguments(call.function.arguments)
 
-            let resultContent: string
+            let resultContent: string = ''
             let toolSuccess = true
             let retried = false
             let retrySuccess = false
@@ -870,7 +878,7 @@ export async function runChat(
               },
               llmMsg: {
                 role: "tool" as const,
-                content: resultContent,
+                content: sanitizeMessageContent(resultContent),
                 tool_call_id: call.id,
               },
               summary: {

@@ -40,7 +40,8 @@ const IntentAnalysisSchema = z.object({
 })
 
 const ParameterExtractionSchema = z.object({
-  parameters: z.record(z.unknown()).describe('Extracted parameters for the selected tools'),
+  parameterKeys: z.array(z.string()).describe('Names of extracted parameters. Empty array if none.'),
+  parameterValues: z.array(z.string()).describe('String values for extracted parameters (same order as parameterKeys). Empty array if none.'),
   missingRequired: z.array(z.string()).describe('Required parameters that are missing'),
   userProvided: z.array(z.string()).describe('Parameters that were explicitly provided by the user'),
   inferred: z.array(z.string()).describe('Parameters that were inferred from context'),
@@ -50,8 +51,8 @@ const PlanningSchema = z.object({
   steps: z.array(z.object({
     order: z.number().describe('Step execution order (1-indexed)'),
     description: z.string().describe('What this step does'),
-    toolName: z.string().optional().describe('Tool to use for this step'),
-    dependsOn: z.array(z.number()).optional().describe('Step numbers this step depends on'),
+    toolName: z.string().describe('Tool to use for this step. Empty string if no tool needed.'),
+    dependsOn: z.array(z.number()).describe('Step numbers this step depends on. Empty array if no dependencies.'),
   })).describe('Planned execution steps'),
   estimatedDuration: z.number().describe('Estimated time in seconds'),
   canParallelize: z.boolean().describe('Whether any steps can run in parallel'),
@@ -67,6 +68,20 @@ const ValidationSchema = z.object({
 // ============================================================
 // REASONING PIPELINE
 // ============================================================
+
+/**
+ * Reconstruct a parameters Record from parallel key/value arrays.
+ * Used because OpenAI structured output doesn't support z.record().
+ */
+function reconstructParams(keys: string[], values: string[]): Record<string, unknown> {
+  const params: Record<string, unknown> = {}
+  if (keys?.length && values?.length) {
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i]) params[keys[i]] = values[i] ?? ''
+    }
+  }
+  return params
+}
 
 export type ReasoningContext = {
   userMessage: string
@@ -163,7 +178,7 @@ export async function runReasoningPipeline(
       intent: intentResult.intent,
       confidence: intentResult.confidence,
       suggestedTools: intentResult.suggestedTools,
-      extractedParams: paramsResult.parameters,
+      extractedParams: reconstructParams(paramsResult.parameterKeys, paramsResult.parameterValues),
       missingParams: paramsResult.missingRequired,
       executionPlan,
       validation,
@@ -252,7 +267,8 @@ Rules:
   } catch (err) {
     log.warn({ error: err }, 'Parameter extraction failed, returning empty')
     return {
-      parameters: {},
+      parameterKeys: [],
+      parameterValues: [],
       missingRequired: [],
       userProvided: [],
       inferred: [],
@@ -263,7 +279,7 @@ Rules:
 async function createExecutionPlan(
   context: ReasoningContext,
   intentResult: { intent: string; suggestedTools: string[] },
-  paramsResult: { parameters: Record<string, unknown> },
+  paramsResult: { parameterKeys: string[]; parameterValues: string[] },
   signal?: AbortSignal
 ): Promise<{ success: true; plan: NonNullable<ReasoningResult['executionPlan']> } | { success: false }> {
   try {
@@ -287,7 +303,7 @@ Consider which steps can run in parallel.`,
 
 Intent: ${intentResult.intent}
 Tools: ${intentResult.suggestedTools.join(', ')}
-Parameters: ${JSON.stringify(paramsResult.parameters, null, 2)}`,
+Parameters: ${JSON.stringify(reconstructParams(paramsResult.parameterKeys, paramsResult.parameterValues), null, 2)}`,
       temperature: 0.1,
       abortSignal: signal,
     })
@@ -390,7 +406,18 @@ type ReasoningProvider = {
 function getReasoningProvider(): ReasoningProvider {
   const env = serverEnv()
 
-  // Prefer fast models for reasoning
+  // PRIMARY: Anthropic/Claude for reasoning (best structured output quality)
+  if (env.ANTHROPIC_API_KEY) {
+    return { name: 'anthropic', model: anthropic(env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001') }
+  }
+
+  // Fallback to OpenAI
+  if (env.OPENAI_API_KEY) {
+    const client = createOpenAI({ apiKey: env.OPENAI_API_KEY })
+    return { name: 'openai', model: client('gpt-4o-mini') }
+  }
+
+  // Fallback to xAI/Grok
   if (env.XAI_API_KEY) {
     const client = createOpenAI({
       baseURL: env.XAI_BASE_URL,
@@ -399,15 +426,7 @@ function getReasoningProvider(): ReasoningProvider {
     return { name: 'xai', model: client('grok-2-1212') }
   }
 
-  if (env.OPENAI_API_KEY) {
-    const client = createOpenAI({ apiKey: env.OPENAI_API_KEY })
-    return { name: 'openai', model: client('gpt-4o-mini') }
-  }
-
-  if (env.ANTHROPIC_API_KEY) {
-    return { name: 'anthropic', model: anthropic('claude-3-5-haiku-20241022') }
-  }
-
+  // Last resort: use whatever LLM_PROVIDER is configured
   if (env.LLM_PROVIDER_API_KEY) {
     const client = createOpenAI({
       baseURL: env.LLM_PROVIDER_BASE_URL,

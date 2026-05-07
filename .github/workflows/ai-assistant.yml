@@ -1,0 +1,245 @@
+name: AI Assistant Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/ai/**'
+      - 'tests/ai/**'
+      - '.github/workflows/ai-assistant.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/ai/**'
+      - 'tests/ai/**'
+  workflow_dispatch:
+    inputs:
+      testCategory:
+        description: 'Test category to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - node-management
+          - config-generation
+          - deployment
+          - payload
+          - troubleshooting
+
+concurrency:
+  group: ai-assistant-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  #  AI Assistant Comprehensive Test Suite
+  # ──────────────────────────────────────────────────────────────────
+  comprehensive-tests:
+    name: AI Assistant Comprehensive Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      DATABASE_URL: postgresql://unused@localhost:5432/unused
+      JWT_SECRET: ci-test-secret-key-32-chars-long!!
+      JWT_REFRESH_SECRET: ci-refresh-secret-key-32-chars!!
+      NEXTAUTH_SECRET: ci-nextauth-secret
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run AI assistant comprehensive tests
+        id: comprehensive
+        run: |
+          npx jest tests/ai/ai-assistant-comprehensive.test.ts \
+            --verbose \
+            --ci \
+            --forceExit \
+            --no-coverage \
+            --testLocationInResults \
+            --json > test-results.json 2>&1 || true
+          cat test-results.json
+
+      - name: Parse test results
+        id: parse
+        if: always()
+        run: |
+          if [ -f test-results.json ]; then
+            PASSED=$(grep -o '"numPassedTests":[0-9]*' test-results.json | head -1 | cut -d: -f2)
+            FAILED=$(grep -o '"numFailedTests":[0-9]*' test-results.json | head -1 | cut -d: -f2)
+            TOTAL=$(grep -o '"numTotalTests":[0-9]*' test-results.json | head -1 | cut -d: -f2)
+            echo "passed=$PASSED" >> $GITHUB_OUTPUT
+            echo "failed=$FAILED" >> $GITHUB_OUTPUT
+            echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          else
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "failed=0" >> $GITHUB_OUTPUT
+            echo "total=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run AI new tools tests
+        id: newtools
+        if: always()
+        run: |
+          npx jest tests/ai/ai-new-tools.test.ts \
+            --verbose \
+            --ci \
+            --forceExit \
+            --no-coverage
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## AI Assistant Test Report" > test-report.md
+          echo "" >> test-report.md
+          echo "### Comprehensive Tests" >> test-report.md
+          echo "- **Passed:** ${{ steps.parse.outputs.passed }}" >> test-report.md
+          echo "- **Failed:** ${{ steps.parse.outputs.failed }}" >> test-report.md
+          echo "- **Total:** ${{ steps.parse.outputs.total }}" >> test-report.md
+          echo "" >> test-report.md
+          echo "### Test Categories" >> test-report.md
+          echo "1. Node Management (list, create, get, update)" >> test-report.md
+          echo "2. Config Generation (obfuscation, high-throughput)" >> test-report.md
+          echo "3. Azure Deployment (deploy, status check)" >> test-report.md
+          echo "4. Payload Generation (generate, list, status)" >> test-report.md
+          echo "5. Troubleshooting (diagnostics, traffic analysis)" >> test-report.md
+          echo "6. Complex Multi-step (plans, prerequisites)" >> test-report.md
+          echo "" >> test-report.md
+          echo "### Timestamp" >> test-report.md
+          echo "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> test-report.md
+          cat test-report.md
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-assistant-test-results-${{ github.run_id }}
+          path: |
+            test-results.json
+            test-report.md
+          retention-days: 14
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const passed = '${{ steps.parse.outputs.passed }}';
+            const failed = '${{ steps.parse.outputs.failed }}';
+            const total = '${{ steps.parse.outputs.total }}';
+
+            const status = failed === '0' ? '✅ All tests passed' : '⚠️ Some tests failed';
+
+            const body = `## 🤖 AI Assistant Test Results
+
+            ${status}
+
+            | Metric | Value |
+            |--------|-------|
+            | **Passed** | ${passed} |
+            | **Failed** | ${failed} |
+            | **Total** | ${total} |
+
+            ### Test Categories
+            - Node Management
+            - Config Generation
+            - Azure Deployment
+            - Payload Generation
+            - Troubleshooting
+            - Complex Multi-step
+
+            <details>
+            <summary>View Details</summary>
+
+            Tests verify:
+            - Tool execution and response formats
+            - Error handling for invalid inputs
+            - Database operations (CRUD)
+            - Deployment orchestration
+            - Prerequisites checking
+            - Plan generation
+
+            </details>
+
+            ---
+            *Generated by AI Assistant Test Workflow*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  # ──────────────────────────────────────────────────────────────────
+  #  AI Tool Registry Validation
+  # ──────────────────────────────────────────────────────────────────
+  tool-registry:
+    name: Validate AI Tool Registry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Validate tool exports
+        run: |
+          node -e "
+            const tools = require('./lib/ai/tools');
+            const requiredTools = [
+              'list_nodes', 'create_node', 'get_node', 'update_node', 'delete_node',
+              'generate_config', 'deploy_node', 'get_deployment_status', 'list_deployments',
+              'generate_payload', 'list_payloads', 'get_payload_status',
+              'system_status', 'analyze_traffic', 'troubleshoot',
+              'generate_plan', 'check_prerequisites'
+            ];
+
+            const missing = requiredTools.filter(t => !tools.AI_TOOLS[t]);
+            if (missing.length > 0) {
+              console.error('Missing tools:', missing);
+              process.exit(1);
+            }
+
+            console.log('✅ All required AI tools are registered');
+            console.log('📊 Total tools available:', Object.keys(tools.AI_TOOLS).length);
+          "
+
+  # ──────────────────────────────────────────────────────────────────
+  #  Test Summary
+  # ──────────────────────────────────────────────────────────────────
+  summary:
+    name: Test Summary
+    needs: [comprehensive-tests, tool-registry]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Test Results Summary
+        run: |
+          echo "## AI Assistant CI/CD Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Comprehensive Tests | ${{ needs.comprehensive-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tool Registry | ${{ needs.tool-registry.result }} |" >> $GITHUB_STEP_SUMMARY

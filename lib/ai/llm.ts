@@ -24,7 +24,13 @@ import {
   validateProviderName,
 } from './robustness'
 
-// Default Grok client — replaces OpenAI as the primary provider
+  // Default Claude client — Anthropic is the primary provider
+function createClaudeClient(apiKey?: string) {
+  const env = serverEnv()
+  return anthropic(apiKey || env.ANTHROPIC_API_KEY)
+}
+
+// Default Grok client — fallback provider
 function createGrokClient(apiKey?: string) {
   const env = serverEnv()
   return createOpenAI({
@@ -421,11 +427,11 @@ export async function chatComplete(options: ChatCompleteOptions): Promise<ChatCo
     timeoutMs,
   })
 
-  // Build list of available providers
+  // Build list of available providers - ANTHROPIC is PRIMARY
   const availableProviders: string[] = []
+  if (env.ANTHROPIC_API_KEY) availableProviders.push('anthropic') // PRIMARY: Claude first
   if (env.OPENAI_API_KEY) availableProviders.push('openai')
   if (useShadowGrok && env.SHADOWGROK_ENABLED && env.XAI_API_KEY) availableProviders.push('xai')
-  if (env.ANTHROPIC_API_KEY) availableProviders.push('anthropic')
   if (env.GOOGLE_API_KEY) availableProviders.push('google')
   if (env.AZURE_OPENAI_ENDPOINT && env.AZURE_OPENAI_API_KEY) availableProviders.push('azure')
   if (env.OPENROUTER_API_KEY) availableProviders.push('openrouter')
@@ -612,11 +618,18 @@ async function executeSingleProvider(
   const startTime = Date.now()
 
   let selectedModel: any
-  let selectedModelName: string = model || env.XAI_MODEL
+  let selectedModelName: string = model || env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001'
   let providerUsed = provider
 
-  // Build provider client
+  // Build provider client - ANTHROPIC is PRIMARY
   switch (provider) {
+    case 'anthropic':
+      if (env.ANTHROPIC_API_KEY) {
+        selectedModel = anthropic(model || env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001')
+        selectedModelName = model || env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001'
+        providerUsed = 'anthropic'
+      }
+      break
     case 'openai':
       if (env.OPENAI_API_KEY) {
         const openaiClient = createOpenAI({
@@ -636,13 +649,6 @@ async function executeSingleProvider(
         selectedModel = xaiClient(model || env.XAI_MODEL)
         selectedModelName = model || env.XAI_MODEL
         providerUsed = 'xai'
-      }
-      break
-    case 'anthropic':
-      if (env.ANTHROPIC_API_KEY) {
-        selectedModel = anthropic(model || 'claude-3-5-sonnet-20241022')
-        selectedModelName = model || 'claude-3-5-sonnet-20241022'
-        providerUsed = 'anthropic'
       }
       break
     case 'google':

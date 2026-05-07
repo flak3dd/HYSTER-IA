@@ -27,9 +27,9 @@ export const DecompositionSchema = z.object({
 export const ThoughtAnalysisSchema = z.object({
   analysis: z.string().min(1).describe('The analysis or reasoning content'),
   confidence: z.number().min(0).max(1).describe('Confidence score 0-1'),
-  keyInsights: z.array(z.string()).optional().describe('Key insights discovered'),
-  assumptions: z.array(z.string()).optional().describe('Assumptions made'),
-  risks: z.array(z.string()).optional().describe('Risks identified'),
+  keyInsights: z.array(z.string()).describe('Key insights discovered. Empty array if none.'),
+  assumptions: z.array(z.string()).describe('Assumptions made. Empty array if none.'),
+  risks: z.array(z.string()).describe('Risks identified. Empty array if none.'),
 })
 
 export const VerificationSchema = z.object({
@@ -66,7 +66,7 @@ export const UncertaintyAssessmentSchema = z.object({
   confidence: z.number().min(0).max(1).describe('Confidence in this assessment'),
   reasoning: z.string().describe('Why this uncertainty exists'),
   severity: z.enum(['low', 'medium', 'high']).describe('Severity of the uncertainty'),
-  mitigation: z.string().optional().describe('Suggested mitigation strategy'),
+  mitigation: z.string().describe('Suggested mitigation strategy. Empty string if none.'),
 })
 
 export const KnowledgeGapSchema = z.object({
@@ -88,7 +88,7 @@ export const SelfQuestioningSchema = z.object({
   questions: z.array(z.object({
     question: z.string().describe('The self-questioning prompt'),
     purpose: z.string().describe('Why this question matters'),
-    expectedAnswer: z.string().optional().describe('What the answer might look like'),
+    expectedAnswer: z.string().describe('What the answer might look like. Empty string if unknown.'),
   })).describe('Self-generated questions to validate reasoning'),
 })
 
@@ -137,14 +137,16 @@ export const ReflectionSchema = z.object({
 
 // ============================================================
 // Intent Analysis Schema
+// Cross-provider compatible: no z.record(), no .optional()
 // ============================================================
 
 export const IntentAnalysisSchema = z.object({
   intent: z.string().min(1).describe('The detected user intent'),
   confidence: z.number().min(0).max(1).describe('Confidence in intent detection'),
-  extractedParameters: z.record(z.string(), z.unknown()).describe('Parameters extracted from the user message'),
-  suggestedFunction: z.string().optional().describe('Suggested backend function to call'),
+  parameterKeys: z.array(z.string()).describe('Names of extracted parameters. Empty array if none.'),
+  parameterValues: z.array(z.string()).describe('String values for extracted parameters (same order as parameterKeys). Empty array if none.'),
+  suggestedFunction: z.string().describe('Suggested backend function to call. Empty string if none.'),
   riskLevel: z.enum(['low', 'medium', 'high', 'critical']).describe('Risk level of the operation'),
   requiresConfirmation: z.boolean().describe('Whether user confirmation is needed'),
-  reasoning: z.string().optional().describe('Reasoning behind the intent classification'),
+  reasoning: z.string().describe('Reasoning behind the intent classification. Empty string if none.'),
 })

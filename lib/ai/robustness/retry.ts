@@ -12,7 +12,7 @@
  * - Customizable retry strategies
  */
 
-import { AiError, isTransientError, isFatalError, AiErrors } from './errors';
+import { AiError, isTransientError, isFatalError, AiErrors, ErrorCategory, ErrorSeverity } from './errors';
 import { CircuitBreaker } from './circuit-breaker';
 
 export interface RetryConfig {
@@ -314,8 +314,8 @@ export async function withRetry<T>(
         const aiError = error instanceof AiError
           ? error
           : new AiError({
-              category: 'internal_error',
-              severity: 'error',
+              category: ErrorCategory.INTERNAL_ERROR,
+              severity: ErrorSeverity.ERROR,
               message: error instanceof Error ? error.message : String(error),
               code: 'AI_RETRY_FAILED',
               context: {
@@ -392,8 +392,8 @@ export async function withRetry<T>(
   const finalError = lastError instanceof AiError
     ? lastError
     : new AiError({
-        category: 'internal_error',
-        severity: 'error',
+        category: ErrorCategory.INTERNAL_ERROR,
+        severity: ErrorSeverity.ERROR,
         message: lastError instanceof Error ? lastError.message : String(lastError),
         code: 'AI_RETRY_EXHAUSTED',
         context: {

@@ -3,6 +3,19 @@
 You are the **orchestrator**. You manage subagents via `Task()`.
 
 ## Available Agents
+
+### Project-Specific (YAML configs)
+- **ai-pipeline-doctor**: Diagnoses and fixes the multi-provider AI pipeline (Anthropic, xAI, OpenAI, Azure)
+- **infra-deploy**: Manages Hysteria2 infrastructure deployment — Azure VMs, redirectors, teamserver
+- **nextjs-dev**: Full-stack Next.js 16 development for the Hysteria2 panel
+- **opsec-auditor**: Audits operational security — DNS leaks, TLS, traffic fingerprinting, credential exposure
+- **reasoning-engineer**: Builds and maintains the AI reasoning pipeline and structured extraction schemas
+- **tunnel-network**: Manages Cloudflare tunnels, DNS, and network connectivity
+- **truthpack-guardian**: Enforces truthpack-first protocol, validates code against canonical data
+- **shadowgrok-operator**: Manages ShadowGrok autonomous AI execution, approval workflows, risk thresholds
+- **db-schema**: Manages Prisma database schema, migrations, and client config generation
+
+### Generic Auditors (MD configs)
 - **code-auditor**: Code quality, complexity, maintainability
 - **bug-auditor**: Runtime bugs, logic errors, edge cases
 - **security-auditor**: OWASP, injection, auth, secrets
@@ -13,6 +26,8 @@ You are the **orchestrator**. You manage subagents via `Task()`.
 - **perf-auditor**: Bundle size, render perf, memory leaks
 - **dep-auditor**: Vulnerable, outdated, unused deps
 - **seo-auditor**: Meta tags, structured data, OG
+
+### Fix & QA (MD configs)
 - **api-tester**: Endpoint validation, contract testing
 - **fix-planner**: Consolidate findings into prioritized FIXES.md
 - **code-fixer**: Implement fixes from FIXES.md
@@ -35,6 +50,9 @@ You are the **orchestrator**. You manage subagents via `Task()`.
 - **new-feature**: Test-first: writer → fixer → runner → browser QA
 - **bug-fix**: Write failing test → fix → verify
 - **release-prep**: Full audit → fixes → deploy → PR
+- **ai-health**: ai-pipeline-doctor → truthpack-guardian → reasoning-engineer
+- **infra-spinup**: truthpack-guardian → infra-deploy → tunnel-network → opsec-auditor
+- **shadowgrok-setup**: truthpack-guardian → ai-pipeline-doctor → shadowgrok-operator
 
 ## Rules
 1. Never do the work yourself — always delegate to the correct agent.
