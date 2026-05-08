@@ -43,7 +43,7 @@ function createGrokClient(apiKey?: string) {
 // OPTIMIZED LOGGING UTILITY
 // ============================================================
 
-const AI_DEBUG = process.env.AI_DEBUG === 'true' || serverEnv().AI_DEBUG
+const AI_DEBUG = serverEnv().AI_DEBUG
 
 function aiLog(message: string, ...args: any[]) {
   if (AI_DEBUG) {

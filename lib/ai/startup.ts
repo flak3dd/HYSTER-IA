@@ -1,4 +1,5 @@
 import { aiInitializer } from './ai-initializer'
+import { serverEnv } from '@/lib/env'
 
 /* ------------------------------------------------------------------ */
 /*  Automatic AI System Startup                                         */
@@ -19,15 +20,16 @@ export async function initializeAISystems(): Promise<void> {
   initializationPromise = (async () => {
     try {
       console.log('🤖 Initializing AI Systems...')
+      const env = serverEnv();
 
       const result = await aiInitializer.initialize({
-        enableTaskScheduling: process.env.ENABLE_AI_SCHEDULING !== 'false',
-        enableSelfOptimization: process.env.ENABLE_AI_OPTIMIZATION !== 'false',
-        enablePredictiveCaching: process.env.ENABLE_AI_PREDICTIVE_CACHE !== 'false',
-        enableThreatCorrelation: process.env.ENABLE_AI_THREAT_CORRELATION !== 'false',
-        enableAnomalyDetection: process.env.ENABLE_AI_ANOMALY_DETECTION !== 'false',
-        redisUrl: process.env.REDIS_URL,
-        optimizationInterval: parseInt(process.env.AI_OPTIMIZATION_INTERVAL || '300000', 10),
+        enableTaskScheduling: env.ENABLE_AI_SCHEDULING,
+        enableSelfOptimization: env.ENABLE_AI_OPTIMIZATION,
+        enablePredictiveCaching: env.ENABLE_AI_PREDICTIVE_CACHE,
+        enableThreatCorrelation: env.ENABLE_AI_THREAT_CORRELATION,
+        enableAnomalyDetection: env.ENABLE_AI_ANOMALY_DETECTION,
+        redisUrl: env.REDIS_URL,
+        optimizationInterval: env.AI_OPTIMIZATION_INTERVAL,
       })
 
       if (result.success) {
@@ -46,7 +48,8 @@ export async function initializeAISystems(): Promise<void> {
 
 // Auto-initialize on module import (can be disabled via environment variable)
 const g = globalThis as typeof globalThis & { __aiSystemsInitializing?: boolean }
-if (process.env.AUTO_INIT_AI !== 'false' && !g.__aiSystemsInitializing) {
+const env = serverEnv();
+if (env.AUTO_INIT_AI && !g.__aiSystemsInitializing) {
   g.__aiSystemsInitializing = true
   // Don't await - let it initialize in the background
   initializeAISystems().catch(console.error)

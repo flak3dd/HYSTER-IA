@@ -174,6 +174,11 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
   const deployment = activeDeployments.get(id)!
   deployment.vpsId = result.vpsId
 
+  // Most providers default to root SSH; Azure (and some others) use a
+  // non-root admin user and require sudo. We thread this through every
+  // SSH call below.
+  const sshUsername = result.sshUsername ?? "root"
+
   // Wait for IP
   emit(id, "waiting_for_ip", "Waiting for server to get a public IP...")
   let ip: string
@@ -186,10 +191,15 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
   deployment.vpsIp = ip
   emit(id, "waiting_for_ip", `Server IP: ${ip}`)
 
-  // Wait for SSH
-  emit(id, "provisioning", `Waiting for SSH to become available on ${ip}...`)
+  // Wait for SSH (Azure ARM Ubuntu boot can take 60-120s, so allow extra time)
+  emit(id, "provisioning", `Waiting for SSH to become available on ${ip} as ${sshUsername}...`)
   try {
-    await waitForSsh({ host: ip, privateKey: keyPair.privateKey, timeoutMs: 180_000 })
+    await waitForSsh({
+      host: ip,
+      privateKey: keyPair.privateKey,
+      username: sshUsername,
+      timeoutMs: 240_000,
+    })
   } catch (err) {
     emit(id, "failed", "SSH not reachable", err instanceof Error ? err.message : String(err))
     return
@@ -233,12 +243,19 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
   })
 
   emit(id, "installing_hysteria", "Running Hysteria 2 installation script...")
+  // For non-root SSH users (e.g. Azure's `azureuser`), the provision script
+  // needs to run under sudo since it touches /etc, installs apt packages,
+  // and writes systemd units.
+  const provisionCmd = sshUsername === "root"
+    ? script
+    : `sudo -n bash -s <<'__DEVIN_PROVISION_EOF__'\n${script}\n__DEVIN_PROVISION_EOF__\n`
   let execResult
   try {
     execResult = await sshExec({
       host: ip,
       privateKey: keyPair.privateKey,
-      command: script,
+      username: sshUsername,
+      command: provisionCmd,
       timeoutMs: 300_000,
     })
   } catch (err) {
@@ -255,10 +272,12 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
   // Test connectivity
   emit(id, "testing_connectivity", `Testing Hysteria 2 connectivity on ${ip}:${config.port}...`)
   try {
+    const testCmd = `systemctl is-active hysteria-server && curl -sf http://127.0.0.1:25000/ -H "Authorization: ${trafficSecret}" || echo "traffic-api-check-failed"`
     const testResult = await sshExec({
       host: ip,
       privateKey: keyPair.privateKey,
-      command: `systemctl is-active hysteria-server && curl -sf http://127.0.0.1:25000/ -H "Authorization: ${trafficSecret}" || echo "traffic-api-check-failed"`,
+      username: sshUsername,
+      command: sshUsername === "root" ? testCmd : `sudo -n bash -c '${testCmd.replace(/'/g, "'\\''")}'`,
       timeoutMs: 30_000,
     })
     if (testResult.stdout.includes("active")) {

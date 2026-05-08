@@ -1,5 +1,6 @@
 import { RateLimiterMemory, RateLimiterRedis } from 'rate-limiter-flexible'
 import Redis from 'ioredis'
+import { serverEnv } from '@/lib/env'
 
 // Rate limit configuration
 const RATE_LIMIT_CONFIG = {
@@ -28,10 +29,11 @@ const RATE_LIMIT_CONFIG = {
 // Redis client (optional - falls back to memory if not configured)
 const gRL = globalThis as typeof globalThis & { __rateLimiterRedis?: Redis | null }
 let redisClient: Redis | null = gRL.__rateLimiterRedis ?? null
+const env = serverEnv();
 
-if (!redisClient && process.env.REDIS_URL) {
+if (!redisClient && env.REDIS_URL) {
   try {
-    redisClient = new Redis(process.env.REDIS_URL, {
+    redisClient = new Redis(env.REDIS_URL, {
       maxRetriesPerRequest: 3,
       enableReadyCheck: true,
     })

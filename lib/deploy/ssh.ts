@@ -100,6 +100,7 @@ export async function sshExec(opts: {
 export async function waitForSsh(opts: {
   host: string
   privateKey: string
+  username?: string
   timeoutMs?: number
   intervalMs?: number
 }): Promise<void> {
@@ -111,6 +112,7 @@ export async function waitForSsh(opts: {
       const result = await sshExec({
         host: opts.host,
         privateKey: opts.privateKey,
+        username: opts.username,
         command: "echo ok",
         timeoutMs: 15_000,
       })

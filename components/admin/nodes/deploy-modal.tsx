@@ -97,7 +97,7 @@ export function DeployModal({ onClose, onDeployed }: { onClose: () => void; onDe
     setSteps([])
 
     try {
-      const panelUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"
+      const panelUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000")
       const res = await apiFetch("/api/admin/deploy", {
         method: "POST",
         headers: { "content-type": "application/json" },

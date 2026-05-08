@@ -42,6 +42,9 @@ const DeployNodeArgsSchema = z.object({
   panelUrl: z
     .string()
     .describe('Publicly reachable panel URL (HTTPS preferred). Empty string if not specified.'),
+  tags: z
+    .array(z.string())
+    .describe('Node tags for organization (e.g., ["c2", "azure", "eastus"]). Empty array if not specified.'),
 })
 
 const CheckPrerequisitesArgsSchema = z.object({
@@ -74,6 +77,42 @@ const PromptUserArgsSchema = z.object({
   })).describe('Multiple-choice options. Empty array if no options.'),
 })
 
+const GeneratePayloadArgsSchema = z.object({
+  description: z
+    .string()
+    .describe(
+      'Natural language description of the payload (platform, format, obfuscation, signing). Empty string if not specified.',
+    ),
+})
+
+const GenerateConfigArgsSchema = z.object({
+  description: z
+    .string()
+    .describe(
+      'Natural language description of the desired Hysteria2 config (obfuscation, masquerade, throughput, ports). Empty string if not specified.',
+    ),
+})
+
+const NodeRefArgsSchema = z.object({
+  nodeId: z
+    .string()
+    .describe('Node ID. Empty string if not specified.'),
+  name: z
+    .string()
+    .describe('Node name (used to look up nodeId when ID is unknown). Empty string if not specified.'),
+})
+
+const TroubleshootArgsSchema = z.object({
+  issue: z
+    .string()
+    .describe(
+      'Short description of the issue to investigate (e.g., "node unhealthy", "connection failures"). Empty string if not specified.',
+    ),
+  nodeId: z
+    .string()
+    .describe('Specific node ID, if mentioned. Empty string if not specified.'),
+})
+
 const PayloadIntentSchema = z.object({
   intent: z
     .enum(['list_payloads', 'generate_payload', 'get_payload_status', 'none'])
@@ -95,7 +134,21 @@ const EXTRACTION_SCHEMAS: Record<string, z.ZodType> = {
   check_prerequisites: CheckPrerequisitesArgsSchema,
   generate_plan: GeneratePlanArgsSchema,
   prompt_user: PromptUserArgsSchema,
+  generate_payload: GeneratePayloadArgsSchema,
+  generate_config: GenerateConfigArgsSchema,
+  get_node: NodeRefArgsSchema,
+  update_node: NodeRefArgsSchema,
+  delete_node: NodeRefArgsSchema,
+  troubleshoot: TroubleshootArgsSchema,
 }
+
+// Tools where a missing required string-description argument should fall back
+// to the raw user message rather than failing. This guarantees forward progress
+// when the LLM planner forgot to include the description.
+const DESCRIPTION_FALLBACK_TOOLS = new Set<string>([
+  'generate_payload',
+  'generate_config',
+])
 
 // ============================================================
 // EXTRACTION PROMPT
@@ -193,6 +246,19 @@ export async function extractToolArgs(
     // Merge extracted args with existing args (existing takes precedence)
     const mergedArgs = { ...meaningfulArgs, ...existingArgs }
 
+    // Description fallback: if the tool requires a description (e.g. generate_payload,
+    // generate_config) and the planner/extractor didn't produce one, use the raw user
+    // message so the call doesn't fail with a Zod "expected string, received undefined".
+    if (
+      DESCRIPTION_FALLBACK_TOOLS.has(toolName) &&
+      (typeof mergedArgs.description !== 'string' || mergedArgs.description.length === 0) &&
+      typeof userMessage === 'string' &&
+      userMessage.trim().length > 0
+    ) {
+      mergedArgs.description = userMessage.trim()
+      if (!extractedFields.includes('description')) extractedFields.push('description')
+    }
+
     log.info(
       {
         toolName,
@@ -216,12 +282,26 @@ export async function extractToolArgs(
       'AI argument extraction failed, returning existing args',
     )
 
+    // Apply description fallback even when extraction fails, so simple
+    // single-arg tools still make forward progress.
+    const fallbackArgs: Record<string, unknown> = { ...existingArgs }
+    const fallbackFields: string[] = []
+    if (
+      DESCRIPTION_FALLBACK_TOOLS.has(toolName) &&
+      (typeof fallbackArgs.description !== 'string' || fallbackArgs.description.length === 0) &&
+      typeof userMessage === 'string' &&
+      userMessage.trim().length > 0
+    ) {
+      fallbackArgs.description = userMessage.trim()
+      fallbackFields.push('description')
+    }
+
     return {
       success: false,
-      args: existingArgs,
+      args: fallbackArgs,
       error: errorMsg,
-      extractedFields: [],
-      missingFields,
+      extractedFields: fallbackFields,
+      missingFields: missingFields.filter((f) => !fallbackFields.includes(f)),
     }
   }
 }

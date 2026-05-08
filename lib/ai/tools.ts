@@ -914,7 +914,9 @@ export const deployNodeTool: AgentTool<
     const region = input.region?.trim() || defaults.region
     const size = input.size?.trim() || defaults.size
     const name = input.name?.trim() || `hysteria-${provider}-${Date.now()}`
-    const panelUrl = input.panelUrl?.trim() || process.env.NEXT_PUBLIC_APP_URL || ""
+    const { serverEnv } = await import('@/lib/env')
+    const env = serverEnv()
+    const panelUrl = input.panelUrl?.trim() || env.NEXT_PUBLIC_APP_URL || ""
 
     const defaultsApplied: Record<string, string | number | undefined> = {
       provider,
@@ -3273,6 +3275,8 @@ const CheckPrerequisitesInput = z.object({
       "start_server",
       "general",
     ])
+    .optional()
+    .default("general")
     .describe("Operation to check readiness for"),
   provider: z
     .enum(["hetzner", "digitalocean", "vultr", "lightsail", "azure"])
@@ -3315,7 +3319,7 @@ export const checkPrerequisitesTool: AgentTool<
           "start_server",
           "general",
         ],
-        description: "MANDATORY: Operation to validate — you MUST provide this parameter",
+        description: "Operation to validate — defaults to 'general' if not provided",
       },
       provider: {
         type: "string",
@@ -3328,7 +3332,7 @@ export const checkPrerequisitesTool: AgentTool<
         description: "Azure resource group name (required for deploy_node with azure provider)",
       },
     },
-    required: ["operation"],
+    required: [],
   },
   async run(input) {
     const checks: Array<{
@@ -3361,12 +3365,14 @@ export const checkPrerequisitesTool: AgentTool<
         const size = "cx22" // default size for hetzner
 
         try {
+          const { serverEnv } = await import('@/lib/env')
+          const env = serverEnv()
           const validation = await validateDeploymentConfig({
             provider,
             region,
             size,
             name: "preflight-check",
-            panelUrl: process.env.NEXT_PUBLIC_APP_URL || "https://example.com",
+            panelUrl: env.NEXT_PUBLIC_APP_URL || "https://example.com",
             port: 443,
             tags: [],
             resourceGroup: input.resourceGroup,

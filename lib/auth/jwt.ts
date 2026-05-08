@@ -1,14 +1,24 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/db'
+import { serverEnv } from '@/lib/env'
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'your-secret-key-change-in-production'
-)
+// Lazily load JWT secrets to ensure serverEnv is properly initialized
+function getJWTSecret(): Uint8Array {
+  const env = serverEnv()
+  if (!env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is required but not set in environment')
+  }
+  return new TextEncoder().encode(env.JWT_SECRET)
+}
 
-const JWT_REFRESH_SECRET = new TextEncoder().encode(
-  process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key-change-in-production'
-)
+function getJWTRefreshSecret(): Uint8Array {
+  const env = serverEnv()
+  if (!env.JWT_REFRESH_SECRET) {
+    throw new Error('JWT_REFRESH_SECRET is required but not set in environment')
+  }
+  return new TextEncoder().encode(env.JWT_REFRESH_SECRET)
+}
 
 export interface JWTPayload {
   id: string
@@ -85,7 +95,7 @@ export async function generateTokens(operatorId: string): Promise<{
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('15m')
-    .sign(JWT_SECRET)
+    .sign(getJWTSecret())
 
   // Generate refresh token (7 days)
   const refreshToken = await new SignJWT({
@@ -98,7 +108,7 @@ export async function generateTokens(operatorId: string): Promise<{
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
-    .sign(JWT_REFRESH_SECRET)
+    .sign(getJWTRefreshSecret())
 
   return { accessToken, refreshToken }
 }
@@ -108,7 +118,7 @@ export async function generateTokens(operatorId: string): Promise<{
  */
 export async function verifyAccessToken(token: string): Promise<JWTPayload> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET)
+    const { payload } = await jwtVerify(token, getJWTSecret())
     return payload as JWTPayload
   } catch {
     throw new Error('Invalid access token')
@@ -120,7 +130,7 @@ export async function verifyAccessToken(token: string): Promise<JWTPayload> {
  */
 export async function verifyRefreshToken(token: string): Promise<JWTPayload> {
   try {
-    const { payload } = await jwtVerify(token, JWT_REFRESH_SECRET)
+    const { payload } = await jwtVerify(token, getJWTRefreshSecret())
     return payload as JWTPayload
   } catch {
     throw new Error('Invalid refresh token')
@@ -187,7 +197,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('15m')
-    .sign(JWT_SECRET)
+    .sign(getJWTSecret())
 
   return newAccessToken
 }
