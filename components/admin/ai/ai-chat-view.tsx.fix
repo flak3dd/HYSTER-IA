@@ -1,0 +1,20 @@
+Fix needed at line 828-834:
+
+OLD CODE:
+```
+      showError("AI request failed", errorMessage, {
+        label: "Retry",
+        onClick: () => {
+          void sendMessage(prompt.trim(), { clientMessageId })
+          },
+        },
+      })
+```
+
+NEW CODE:
+```
+      showError("AI request failed", errorMessage, {
+        label: "Retry",
+        onClick: () => void sendMessage(prompt.trim(), { clientMessageId }),
+      })
+```

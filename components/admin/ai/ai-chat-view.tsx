@@ -828,9 +828,7 @@ export function AiChatView({ hideHeader = false }: { hideHeader?: boolean } = {}
         description: errorMessage,
         action: {
           label: "Retry",
-          onClick: () => {
-            void sendMessage(prompt.trim(), { clientMessageId })
-          },
+          onClick: () => void sendMessage(prompt.trim(), { clientMessageId }),
         },
       })
     } finally {

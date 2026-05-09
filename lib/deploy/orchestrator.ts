@@ -129,8 +129,25 @@ export async function validateDeploymentConfig(config: DeploymentConfig): Promis
   return { valid: !issues.some((i) => i.severity === "error"), issues }
 }
 
+/**
+ * Clean up cloud resources on deployment failure.
+ * This prevents orphaned resources (Public IPs, VMs, etc.) from consuming quota.
+ */
+async function cleanupFailedDeployment(provider: Awaited<ReturnType<typeof resolveProviderAsync>>, vpsId: string | undefined, providerName: string): Promise<void> {
+  if (!vpsId) return
+  try {
+    console.log(`[Deployment Cleanup] Destroying ${providerName} resources for ${vpsId}...`)
+    await provider.destroyServer(vpsId)
+    console.log(`[Deployment Cleanup] Successfully cleaned up ${vpsId}`)
+  } catch (cleanupErr) {
+    // Log but don't throw - cleanup is best effort
+    console.error(`[Deployment Cleanup] Failed to destroy ${vpsId}:`, cleanupErr)
+  }
+}
+
 async function runDeployment(id: string, config: DeploymentConfig): Promise<void> {
   const provider = await resolveProviderAsync(config.provider)
+  let vpsId: string | undefined
 
   // Pre-flight validation: catch blockers before generating SSH keys or calling cloud APIs
   emit(id, "pending", `Pre-flight validation for ${config.provider} deployment...`)
@@ -166,8 +183,10 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
       sshKeyContent: keyPair.publicKey,
       resourceGroup: config.resourceGroup,
     })
+    vpsId = result.vpsId
   } catch (err) {
     emit(id, "failed", `VPS creation failed`, err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
 
@@ -186,6 +205,7 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     ip = result.ip ?? (await provider.waitForIp(result.vpsId))
   } catch (err) {
     emit(id, "failed", "Timed out waiting for IP", err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
   deployment.vpsIp = ip
@@ -202,6 +222,7 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     })
   } catch (err) {
     emit(id, "failed", "SSH not reachable", err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
   emit(id, "provisioning", "SSH connection established")
@@ -260,11 +281,13 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     })
   } catch (err) {
     emit(id, "failed", "Provisioning script failed", err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
 
   if (execResult.code !== 0) {
     emit(id, "failed", `Provisioning script exited with code ${execResult.code}`, execResult.stderr.slice(0, 500))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
   emit(id, "installing_hysteria", "Hysteria 2 installed and service started")
@@ -310,6 +333,7 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     emit(id, "registering_node", `Node registered: ${node.id}`)
   } catch (err) {
     emit(id, "failed", "Failed to register node", err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
 

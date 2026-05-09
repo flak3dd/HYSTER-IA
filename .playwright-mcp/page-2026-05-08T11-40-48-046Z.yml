@@ -1,0 +1,259 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "D-Panel Operations Center" [ref=e5] [cursor=pointer]:
+        - /url: /admin
+        - img [ref=e7]
+        - generic [ref=e9]:
+          - generic [ref=e10]: D-Panel
+          - generic [ref=e11]: Operations Center
+      - separator [ref=e12]
+      - button [ref=e14]:
+        - img
+      - separator [ref=e15]
+      - link "Command Center" [ref=e17] [cursor=pointer]:
+        - /url: /admin
+        - img [ref=e18]
+        - generic [ref=e23]: Command Center
+      - navigation [ref=e25]:
+        - button "Recon" [ref=e27]:
+          - generic [ref=e30]: Recon
+          - img [ref=e31]
+        - button "Infrastructure" [ref=e34]:
+          - generic [ref=e37]: Infrastructure
+          - img [ref=e38]
+        - button "Weaponize" [ref=e41]:
+          - generic [ref=e44]: Weaponize
+          - img [ref=e45]
+        - button "Deliver" [ref=e48]:
+          - generic [ref=e51]: Deliver
+          - img [ref=e52]
+        - button "Operate" [ref=e55]:
+          - generic [ref=e58]: Operate
+          - img [ref=e59]
+        - button "Report" [ref=e62]:
+          - generic [ref=e65]: Report
+          - img [ref=e66]
+      - separator [ref=e68]
+      - link "Settings" [ref=e70] [cursor=pointer]:
+        - /url: /admin/settings
+        - img [ref=e71]
+        - generic [ref=e74]: Settings
+    - generic [ref=e75]:
+      - banner [ref=e76]:
+        - navigation "breadcrumb" [ref=e77]:
+          - list [ref=e78]:
+            - listitem [ref=e79]:
+              - link "Command Center" [ref=e80] [cursor=pointer]:
+                - /url: /admin
+        - generic [ref=e81]:
+          - button [ref=e82]:
+            - img
+          - button "A admin ADMIN" [ref=e83]:
+            - generic [ref=e85]: A
+            - generic [ref=e86]: admin
+            - generic [ref=e87]: ADMIN
+      - main [ref=e88]:
+        - generic [ref=e90]:
+          - generic [ref=e91]:
+            - generic [ref=e92]:
+              - heading "Command Center" [level=1] [ref=e93]
+              - paragraph [ref=e94]: Unified operation dashboard — all modules, one view.
+            - button "unknown" [ref=e95]:
+              - img [ref=e96]
+              - generic [ref=e98]: unknown
+          - generic [ref=e99]:
+            - generic [ref=e101]:
+              - img [ref=e104]
+              - generic [ref=e107]:
+                - paragraph [ref=e108]: Total Nodes
+                - paragraph [ref=e109]: —
+                - paragraph [ref=e110]: Registered in inventory
+            - generic [ref=e112]:
+              - img [ref=e115]
+              - generic [ref=e116]:
+                - paragraph [ref=e117]: Online Nodes
+                - paragraph [ref=e118]: —
+                - paragraph [ref=e119]: No nodes
+            - generic [ref=e121]:
+              - img [ref=e124]
+              - generic [ref=e126]:
+                - paragraph [ref=e127]: Connections
+                - paragraph [ref=e128]: —
+                - paragraph [ref=e129]: Traffic API unavailable
+            - generic [ref=e131]:
+              - img [ref=e134]
+              - generic [ref=e136]:
+                - paragraph [ref=e137]: Bandwidth
+                - paragraph [ref=e138]: —
+                - paragraph [ref=e139]: Traffic API unavailable
+          - generic [ref=e140]:
+            - generic [ref=e141]:
+              - heading "Operation Pipeline" [level=3] [ref=e142]
+              - paragraph [ref=e143]: Kill chain phases — Recon through Report
+            - generic [ref=e145]:
+              - generic [ref=e146]:
+                - generic [ref=e147]:
+                  - img [ref=e149]
+                  - generic [ref=e152]: Phase 1
+                  - generic [ref=e153]: Recon
+                  - generic [ref=e154]: 3 modules
+                - img [ref=e157]
+              - generic [ref=e159]:
+                - generic [ref=e160]:
+                  - img [ref=e162]
+                  - generic [ref=e165]: Phase 2
+                  - generic [ref=e166]: Infrastructure
+                  - generic [ref=e167]: 6 modules
+                - img [ref=e170]
+              - generic [ref=e172]:
+                - generic [ref=e173]:
+                  - img [ref=e175]
+                  - generic [ref=e177]: Phase 3
+                  - generic [ref=e178]: Weaponize
+                  - generic [ref=e179]: 4 modules
+                - img [ref=e182]
+              - generic [ref=e184]:
+                - generic [ref=e185]:
+                  - img [ref=e187]
+                  - generic [ref=e190]: Phase 4
+                  - generic [ref=e191]: Deliver
+                  - generic [ref=e192]: 2 modules
+                - img [ref=e195]
+              - generic [ref=e197]:
+                - generic [ref=e198]:
+                  - img [ref=e200]
+                  - generic [ref=e203]: Phase 5
+                  - generic [ref=e204]: Operate
+                  - generic [ref=e205]: 4 modules
+                - img [ref=e208]
+              - generic [ref=e211]:
+                - img [ref=e213]
+                - generic [ref=e215]: Phase 6
+                - generic [ref=e216]: Report
+                - generic [ref=e217]: 3 modules
+          - generic [ref=e218]:
+            - generic [ref=e219]:
+              - generic [ref=e220]:
+                - generic [ref=e221]:
+                  - heading "Quick Start" [level=3] [ref=e222]
+                  - paragraph [ref=e223]: Get operational in four steps
+                - generic [ref=e224]: 0/4
+              - progressbar [ref=e225]: x
+            - generic [ref=e228]:
+              - generic [ref=e229]:
+                - generic [ref=e230]:
+                  - generic [ref=e231]: "1"
+                  - generic [ref=e232]: Deploy a node
+                - paragraph [ref=e233]: Register your first Hysteria2 node
+                - link "Manage Nodes" [ref=e234] [cursor=pointer]:
+                  - /url: /admin/nodes
+                  - button "Manage Nodes" [ref=e235]:
+                    - text: Manage Nodes
+                    - img
+              - generic [ref=e236]:
+                - generic [ref=e237]:
+                  - generic [ref=e238]: "2"
+                  - generic [ref=e239]: Create a profile
+                - paragraph [ref=e240]: Set up a configuration template
+                - link "Manage Profiles" [ref=e241] [cursor=pointer]:
+                  - /url: /admin/profiles
+                  - button "Manage Profiles" [ref=e242]:
+                    - text: Manage Profiles
+                    - img
+              - generic [ref=e243]:
+                - generic [ref=e244]:
+                  - generic [ref=e245]: "3"
+                  - generic [ref=e246]: Generate configs
+                - paragraph [ref=e247]: Produce subscription URLs
+                - link "Config Generator" [ref=e248] [cursor=pointer]:
+                  - /url: /admin/configs
+                  - button "Config Generator" [ref=e249]:
+                    - text: Config Generator
+                    - img
+              - generic [ref=e250]:
+                - generic [ref=e251]:
+                  - generic [ref=e252]: "4"
+                  - generic [ref=e253]: Verify connectivity
+                - paragraph [ref=e254]: Check nodes are online
+                - link "View Dashboard" [ref=e255] [cursor=pointer]:
+                  - /url: /admin
+                  - button "View Dashboard" [ref=e256]:
+                    - text: View Dashboard
+                    - img
+          - generic [ref=e257]:
+            - generic [ref=e259]:
+              - heading "AI Assistant" [level=3] [ref=e260]:
+                - generic [ref=e261]:
+                  - img [ref=e263]
+                  - img [ref=e267]
+                - text: AI Assistant
+              - generic [ref=e269]:
+                - button [ref=e270]:
+                  - img
+                - link "View All" [ref=e271] [cursor=pointer]:
+                  - /url: /admin/ai
+                  - button "View All" [ref=e272]:
+                    - text: View All
+                    - img
+            - generic [ref=e273]:
+              - generic [ref=e276]:
+                - img [ref=e277]
+                - generic [ref=e280]: AI Systems
+              - generic [ref=e291]:
+                - generic [ref=e292]:
+                  - img [ref=e293]
+                  - text: Quick Actions
+                - generic [ref=e295]:
+                  - link "AI Chat" [ref=e296] [cursor=pointer]:
+                    - /url: /admin/ai
+                    - generic [ref=e297]:
+                      - img [ref=e298]
+                      - generic [ref=e301]: AI Chat
+                  - link "ShadowGrok" [ref=e302] [cursor=pointer]:
+                    - /url: /admin/ai
+                    - generic [ref=e303]:
+                      - img [ref=e304]
+                      - generic [ref=e306]: ShadowGrok
+                  - link "Templates" [ref=e307] [cursor=pointer]:
+                    - /url: /admin/ai
+                    - generic [ref=e308]:
+                      - img [ref=e309]
+                      - generic [ref=e312]: Templates
+              - generic [ref=e314]:
+                - generic [ref=e315]:
+                  - img [ref=e316]
+                  - text: Recent Activity
+                - generic [ref=e318]: Live
+              - link "Start New Conversation" [ref=e323] [cursor=pointer]:
+                - /url: /admin/ai
+                - button "Start New Conversation" [ref=e324]:
+                  - img
+                  - text: Start New Conversation
+          - generic [ref=e325]:
+            - generic [ref=e326]:
+              - generic [ref=e328]:
+                - generic [ref=e329]:
+                  - heading "Recent Activity" [level=3] [ref=e330]
+                  - paragraph [ref=e331]: Real-time event feed
+                - generic [ref=e332]: 0 events
+              - generic [ref=e334]:
+                - img [ref=e336]
+                - generic [ref=e338]:
+                  - paragraph [ref=e339]: No activity yet
+                  - paragraph [ref=e340]: Events will appear here as they occur
+            - generic [ref=e341]:
+              - generic [ref=e342]:
+                - heading "Nodes Health" [level=3] [ref=e343]
+                - paragraph [ref=e344]: No nodes registered yet.
+              - generic [ref=e346]:
+                - img [ref=e348]
+                - generic [ref=e351]:
+                  - paragraph [ref=e352]: No nodes yet
+                  - paragraph [ref=e353]: Deploy your first node to get started
+                - link "Add Node" [ref=e354] [cursor=pointer]:
+                  - /url: /admin/nodes
+                  - button "Add Node" [ref=e355]:
+                    - text: Add Node
+                    - img
+  - region "Notifications alt+T"

@@ -1,6 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   serverExternalPackages: ["ssh2", "bullmq", "ioredis"],
+
+  // Allow Next.js dev resources (HMR, RSC payload) to be served to the
+  // Cloudflare tunnel hostname so the panel can be accessed at the public
+  // URL without breaking React hydration. See: panel_url_localhost validator.
+  allowedDevOrigins: ["panel.anzstaff-club.au"],
   // Production deployment configuration
   output: process.env.NODE_ENV === 'production' ? 'standalone' : undefined,
   // Enable compression for production

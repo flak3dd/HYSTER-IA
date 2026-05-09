@@ -47,10 +47,19 @@ export function DeployModal({ onClose, onDeployed }: { onClose: () => void; onDe
   const [tags, setTags] = useState("")
   const [bandwidthUp, setBandwidthUp] = useState("")
   const [bandwidthDown, setBandwidthDown] = useState("")
+  const [resourceGroup, setResourceGroup] = useState("")
 
   // deploy state
   const [steps, setSteps] = useState<DeployStep[]>([])
   const [deployId, setDeployId] = useState<string | null>(null)
+  const [batchDeploying, setBatchDeploying] = useState(false)
+  const [batchResults, setBatchResults] = useState<Array<{
+    region: string
+    size: string
+    deploymentId: string
+    status: "started" | "failed"
+    error?: string
+  }> | null>(null)
 
   const loadPresets = useCallback(async () => {
     try {
@@ -90,6 +99,47 @@ export function DeployModal({ onClose, onDeployed }: { onClose: () => void; onDe
     }
   }, [presets])
 
+  const startBatchDeploy = async () => {
+    setBatchDeploying(true)
+    toast.info("Starting batch deployment of 5 Hysteria2 nodes...", {
+      description: "Using obfuscated preset, port 443, masquerade, strong passwords"
+    })
+    
+    try {
+      const res = await apiFetch("/api/admin/deploy/batch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: res.statusText }))
+        throw new Error(body.error ?? body.message ?? `${res.status}`)
+      }
+
+      const data = await res.json()
+      setBatchResults(data.results)
+      
+      const started = data.results.filter((r: { status: string }) => r.status === "started").length
+      const failed = data.results.filter((r: { status: string }) => r.status === "failed").length
+      
+      if (started === 5) {
+        toast.success("All 5 nodes deploying!", { description: "Check Infrastructure tab for status" })
+        onClose()
+        onDeployed()
+      } else if (started > 0) {
+        toast.success(`${started} of 5 nodes started`, { description: `${failed} failed. Check Infrastructure tab.` })
+        onClose()
+        onDeployed()
+      } else {
+        toast.error("Batch deployment failed", { description: "All 5 deployments failed" })
+      }
+    } catch (err) {
+      toast.error("Auto deploy failed", { description: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setBatchDeploying(false)
+    }
+  }
+
   const startDeploy = async () => {
     if (!name.trim()) { toast.error("Node name is required"); return }
 
@@ -114,6 +164,7 @@ export function DeployModal({ onClose, onDeployed }: { onClose: () => void; onDe
           panelUrl,
           bandwidthUp: bandwidthUp.trim() || undefined,
           bandwidthDown: bandwidthDown.trim() || undefined,
+          resourceGroup: resourceGroup.trim() || undefined,
         }),
       })
 
@@ -245,12 +296,36 @@ export function DeployModal({ onClose, onDeployed }: { onClose: () => void; onDe
                 <Field label="Tags (comma-separated)">
                   <input value={tags} onChange={(e) => setTags(e.target.value)} className="input-field" placeholder="prod, us-east" />
                 </Field>
+
+                {provider === "azure" && (
+                  <Field label="Resource Group (Azure - required)">
+                    <input
+                      value={resourceGroup}
+                      onChange={(e) => setResourceGroup(e.target.value)}
+                      className="input-field"
+                      placeholder="hysteria-rg-eastus"
+                    />
+                    <p className="text-caption text-muted-foreground mt-1">
+                      Must be an existing Azure resource group. The service principal cannot create new resource groups.
+                    </p>
+                  </Field>
+                )}
               </div>
             )}
 
-            <div className="mt-6 flex justify-end gap-2">
-              <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={startDeploy} disabled={loadingPresets}>Deploy Node</Button>
+            <div className="mt-6 flex justify-between items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={startBatchDeploy}
+                disabled={loadingPresets || batchDeploying}
+                className="gap-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700"
+              >
+                {batchDeploying ? "Deploying 5 Nodes..." : "🚀 Auto Deploy 5 Nodes"}
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={onClose}>Cancel</Button>
+                <Button onClick={startDeploy} disabled={loadingPresets || batchDeploying}>Deploy Node</Button>
+              </div>
             </div>
           </>
         )}
