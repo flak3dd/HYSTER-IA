@@ -8,12 +8,22 @@ import {
 } from "@/lib/db/lateral-movement"
 import { LateralMovementCreate } from "@/lib/db/schema"
 import { parsePagination, paginatedResponse } from "@/lib/pagination"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
+import logger from "@/lib/logger"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
+const log = logger.child({ module: "api/admin/lateral-movement" })
+
 // GET /api/admin/lateral-movement - List lateral movements with filters
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  try {
+    await verifyAdmin(req)
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+
   try {
     const { searchParams } = new URL(req.url)
     const fromHostId = searchParams.get("fromHostId") || undefined
@@ -45,13 +55,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     
     return NextResponse.json({ movements, pagination, stats })
   } catch (error) {
-    console.error("List lateral movements error:", error)
+    log.error({ err: error }, "List lateral movements error")
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
 // POST /api/admin/lateral-movement - Create a new lateral movement
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    await verifyAdmin(req)
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+
   try {
     const body = await req.json()
     const parsed = LateralMovementCreate.safeParse(body)
@@ -70,7 +86,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     
     return NextResponse.json({ movement }, { status: 201 })
   } catch (error) {
-    console.error("Create lateral movement error:", error)
+    log.error({ err: error }, "Create lateral movement error")
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

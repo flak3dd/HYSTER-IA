@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readSession } from '@/lib/auth/session'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/sessions/[sessionId]/export' })
 
 /**
  * GET /api/workflow/sessions/[sessionId]/export - Export a workflow session as JSON
@@ -72,7 +75,7 @@ export async function GET(
       },
     })
   } catch (error) {
-    console.error('Error exporting workflow session:', error)
+    log.error({ err: error }, 'Error exporting workflow session')
     return NextResponse.json(
       { error: 'Failed to export workflow session' },
       { status: 500 }

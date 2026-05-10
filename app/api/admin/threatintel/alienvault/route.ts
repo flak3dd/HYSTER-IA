@@ -7,6 +7,9 @@ import {
   analyzeOtxFileHash 
 } from '@/lib/threatintel/alienvault'
 import { getOtxClient } from '@/lib/threatintel/alienvault'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/admin/threatintel/alienvault' })
 
 // GET /api/admin/threatintel/alienvault - Analyze indicators with AlienVault OTX
 export async function GET(request: NextRequest) {
@@ -88,7 +91,7 @@ export async function GET(request: NextRequest) {
       ...result,
     })
   } catch (error) {
-    console.error('AlienVault OTX analysis error:', error)
+    log.error({ err: error }, 'AlienVault OTX analysis error')
     return NextResponse.json(
       {
         error: 'AlienVault OTX analysis failed',

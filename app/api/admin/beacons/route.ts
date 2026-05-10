@@ -3,6 +3,7 @@ import { z } from "zod"
 import { listBeacons, createBeacon, countBeacons, getBeaconStats } from "@/lib/db/beacons"
 import { BeaconCreate } from "@/lib/db/schema"
 import { parsePagination, paginatedResponse } from "@/lib/pagination"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic"
 // GET /api/admin/beacons - List beacons with filters
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { searchParams } = new URL(req.url)
     const status = searchParams.get("status") as any
     const privilegeLevel = searchParams.get("privilegeLevel") as any
@@ -43,14 +45,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     
     return NextResponse.json({ beacons, pagination, stats })
   } catch (error) {
-    console.error("List beacons error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
 // POST /api/admin/beacons - Create a new beacon
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const body = await req.json()
     const parsed = BeaconCreate.safeParse(body)
     
@@ -64,7 +66,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const beacon = await createBeacon(parsed.data)
     return NextResponse.json({ beacon }, { status: 201 })
   } catch (error) {
-    console.error("Create beacon error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }

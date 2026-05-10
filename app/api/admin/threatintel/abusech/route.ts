@@ -6,6 +6,9 @@ import {
   checkThreatFoxIoc 
 } from '@/lib/threatintel/abusech'
 import { getAbuseChClient } from '@/lib/threatintel/abusech'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/admin/threatintel/abusech' })
 
 // GET /api/admin/threatintel/abusech - Query Abuse.ch feeds
 export async function GET(request: NextRequest) {
@@ -109,7 +112,7 @@ export async function GET(request: NextRequest) {
       ...result,
     })
   } catch (error) {
-    console.error('Abuse.ch query error:', error)
+    log.error({ err: error }, 'Abuse.ch query error')
     return NextResponse.json(
       {
         error: 'Abuse.ch query failed',

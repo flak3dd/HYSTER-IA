@@ -1,33 +1,88 @@
 import { Client as SSHClient } from "ssh2"
-import { generateKeyPairSync } from "node:crypto"
+import { generateKeyPairSync, randomBytes } from "node:crypto"
 
 export type SshKeyPair = {
+  /** OpenSSH-format public key (`ssh-ed25519 BASE64 comment`) — for authorized_keys / cloud APIs */
   publicKey: string
+  /** OpenSSH-format private key — required by ssh2 v1.x which cannot parse PKCS8 ed25519 */
   privateKey: string
 }
 
+/** Length-prefixed string per RFC 4251 §5 */
+function lenPrefix(buf: Buffer): Buffer {
+  const len = Buffer.alloc(4)
+  len.writeUInt32BE(buf.length)
+  return Buffer.concat([len, buf])
+}
+
+/**
+ * Generate an ed25519 keypair in OpenSSH formats.
+ *
+ * NOTE: We can't simply ask Node's `generateKeyPairSync('ed25519', { ... format: 'pem' })`
+ * because ssh2 v1.x rejects PKCS8 PEM ed25519 keys with `"Unsupported key format"`.
+ * Both the public and private key strings here use the OpenSSH wire format that ssh2 expects.
+ * @see https://datatracker.ietf.org/doc/html/draft-miller-ssh-agent-04#section-3.2.3
+ */
 export function generateSshKeyPair(): SshKeyPair {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
-    publicKeyEncoding: { type: "spki", format: "pem" },
-    privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    publicKeyEncoding: { type: "spki", format: "der" },
+    privateKeyEncoding: { type: "pkcs8", format: "der" },
   })
 
-  const pubKeyDer = Buffer.from(
-    publicKey
-      .replace("-----BEGIN PUBLIC KEY-----", "")
-      .replace("-----END PUBLIC KEY-----", "")
-      .replace(/\s/g, ""),
-    "base64",
-  )
-  const keyData = pubKeyDer.subarray(pubKeyDer.length - 32)
-  const nameLen = Buffer.alloc(4)
-  nameLen.writeUInt32BE(11)
-  const keyLen = Buffer.alloc(4)
-  keyLen.writeUInt32BE(32)
-  const sshPub = Buffer.concat([nameLen, Buffer.from("ssh-ed25519"), keyLen, keyData])
-  const opensshPub = `ssh-ed25519 ${sshPub.toString("base64")} hysteria-deploy`
+  // Last 32 bytes of SPKI DER for ed25519 = the raw public key.
+  const pubKeyRaw = publicKey.subarray(publicKey.length - 32)
+  // Last 32 bytes of PKCS8 DER for ed25519 = the raw seed (private key half).
+  const privSeed = privateKey.subarray(privateKey.length - 32)
 
-  return { publicKey: opensshPub, privateKey }
+  const algoName = Buffer.from("ssh-ed25519")
+  const comment = Buffer.from("hysteria-deploy")
+
+  // ── OpenSSH public key wire format ──
+  const pubBlob = Buffer.concat([lenPrefix(algoName), lenPrefix(pubKeyRaw)])
+  const opensshPub = `ssh-ed25519 ${pubBlob.toString("base64")} ${comment.toString()}`
+
+  // ── OpenSSH private key file (unencrypted, single key) ──
+  // private[0..32]  = ed25519 seed (already have it as `privSeed`)
+  // private[32..64] = the corresponding public key bytes (per OpenSSH layout)
+  const fullPriv = Buffer.concat([privSeed, pubKeyRaw])
+
+  const checkInt = randomBytes(4)
+  const privSection = Buffer.concat([
+    checkInt,
+    checkInt, // checkint repeated — verifies a successful decrypt
+    pubBlob,
+    lenPrefix(fullPriv),
+    lenPrefix(comment),
+  ])
+
+  // Pad to 8-byte alignment with 1, 2, 3… per spec
+  const padLen = (8 - (privSection.length % 8)) % 8
+  const padding = Buffer.from(Array.from({ length: padLen }, (_, i) => i + 1))
+  const privSectionPadded = Buffer.concat([privSection, padding])
+
+  const cipherName = Buffer.from("none")
+  const kdfName = Buffer.from("none")
+  const kdfOptions = Buffer.alloc(0)
+  const numKeys = Buffer.alloc(4)
+  numKeys.writeUInt32BE(1)
+
+  const opensshBlob = Buffer.concat([
+    Buffer.from("openssh-key-v1\0", "utf8"),
+    lenPrefix(cipherName),
+    lenPrefix(kdfName),
+    lenPrefix(kdfOptions),
+    numKeys,
+    lenPrefix(pubBlob),
+    lenPrefix(privSectionPadded),
+  ])
+
+  // PEM wrap with 70-char base64 lines
+  const b64 = opensshBlob.toString("base64")
+  const wrapped = b64.match(/.{1,70}/g)!.join("\n")
+  const opensshPrivate =
+    "-----BEGIN OPENSSH PRIVATE KEY-----\n" + wrapped + "\n-----END OPENSSH PRIVATE KEY-----\n"
+
+  return { publicKey: opensshPub, privateKey: opensshPrivate }
 }
 
 export type SshExecResult = {

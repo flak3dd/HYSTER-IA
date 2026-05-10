@@ -6,6 +6,9 @@ import {
   scoreObfuscationEffectiveness,
   runSecurityChecklist,
 } from '@/lib/config/audit'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/admin/config/audit' })
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,7 +46,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, result })
   } catch (error) {
-    console.error('Config audit error:', error)
+    log.error({ err: error }, 'Config audit error')
     return NextResponse.json(
       { error: 'Audit failed', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }

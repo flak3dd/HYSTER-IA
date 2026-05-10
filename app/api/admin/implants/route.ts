@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { z } from "zod"
 import { listImplants, createImplant, getImplantStats, countImplants } from "@/lib/db/implants"
 import { parsePagination, paginatedResponse } from "@/lib/pagination"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import logger from "@/lib/logger"
 
 const log = logger.child({ module: "api/implants" })
@@ -22,6 +23,7 @@ const ImplantCreateSchema = z.object({
 // GET /api/admin/implants - List implants (paginated)
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { page, pageSize, skip, take } = parsePagination(new URL(req.url).searchParams)
     const [implants, total, stats] = await Promise.all([
       listImplants({ skip, take }),
@@ -32,14 +34,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ implants, pagination, stats })
   } catch (error) {
-    log.error({ err: error }, "List implants error")
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
 // POST /api/admin/implants - Create a new implant record
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const body = await req.json()
     const parsed = ImplantCreateSchema.parse(body)
 
@@ -47,10 +49,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(implant, { status: 201 })
   } catch (error) {
-    log.error({ err: error }, "Create implant error")
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Invalid request", details: error.issues }, { status: 400 })
-    }
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }

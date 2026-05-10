@@ -211,14 +211,15 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
   deployment.vpsIp = ip
   emit(id, "waiting_for_ip", `Server IP: ${ip}`)
 
-  // Wait for SSH (Azure ARM Ubuntu boot can take 60-120s, so allow extra time)
+  // Wait for SSH (Azure D-series + cloud-init can take 5-8 min; B-series 1-3 min;
+  // Vultr/DO are faster. 600s covers the slowest realistic boot path.)
   emit(id, "provisioning", `Waiting for SSH to become available on ${ip} as ${sshUsername}...`)
   try {
     await waitForSsh({
       host: ip,
       privateKey: keyPair.privateKey,
       username: sshUsername,
-      timeoutMs: 240_000,
+      timeoutMs: 600_000,
     })
   } catch (err) {
     emit(id, "failed", "SSH not reachable", err instanceof Error ? err.message : String(err))

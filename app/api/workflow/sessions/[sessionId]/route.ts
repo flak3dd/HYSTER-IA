@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { WorkflowEngine } from '@/lib/workflow/engine'
 import { readSession } from '@/lib/auth/session'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/sessions/[sessionId]' })
 
 /**
  * GET /api/workflow/sessions/[sessionId] - Get a specific workflow session
@@ -37,7 +40,7 @@ export async function GET(
 
     return NextResponse.json({ session })
   } catch (error) {
-    console.error('Error getting workflow session:', error)
+    log.error({ err: error }, 'Error getting workflow session')
     return NextResponse.json(
       { error: 'Failed to get workflow session' },
       { status: 500 }
@@ -66,7 +69,7 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error) {
-    console.error('Error processing workflow session:', error)
+    log.error({ err: error }, 'Error processing workflow session')
     return NextResponse.json(
       { error: 'Failed to process workflow session' },
       { status: 500 }
@@ -114,7 +117,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true, message: 'Session cancelled' })
   } catch (error) {
-    console.error('Error cancelling workflow session:', error)
+    log.error({ err: error }, 'Error cancelling workflow session')
     return NextResponse.json(
       { error: 'Failed to cancel workflow session' },
       { status: 500 }

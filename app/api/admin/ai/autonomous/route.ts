@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifyAdmin } from '@/lib/auth/admin'
+import { verifyAdmin, toErrorResponse } from '@/lib/auth/admin'
 import { orchestrationEngine, TaskType } from '@/lib/ai/orchestration-engine'
 import { intelligentScheduler } from '@/lib/ai/intelligent-scheduler'
 import { selfOptimizingConfig } from '@/lib/ai/self-optimizing-config'
@@ -12,9 +12,6 @@ import { aiInitializer } from '@/lib/ai/ai-initializer'
 export async function POST(request: NextRequest) {
   try {
     const admin = await verifyAdmin(request)
-    if (!admin) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
 
     const body = await request.json()
     const { action, type, target, parameters } = body
@@ -42,14 +39,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
     }
   } catch (error) {
-    console.error('Autonomous AI error:', error)
-    return NextResponse.json(
-      {
-        error: 'Autonomous operation failed',
-        message: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 }
-    )
+    return toErrorResponse(error)
   }
 }
 
@@ -57,9 +47,6 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const admin = await verifyAdmin(request)
-    if (!admin) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
 
     const searchParams = request.nextUrl.searchParams
     const statusType = searchParams.get('type') || 'overview'
@@ -83,14 +70,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Unknown status type' }, { status: 400 })
     }
   } catch (error) {
-    console.error('Autonomous status error:', error)
-    return NextResponse.json(
-      {
-        error: 'Status retrieval failed',
-        message: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 }
-    )
+    return toErrorResponse(error)
   }
 }
 

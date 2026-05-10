@@ -6,6 +6,9 @@ import {
   analyzeUrl, 
   analyzeFileHash 
 } from '@/lib/threatintel/virustotal'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/admin/threatintel/virustotal' })
 
 // GET /api/admin/threatintel/virustotal - Analyze indicators with VirusTotal
 export async function GET(request: NextRequest) {
@@ -54,7 +57,7 @@ export async function GET(request: NextRequest) {
       ...result,
     })
   } catch (error) {
-    console.error('VirusTotal analysis error:', error)
+    log.error({ err: error }, 'VirusTotal analysis error')
     return NextResponse.json(
       {
         error: 'VirusTotal analysis failed',

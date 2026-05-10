@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAdmin } from '@/lib/auth/admin'
 import { enumerateDomain, getAllSubdomains } from '@/lib/osint/domain-enum'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/admin/osint/domain' })
 
 // GET /api/admin/osint/domain - Perform domain enumeration
 export async function GET(request: NextRequest) {
@@ -50,7 +53,7 @@ export async function GET(request: NextRequest) {
       timestamp: result.timestamp,
     })
   } catch (error) {
-    console.error('Domain enumeration error:', error)
+    log.error({ err: error }, 'Domain enumeration error')
     return NextResponse.json(
       {
         error: 'Domain enumeration failed',

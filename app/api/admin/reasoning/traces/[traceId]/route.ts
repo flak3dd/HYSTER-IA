@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import { reasoningTraceSystem } from '@/lib/ai/reasoning/reasoning-trace'
 
 /**
@@ -19,6 +20,7 @@ export async function GET(
   context: { params: Promise<{ traceId: string }> }
 ) {
   try {
+    await verifyAdmin(request)
     const { traceId } = await context.params
     const searchParams = request.nextUrl.searchParams
     const format = searchParams.get('format') // 'json' or 'dot'
@@ -50,13 +52,6 @@ export async function GET(
       trace,
     })
   } catch (error) {
-    console.error('Error getting reasoning trace:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to get trace',
-      },
-      { status: 500 }
-    )
+    return toErrorResponse(error)
   }
 }

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readSession } from '@/lib/auth/session'
 import { randomUUID } from 'crypto'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/sessions/import' })
 
 /**
  * POST /api/workflow/sessions/import - Import a workflow session from JSON
@@ -76,7 +79,7 @@ export async function POST(request: NextRequest) {
       session: completeSession,
     })
   } catch (error) {
-    console.error('Error importing workflow session:', error)
+    log.error({ err: error }, 'Error importing workflow session')
     return NextResponse.json(
       { error: 'Failed to import workflow session' },
       { status: 500 }

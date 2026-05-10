@@ -5,6 +5,9 @@ import { getServerConfig } from "@/lib/db/server-config"
 import { getProfileById, resolveProfileConfig } from "@/lib/db/profiles"
 import type { ResolvedProfileConfig } from "@/lib/db/profiles"
 import { renderClientUri } from "@/lib/hysteria/client-config"
+import logger from "@/lib/logger"
+
+const log = logger.child({ module: "api/sub/hysteria2" })
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -75,7 +78,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ uris })
   } catch (error) {
-    console.error("Subscription error:", error)
+    log.error({ err: error }, "Subscription error")
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

@@ -168,6 +168,15 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
           { id: "northeurope", label: "North Europe (Ireland)" },
           { id: "westeurope", label: "West Europe (Netherlands)" },
           { id: "uksouth", label: "UK South (London)" },
+          // Newer EU regions — usually have better burstable B-series capacity
+          // when westeurope/northeurope/uksouth are SkuNotAvailable.
+          { id: "swedencentral", label: "Sweden Central (Gävle)" },
+          { id: "francecentral", label: "France Central (Paris)" },
+          { id: "germanywestcentral", label: "Germany West Central (Frankfurt)" },
+          { id: "switzerlandnorth", label: "Switzerland North (Zürich)" },
+          { id: "norwayeast", label: "Norway East (Oslo)" },
+          { id: "polandcentral", label: "Poland Central (Warsaw)" },
+          { id: "italynorth", label: "Italy North (Milan)" },
           { id: "southeastasia", label: "Southeast Asia (Singapore)" },
           { id: "eastasia", label: "East Asia (Hong Kong)" },
           { id: "japaneast", label: "Japan East (Tokyo)" },

@@ -24,6 +24,11 @@ import { getExtractorModel } from '@/lib/ai/reasoning/extractor-provider'
 import logger from '@/lib/logger'
 import { sanitizeMessageContent } from '@/lib/ai/robustness'
 import { serverEnv } from '@/lib/env'
+import {
+  createOpenRouterOpenAICompat,
+  getOpenRouterModelId,
+  hasOpenRouterKey,
+} from '@/lib/ai/openrouter/stack'
 
 const log = logger.child({ module: 'ai-reasoning-orchestrator' })
 
@@ -33,11 +38,13 @@ const log = logger.child({ module: 'ai-reasoning-orchestrator' })
 
 function getReasoningModel() {
   const env = serverEnv()
-  // Primary: Anthropic/Claude for advanced reasoning
+  if (hasOpenRouterKey(env)) {
+    const client = createOpenRouterOpenAICompat(env)
+    return client(getOpenRouterModelId(env, 'reasoning_json'))
+  }
   if (env.ANTHROPIC_API_KEY) {
     return anthropic(env.ANTHROPIC_MODEL || 'claude-sonnet-4-5-20251001')
   }
-  // Fallback: xAI/Grok
   if (env.XAI_API_KEY) {
     const client = createOpenAI({
       baseURL: env.XAI_BASE_URL,

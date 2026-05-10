@@ -1,9 +1,20 @@
 import { RateLimiterMemory, RateLimiterRedis } from 'rate-limiter-flexible'
 import Redis from 'ioredis'
+import { NextRequest, NextResponse } from 'next/server'
 import { serverEnv } from '@/lib/env'
 
 // Rate limit configuration
 const RATE_LIMIT_CONFIG = {
+  // Auth endpoints - 10 attempts per minute per IP
+  auth: {
+    points: 10,
+    duration: 60,
+  },
+  // AI chat / LLM calls - 30 requests per minute per user
+  aiChat: {
+    points: 30,
+    duration: 60,
+  },
   // OSINT API calls - 30 requests per minute
   osint: {
     points: 30,
@@ -134,6 +145,40 @@ export async function resetRateLimit(
   }
 
   await rateLimiter.delete(identifier)
+}
+
+/**
+ * Middleware-style rate limit check for API routes.
+ * Returns null if the request is allowed, or a 429 NextResponse if rate-limited.
+ */
+export async function enforceRateLimit(
+  req: NextRequest,
+  category: keyof typeof RATE_LIMIT_CONFIG,
+  identifier?: string,
+): Promise<NextResponse | null> {
+  const key =
+    identifier ??
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    req.headers.get('x-real-ip') ??
+    'unknown'
+
+  try {
+    await checkRateLimit(category, key)
+    return null // allowed
+  } catch {
+    const info = await getRateLimitInfo(category, key).catch(() => null)
+    const retryAfter = info
+      ? Math.ceil((info.resetTime.getTime() - Date.now()) / 1000)
+      : 60
+
+    return NextResponse.json(
+      { error: 'Rate limit exceeded. Try again later.' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(Math.max(retryAfter, 1)) },
+      },
+    )
+  }
 }
 
 export { RATE_LIMIT_CONFIG }

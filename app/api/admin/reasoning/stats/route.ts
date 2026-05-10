@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import { reasoningTraceSystem } from '@/lib/ai/reasoning/reasoning-trace'
 import { metaCognitionEngine } from '@/lib/ai/reasoning/meta-cognition'
 
@@ -18,6 +19,7 @@ import { metaCognitionEngine } from '@/lib/ai/reasoning/meta-cognition'
  */
 export async function GET(request: NextRequest) {
   try {
+    await verifyAdmin(request)
     const searchParams = request.nextUrl.searchParams
     const type = searchParams.get('type') || 'all'
 
@@ -52,13 +54,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(response)
   } catch (error) {
-    console.error('Error getting reasoning statistics:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to get statistics',
-      },
-      { status: 500 }
-    )
+    return toErrorResponse(error)
   }
 }

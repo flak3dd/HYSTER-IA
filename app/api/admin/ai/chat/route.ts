@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server"
 import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import { AiChatRequest } from "@/lib/ai/types"
 import { runChat } from "@/lib/ai/chat"
+import { enforceRateLimit } from "@/lib/infrastructure/rate-limiter"
 import logger from "@/lib/logger"
 
 export const runtime = "nodejs"
@@ -36,6 +37,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const requestId = req.headers.get("x-request-id") ?? `chat-${Date.now()}`
     const admin = await verifyAdmin(req)
+    const rateLimited = await enforceRateLimit(req, 'aiChat', admin.id)
+    if (rateLimited) return rateLimited
     const adminIdSafe = admin.id.slice(0, 8)
     const body = await req.json()
     const input = AiChatRequest.parse(body)

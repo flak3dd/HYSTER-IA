@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 import { revokeCurrentSession } from '@/lib/auth/session'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/auth/logout' })
 
 export async function POST() {
   try {
@@ -31,7 +34,7 @@ export async function POST() {
     return response
 
   } catch (error) {
-    console.error('Logout error:', error)
+    log.error({ err: error }, 'Logout error')
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
