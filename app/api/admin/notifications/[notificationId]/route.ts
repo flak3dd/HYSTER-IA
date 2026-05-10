@@ -4,6 +4,9 @@ import {
   markNotificationAsRead,
   deleteNotification,
 } from '@/lib/notifications/notification-system'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/admin/notifications/[notificationId]' })
 
 export async function PATCH(
   request: NextRequest,
@@ -24,7 +27,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Failed to mark notification as read' }, { status: 500 })
     }
   } catch (error) {
-    console.error('Failed to update notification:', error)
+    log.error({ err: error }, 'Failed to update notification')
     return NextResponse.json(
       { error: 'Failed to update notification', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
@@ -51,7 +54,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Failed to delete notification' }, { status: 500 })
     }
   } catch (error) {
-    console.error('Failed to delete notification:', error)
+    log.error({ err: error }, 'Failed to delete notification')
     return NextResponse.json(
       { error: 'Failed to delete notification', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }

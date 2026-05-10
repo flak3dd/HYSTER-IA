@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { z } from "zod"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import {
   listCredentials,
   createCredential,
@@ -15,6 +16,7 @@ export const dynamic = "force-dynamic"
 // GET /api/admin/credentials - List credentials with filters
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { searchParams } = new URL(req.url)
     const type = searchParams.get("type") as any
     const domain = searchParams.get("domain") || undefined
@@ -45,14 +47,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     
     return NextResponse.json({ credentials, pagination, stats })
   } catch (error) {
-    console.error("List credentials error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
 // POST /api/admin/credentials - Create a new credential
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const body = await req.json()
     const parsed = CredentialCreate.safeParse(body)
     
@@ -66,7 +68,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const credential = await createCredential(parsed.data)
     return NextResponse.json({ credential }, { status: 201 })
   } catch (error) {
-    console.error("Create credential error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }

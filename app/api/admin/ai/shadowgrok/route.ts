@@ -4,6 +4,9 @@ import { runShadowGrokAgent } from "@/lib/grok/agent-runner-enhanced"
 import { prisma } from "@/lib/db"
 import type { Persona } from "@/lib/ai/system-prompt"
 import { reasoningTraceSystem } from "@/lib/ai/reasoning/reasoning-trace"
+import logger from "@/lib/logger"
+
+const log = logger.child({ module: "api/admin/ai/shadowgrok" })
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -51,7 +54,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       try {
         reasoningTrace = reasoningTraceSystem.getTrace(result.traceSessionId)
       } catch (error) {
-        console.error('Failed to get reasoning trace:', error)
+        log.error({ err: error }, 'Failed to get reasoning trace')
       }
     }
 

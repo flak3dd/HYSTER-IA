@@ -152,7 +152,7 @@ export function InfrastructureOverview() {
     setShell({ open: true, loading: true, node })
 
     try {
-      const origin = typeof window !== "undefined" ? window.location.origin : ""
+      const origin = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "")
       const res = await apiFetch("/api/admin/deploy/provision-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -478,7 +478,7 @@ function InstallHysteriaModal({
   const [obfsPassword, setObfsPassword] = useState("")
   const [authPassword, setAuthPassword] = useState("")
   const [panelUrl, setPanelUrl] = useState(() =>
-    typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"
+    process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000")
   )
   const [trafficSecret, setTrafficSecret] = useState(() =>
     randomHex(20)

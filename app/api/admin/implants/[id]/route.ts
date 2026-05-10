@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getImplantById, updateImplant, deleteImplant, listImplantTasks } from "@/lib/db/implants"
 import { addTask } from "@/app/api/dpanel/implant/tasks/route"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -11,6 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const implant = await getImplantById(id)
     if (!implant) {
@@ -25,8 +27,7 @@ export async function GET(
       tasks
     })
   } catch (error) {
-    console.error('Get implant error:', error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
@@ -36,6 +37,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const body = await req.json()
     const implant = await updateImplant(id, body)
@@ -45,8 +47,7 @@ export async function PATCH(
 
     return NextResponse.json(implant)
   } catch (error) {
-    console.error('Update implant error:', error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
@@ -56,6 +57,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const success = await deleteImplant(id)
     if (!success) {
@@ -64,8 +66,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Delete implant error:', error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
@@ -75,6 +76,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const implant = await getImplantById(id)
     if (!implant) {
@@ -95,7 +97,6 @@ export async function POST(
       taskId
     })
   } catch (error) {
-    console.error('Send task error:', error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }

@@ -168,6 +168,18 @@ describe("AI Assistant - Comprehensive Capability Tests", () => {
       expect(generateConfigTool.parameters).toBeDefined()
       expect(typeof generateConfigTool.run).toBe("function")
     })
+
+    it("should return structured needs-input result when description is missing", async () => {
+      const result = (await generateConfigTool.run({}, ctx)) as any
+
+      expect(result).toBeDefined()
+      expect(result.error).toBe("MISSING_DESCRIPTION")
+      expect(result.errorMessage).toContain("describe what kind of Hysteria2 config")
+      expect(result.yaml).toBe("")
+      expect(result.missingFields).toContain("description")
+      // The structured prompt lets the orchestrator render multiple-choice options
+      expect(result.prompt?.options?.length ?? 0).toBeGreaterThanOrEqual(2)
+    })
   })
 
   describe("☁️ Azure Deployment", () => {
@@ -246,6 +258,31 @@ describe("AI Assistant - Comprehensive Capability Tests", () => {
       const result = await getPayloadStatusTool.run({ buildId }, ctx)
       expect(result).toBeDefined()
       expect(result.found).toBe(true)
+    })
+
+    it("should return structured needs-input result when description is missing", async () => {
+      const result = (await generatePayloadTool.run({}, ctx)) as any
+
+      expect(result).toBeDefined()
+      expect(result.error).toBe("MISSING_DESCRIPTION")
+      expect(result.errorMessage).toContain("describe the payload")
+      expect(result.buildId).toBe("")
+      expect(result.missingFields).toContain("description")
+      expect(result.prompt?.options?.length ?? 0).toBeGreaterThanOrEqual(2)
+    })
+
+    it("should return structured needs-input result when Azure deployment lacks resourceGroup", async () => {
+      const { deployNodeTool } = await import("@/lib/ai/tools")
+      const result = (await deployNodeTool.run(
+        { provider: "azure", region: "eastus" },
+        ctx,
+      )) as any
+
+      expect(result).toBeDefined()
+      expect(result.error).toBe("MISSING_REQUIRED_INPUT")
+      expect(result.errorMessage).toContain("resource group")
+      expect(result.missingFields).toContain("resourceGroup")
+      expect(result.prompt?.options?.length ?? 0).toBeGreaterThanOrEqual(2)
     })
   })
 

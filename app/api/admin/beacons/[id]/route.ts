@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getBeaconById, updateBeacon, deleteBeacon } from "@/lib/db/beacons"
 import { BeaconUpdate } from "@/lib/db/schema"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -11,6 +12,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const beacon = await getBeaconById(id)
     
@@ -20,8 +22,7 @@ export async function GET(
     
     return NextResponse.json({ beacon })
   } catch (error) {
-    console.error("Get beacon error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
@@ -31,6 +32,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const body = await req.json()
     const parsed = BeaconUpdate.safeParse(body)
@@ -50,8 +52,7 @@ export async function PATCH(
     
     return NextResponse.json({ beacon })
   } catch (error) {
-    console.error("Update beacon error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
@@ -61,6 +62,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const success = await deleteBeacon(id)
     
@@ -70,7 +72,6 @@ export async function DELETE(
     
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Delete beacon error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }

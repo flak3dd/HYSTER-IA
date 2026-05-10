@@ -168,6 +168,15 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
           { id: "northeurope", label: "North Europe (Ireland)" },
           { id: "westeurope", label: "West Europe (Netherlands)" },
           { id: "uksouth", label: "UK South (London)" },
+          // Newer EU regions — usually have better burstable B-series capacity
+          // when westeurope/northeurope/uksouth are SkuNotAvailable.
+          { id: "swedencentral", label: "Sweden Central (Gävle)" },
+          { id: "francecentral", label: "France Central (Paris)" },
+          { id: "germanywestcentral", label: "Germany West Central (Frankfurt)" },
+          { id: "switzerlandnorth", label: "Switzerland North (Zürich)" },
+          { id: "norwayeast", label: "Norway East (Oslo)" },
+          { id: "polandcentral", label: "Poland Central (Warsaw)" },
+          { id: "italynorth", label: "Italy North (Milan)" },
           { id: "southeastasia", label: "Southeast Asia (Singapore)" },
           { id: "eastasia", label: "East Asia (Hong Kong)" },
           { id: "japaneast", label: "Japan East (Tokyo)" },
@@ -562,7 +571,12 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
         60_000,
       )
 
-      // 6. Create Virtual Machine
+      // 6. Create Virtual Machine — pick image SKU based on VM size CPU arch.
+      // Azure ARM-based sizes (Cobalt/Ampere) include a `p` letter in their
+      // family code, e.g. B2ps_v2, D2pls_v5, B2pts_v2. Those need the
+      // `server-arm64` Ubuntu SKU; everything else uses the x64 `server` SKU.
+      const isArmSize = /standard_[a-z]+\d+p[a-z]*[_]?(v\d+)?$/i.test(opts.size)
+      const ubuntuSku = isArmSize ? "server-arm64" : "server"
       const vmName = safeName
       await armPut(
         token,
@@ -575,7 +589,7 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
               imageReference: {
                 publisher: "Canonical",
                 offer: "ubuntu-24_04-lts",
-                sku: "server",
+                sku: ubuntuSku,
                 version: "latest",
               },
               osDisk: {
@@ -611,7 +625,7 @@ export function azureClient(auth: AzureAuth): VpsProviderClient {
       )
 
       // The vpsId is the resource group name — we use it to look up and destroy
-      return { vpsId: rgName, ip: null }
+      return { vpsId: rgName, ip: null, sshUsername: "azureuser" }
     },
 
     async waitForIp(vpsId, timeoutMs = 180_000): Promise<string> {

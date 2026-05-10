@@ -1232,7 +1232,8 @@ async function createOrUpdateSubscription(args: any, context: ToolContext): Prom
     return { success: false, error: 'Failed to create or update subscription' };
   }
 
-  const subUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/sub/hysteria2?token=${subscription.token}`;
+  const env = serverEnv();
+  const subUrl = `${env.NEXT_PUBLIC_APP_URL}/api/sub/hysteria2?token=${subscription.token}`;
 
   return {
     success: true,
@@ -1368,7 +1369,7 @@ async function deployNodes(args: any, context: ToolContext): Promise<ToolResult>
 
   // Build DeploymentConfig
   const env = serverEnv();
-  const panelUrl = panel_url || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const panelUrl = panel_url || env.NEXT_PUBLIC_APP_URL;
 
   const deploymentConfig: DeploymentConfig = {
     provider,

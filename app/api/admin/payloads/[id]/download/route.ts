@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getPayloadBuildById } from "@/lib/db/payload-builds"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import { readFile } from "fs/promises"
 import { join } from "path"
 import { existsSync } from "fs"
@@ -13,6 +14,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const build = await getPayloadBuildById(id)
     if (!build) {
@@ -59,8 +61,7 @@ export async function GET(
       },
     })
   } catch (error) {
-    console.error('Download payload error:', error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 

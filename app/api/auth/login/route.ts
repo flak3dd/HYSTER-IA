@@ -1,18 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { generateTokens, findUserByUsername } from '@/lib/auth/jwt'
 import { safeRedirectTarget } from '@/lib/auth/redirect'
+import { enforceRateLimit } from '@/lib/infrastructure/rate-limiter'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/auth/login' })
+
+const LoginSchema = z.object({
+  username: z.string().min(1).max(120),
+  password: z.string().min(1).max(256),
+  next: z.string().max(500).optional(),
+})
 
 export async function POST(request: NextRequest) {
   try {
-    const { username, password, next } = await request.json()
+    const rateLimited = await enforceRateLimit(request, 'auth')
+    if (rateLimited) return rateLimited
 
-    if (!username || !password) {
-      return NextResponse.json(
-        { error: 'Username and password required' },
-        { status: 400 }
-      )
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
     }
+
+    const { username, password, next } = LoginSchema.parse(body)
 
     // Find the operator
     const operator = await findUserByUsername(username)
@@ -78,7 +92,13 @@ export async function POST(request: NextRequest) {
     return response
 
   } catch (error) {
-    console.error('Login error:', error)
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid request', details: error.issues },
+        { status: 400 }
+      )
+    }
+    log.error({ err: error }, 'Login error')
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

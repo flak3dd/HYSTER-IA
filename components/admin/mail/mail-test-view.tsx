@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SmtpConfigManager, type SmtpConfigItem } from "./smtp-config-manager"
 
 /* ------------------------------------------------------------------ */
 /*  Types (client-side mirrors of server types)                       */
@@ -80,6 +81,11 @@ export function MailTestView() {
   )
   const [sendingTest, setSendingTest] = useState(false)
 
+  // Saved SMTP configs
+  const [smtpConfigs, setSmtpConfigs] = useState<SmtpConfigItem[]>([])
+  const [selectedSmtpConfigId, setSelectedSmtpConfigId] = useState<string>("")
+  const [loadingSmtpConfigs, setLoadingSmtpConfigs] = useState(false)
+
   // Resend email test state
   const [resendTo, setResendTo] = useState("")
   const [resendSubject, setResendSubject] = useState("D-Panel Resend Test")
@@ -96,6 +102,22 @@ export function MailTestView() {
   const [customSubject, setCustomSubject] = useState("")
   const [customMessage, setCustomMessage] = useState("")
   const [sendingTunnel, setSendingTunnel] = useState(false)
+
+  // Bulk email send state
+  const [bulkCsvText, setBulkCsvText] = useState("")
+  const [bulkSubject, setBulkSubject] = useState("Hello {{firstName}}")
+  const [bulkBody, setBulkBody] = useState(
+    "Hi {{name}},\n\nThis is a personalized message for you.\n\nBest regards,\nD-Panel"
+  )
+  const [bulkHtmlBody, setBulkHtmlBody] = useState("")
+  const [bulkProvider, setBulkProvider] = useState<"smtp" | "resend" | "mysmtp">("smtp")
+  const [bulkSmtpConfigId, setBulkSmtpConfigId] = useState("")
+  const [bulkRateLimit, setBulkRateLimit] = useState("60")
+  const [bulkBatchSize, setBulkBatchSize] = useState("10")
+  const [bulkDelayMs, setBulkDelayMs] = useState("1000")
+  const [bulkSending, setBulkSending] = useState(false)
+  const [bulkDryRunResult, setBulkDryRunResult] = useState<any>(null)
+  const [bulkSendResult, setBulkSendResult] = useState<any>(null)
 
   // Auto-test interval form
   const [intervalInput, setIntervalInput] = useState("30")
@@ -219,14 +241,36 @@ export function MailTestView() {
     [intervalInput],
   )
 
+  /* ---- Load saved SMTP configs ---- */
+  const loadSmtpConfigsList = useCallback(async () => {
+    setLoadingSmtpConfigs(true)
+    try {
+      const res = await apiFetch("/api/admin/mail/smtp-configs", { cache: "no-store" })
+      if (res.ok) {
+        const data = await res.json()
+        setSmtpConfigs(data.configs ?? [])
+      }
+    } catch {
+      // silently fail, not critical
+    } finally {
+      setLoadingSmtpConfigs(false)
+    }
+  }, [])
+
   /* ---- Send test email ---- */
   const handleSendTest = useCallback(async () => {
     setSendingTest(true)
     try {
-      const res = await apiFetch("/api/admin/mail/send-test", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      let body: Record<string, unknown>
+      if (selectedSmtpConfigId) {
+        body = {
+          configId: selectedSmtpConfigId,
+          to: sendTo,
+          subject: sendSubject,
+          body: sendBody,
+        }
+      } else {
+        body = {
           smtp: {
             host: smtpHost,
             port: Number(smtpPort) || 587,
@@ -238,7 +282,13 @@ export function MailTestView() {
           to: sendTo,
           subject: sendSubject,
           body: sendBody,
-        }),
+        }
+      }
+
+      const res = await apiFetch("/api/admin/mail/send-test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
@@ -255,7 +305,7 @@ export function MailTestView() {
     } finally {
       setSendingTest(false)
     }
-  }, [smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass, smtpFrom, sendTo, sendSubject, sendBody])
+  }, [selectedSmtpConfigId, smtpHost, smtpPort, smtpSecure, smtpUser, smtpPass, smtpFrom, sendTo, sendSubject, sendBody])
 
   /* ---- Send Resend test email ---- */
   const handleSendResend = useCallback(async () => {
@@ -335,6 +385,107 @@ export function MailTestView() {
       setSendingTunnel(false)
     }
   }, [tunnelTo, tunnelNodeId, tunnelType, tunnelConfig, customSubject, customMessage])
+
+  /* ---- Bulk email send ---- */
+  const handleBulkDryRun = useCallback(async () => {
+    if (!bulkCsvText.trim()) {
+      toast.error("Please paste CSV content")
+      return
+    }
+    setBulkSending(true)
+    setBulkDryRunResult(null)
+    setBulkSendResult(null)
+    try {
+      const res = await apiFetch("/api/admin/mail/bulk-send", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          csvContent: bulkCsvText,
+          subject: bulkSubject,
+          body: bulkBody,
+          htmlBody: bulkHtmlBody || undefined,
+          provider: bulkProvider,
+          smtpConfigId: bulkSmtpConfigId || undefined,
+          rateLimitPerMinute: Number(bulkRateLimit) || 60,
+          batchSize: Number(bulkBatchSize) || 10,
+          delayMs: Number(bulkDelayMs) || 1000,
+          dryRun: true,
+        }),
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error((errData as { error?: string }).error ?? `${res.status}`)
+      }
+      const data = await res.json()
+      setBulkDryRunResult(data)
+      toast.success("Dry run complete", {
+        description: `${data.summary.validEmails} valid, ${data.summary.invalidEmails} invalid`,
+      })
+    } catch (err) {
+      toast.error("Dry run failed", {
+        description: err instanceof Error ? err.message : "unknown",
+      })
+    } finally {
+      setBulkSending(false)
+    }
+  }, [bulkCsvText, bulkSubject, bulkBody, bulkHtmlBody, bulkProvider, bulkSmtpConfigId, bulkRateLimit, bulkBatchSize, bulkDelayMs])
+
+  const handleBulkSend = useCallback(async () => {
+    if (!bulkCsvText.trim()) {
+      toast.error("Please paste CSV content")
+      return
+    }
+    if (!confirm(`Send emails to ${bulkDryRunResult?.summary?.validEmails ?? "?"} recipients?`)) {
+      return
+    }
+    setBulkSending(true)
+    setBulkSendResult(null)
+    try {
+      const res = await apiFetch("/api/admin/mail/bulk-send", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          csvContent: bulkCsvText,
+          subject: bulkSubject,
+          body: bulkBody,
+          htmlBody: bulkHtmlBody || undefined,
+          provider: bulkProvider,
+          smtpConfigId: bulkSmtpConfigId || undefined,
+          rateLimitPerMinute: Number(bulkRateLimit) || 60,
+          batchSize: Number(bulkBatchSize) || 10,
+          delayMs: Number(bulkDelayMs) || 1000,
+          dryRun: false,
+        }),
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error((errData as { error?: string }).error ?? `${res.status}`)
+      }
+      const data = await res.json()
+      setBulkSendResult(data)
+      toast.success("Bulk email sent", {
+        description: `${data.results.emailsSent} sent, ${data.results.emailsFailed} failed`,
+      })
+    } catch (err) {
+      toast.error("Bulk send failed", {
+        description: err instanceof Error ? err.message : "unknown",
+      })
+    } finally {
+      setBulkSending(false)
+    }
+  }, [bulkCsvText, bulkSubject, bulkBody, bulkHtmlBody, bulkProvider, bulkSmtpConfigId, bulkRateLimit, bulkBatchSize, bulkDelayMs, bulkDryRunResult])
+
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const text = event.target?.result as string
+      setBulkCsvText(text)
+      toast.success("CSV loaded", { description: `${file.name} (${(file.size / 1024).toFixed(1)} KB)` })
+    }
+    reader.readAsText(file)
+  }, [])
 
   /* ---- Helpers ---- */
   const resultForAccount = (id: string): MailTestResult | undefined =>
@@ -502,6 +653,7 @@ export function MailTestView() {
           if (data.intervalMinutes) setIntervalInput(String(data.intervalMinutes))
         }
         loadTemplates()
+        loadSmtpConfigsList()
       } catch (err) {
         toast.error("Failed to load mail data", {
           description: err instanceof Error ? err.message : "unknown",
@@ -511,7 +663,7 @@ export function MailTestView() {
       }
     }
     load()
-  }, [loadTemplates])
+  }, [loadTemplates, loadSmtpConfigsList])
 
   if (loading) {
     return <p className="p-6 text-muted-foreground">Loading mail accounts...</p>
@@ -527,8 +679,9 @@ export function MailTestView() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="accounts">Accounts</TabsTrigger>
+          <TabsTrigger value="smtp-configs">SMTP Configs</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="queue">Queue</TabsTrigger>
           <TabsTrigger value="tracking">Tracking</TabsTrigger>
@@ -715,6 +868,33 @@ export function MailTestView() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {/* Saved config selector */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Use Saved Config</label>
+              <select
+                value={selectedSmtpConfigId}
+                onChange={(e) => {
+                  setSelectedSmtpConfigId(e.target.value)
+                  const cfg = smtpConfigs.find((c) => c.id === e.target.value)
+                  if (cfg) {
+                    setSmtpHost(cfg.host)
+                    setSmtpPort(String(cfg.port))
+                    setSmtpSecure(cfg.secure)
+                    setSmtpUser(cfg.username ?? "")
+                    setSmtpFrom(cfg.fromEmail)
+                  }
+                }}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              >
+                <option value="">-- Manual config --</option>
+                {smtpConfigs.map((cfg) => (
+                  <option key={cfg.id} value={cfg.id}>
+                    {cfg.name} ({cfg.host}:{cfg.port})
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">SMTP Host</label>
@@ -810,7 +990,11 @@ export function MailTestView() {
             <Button
               className="w-full"
               onClick={handleSendTest}
-              disabled={sendingTest || !smtpHost || !smtpUser || !smtpPass || !sendTo}
+              disabled={
+                sendingTest ||
+                !sendTo ||
+                (selectedSmtpConfigId ? false : !smtpHost || !smtpUser || !smtpPass)
+              }
             >
               {sendingTest ? "Sending..." : "Send Test Email"}
             </Button>
@@ -957,6 +1141,202 @@ export function MailTestView() {
         </Card>
 
         {/* ================================================================ */}
+        {/*  BULK EMAIL SEND                                                  */}
+        {/* ================================================================ */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Bulk Email Send</CardTitle>
+            <CardDescription className="text-xs">
+              Upload a CSV with firstname,lastname,email and send personalized emails
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Provider */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Provider</label>
+              <select
+                value={bulkProvider}
+                onChange={(e) => setBulkProvider(e.target.value as "smtp" | "resend" | "mysmtp")}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              >
+                <option value="smtp">SMTP (saved config)</option>
+                <option value="resend">Resend API</option>
+                <option value="mysmtp">my.smtp.com API</option>
+              </select>
+            </div>
+
+            {bulkProvider === "smtp" && (
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">SMTP Config</label>
+                <select
+                  value={bulkSmtpConfigId}
+                  onChange={(e) => setBulkSmtpConfigId(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                >
+                  <option value="">-- Default config --</option>
+                  {smtpConfigs.map((cfg) => (
+                    <option key={cfg.id} value={cfg.id}>
+                      {cfg.name} ({cfg.host}:{cfg.port})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Rate limits */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Rate/min</label>
+                <input
+                  value={bulkRateLimit}
+                  onChange={(e) => setBulkRateLimit(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Batch</label>
+                <input
+                  value={bulkBatchSize}
+                  onChange={(e) => setBulkBatchSize(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Delay ms</label>
+                <input
+                  value={bulkDelayMs}
+                  onChange={(e) => setBulkDelayMs(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* CSV Upload */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                CSV (firstname,lastname,email)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileUpload}
+                  className="text-xs file:mr-2 file:rounded-md file:border file:border-border file:bg-muted file:px-2 file:py-1 file:text-xs"
+                />
+              </div>
+              <textarea
+                value={bulkCsvText}
+                onChange={(e) => setBulkCsvText(e.target.value)}
+                placeholder={`John,Doe,john@example.com\nJane,Smith,jane@example.com`}
+                rows={4}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm font-mono resize-none"
+              />
+            </div>
+
+            {/* Subject & Body */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Subject</label>
+              <input
+                value={bulkSubject}
+                onChange={(e) => setBulkSubject(e.target.value)}
+                placeholder="Hello {{firstName}}"
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Variables: {"{{firstName}}"}, {"{{lastName}}"}, {"{{email}}"}, {"{{name}}"}
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Body (text)</label>
+              <textarea
+                value={bulkBody}
+                onChange={(e) => setBulkBody(e.target.value)}
+                placeholder="Hi {{name}}, ..."
+                rows={3}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm resize-none"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Body (HTML, optional)</label>
+              <textarea
+                value={bulkHtmlBody}
+                onChange={(e) => setBulkHtmlBody(e.target.value)}
+                placeholder="<p>Hi {{name}}, ...</p>"
+                rows={2}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm resize-none"
+              />
+            </div>
+
+            {/* Dry run result */}
+            {bulkDryRunResult && (
+              <div className="rounded-md bg-muted p-3 space-y-1 text-xs">
+                <p className="font-medium">Dry Run Results</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="text-center">
+                    <p className="font-bold">{bulkDryRunResult.summary.totalRecords}</p>
+                    <p className="text-muted-foreground">Total</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-bold text-emerald-600">{bulkDryRunResult.summary.validEmails}</p>
+                    <p className="text-muted-foreground">Valid</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-bold text-red-600">{bulkDryRunResult.summary.invalidEmails}</p>
+                    <p className="text-muted-foreground">Invalid</p>
+                  </div>
+                </div>
+                {bulkDryRunResult.preview?.firstRecipient && (
+                  <div className="border-t pt-1 mt-1">
+                    <p className="text-muted-foreground">Preview (first recipient):</p>
+                    <p>Subject: {bulkDryRunResult.preview.firstRecipient.subject}</p>
+                    <p>Body: {bulkDryRunResult.preview.firstRecipient.body}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Send result */}
+            {bulkSendResult && (
+              <div className="rounded-md bg-muted p-3 space-y-1 text-xs">
+                <p className="font-medium">Send Results</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="text-center">
+                    <p className="font-bold">{bulkSendResult.results.emailsSent}</p>
+                    <p className="text-muted-foreground">Sent</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-bold text-red-600">{bulkSendResult.results.emailsFailed}</p>
+                    <p className="text-muted-foreground">Failed</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-bold">{Math.round(bulkSendResult.results.durationMs / 1000)}s</p>
+                    <p className="text-muted-foreground">Duration</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                onClick={handleBulkDryRun}
+                disabled={bulkSending || !bulkCsvText.trim()}
+              >
+                {bulkSending && !bulkDryRunResult ? "Analyzing..." : "Dry Run"}
+              </Button>
+              <Button
+                onClick={handleBulkSend}
+                disabled={bulkSending || !bulkCsvText.trim() || !bulkSubject.trim() || !bulkBody.trim()}
+              >
+                {bulkSending ? "Sending..." : "Send Emails"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ================================================================ */}
         {/*  INBOX PREVIEW                                                   */}
         {/* ================================================================ */}
         <Card>
@@ -1079,6 +1459,10 @@ export function MailTestView() {
           </CardContent>
         </Card>
       )}
+        </TabsContent>
+
+        <TabsContent value="smtp-configs" className="space-y-6">
+          <SmtpConfigManager />
         </TabsContent>
 
         <TabsContent value="templates" className="space-y-6">

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyAdmin } from '@/lib/auth/admin'
 import { getTrafficStatsCollector } from '@/lib/infrastructure/traffic-stats'
 import { listUsers } from '@/lib/db/users'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/admin/traffic-stats' })
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +46,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error('Failed to fetch traffic stats:', error)
+    log.error({ err: error }, 'Failed to fetch traffic stats')
     return NextResponse.json(
       { error: 'Failed to fetch traffic stats', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
@@ -64,7 +67,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true, message: 'Cache cleared' })
   } catch (error) {
-    console.error('Failed to clear cache:', error)
+    log.error({ err: error }, 'Failed to clear cache')
     return NextResponse.json(
       { error: 'Failed to clear cache', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }

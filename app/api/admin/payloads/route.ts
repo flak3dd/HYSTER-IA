@@ -8,6 +8,7 @@ import {
   countPayloadBuilds,
 } from "@/lib/db/payload-builds"
 import { parsePagination, paginatedResponse } from "@/lib/pagination"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import logger from "@/lib/logger"
 
 const log = logger.child({ module: "api/payloads" })
@@ -25,6 +26,7 @@ const PayloadBuildCreateSchema = z.object({
 // GET /api/admin/payloads - List payload builds (paginated)
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { searchParams } = new URL(req.url)
     const createdBy = searchParams.get('createdBy') || undefined
     const { page, pageSize, skip, take } = parsePagination(searchParams)
@@ -38,14 +40,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ builds, pagination, stats })
   } catch (error) {
-    log.error({ err: error }, "List payload builds error")
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
 // POST /api/admin/payloads - Create a new payload build
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const body = await req.json()
     const parsed = PayloadBuildCreateSchema.parse(body)
 
@@ -56,17 +58,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(build, { status: 201 })
   } catch (error) {
-    log.error({ err: error }, "Create payload build error")
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: "Invalid request", details: error.issues }, { status: 400 })
-    }
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
 // DELETE /api/admin/payloads - Delete a payload build
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { searchParams } = new URL(req.url)
     const id = searchParams.get('id')
 
@@ -81,7 +80,6 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    log.error({ err: error }, "Delete payload build error")
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }

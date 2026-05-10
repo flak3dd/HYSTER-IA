@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readSession } from '@/lib/auth/session'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/scheduled/[id]' })
 
 /**
  * DELETE /api/workflow/scheduled/[id] - Delete a scheduled workflow
@@ -42,7 +45,7 @@ export async function DELETE(
       message: 'Scheduled workflow deleted successfully',
     })
   } catch (error) {
-    console.error('Error deleting scheduled workflow:', error)
+    log.error({ err: error }, 'Error deleting scheduled workflow')
     return NextResponse.json(
       { error: 'Failed to delete scheduled workflow' },
       { status: 500 }
@@ -105,7 +108,7 @@ export async function PATCH(
       scheduledWorkflow: updated,
     })
   } catch (error) {
-    console.error('Error updating scheduled workflow:', error)
+    log.error({ err: error }, 'Error updating scheduled workflow')
     return NextResponse.json(
       { error: 'Failed to update scheduled workflow' },
       { status: 500 }

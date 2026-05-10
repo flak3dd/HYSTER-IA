@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readSession } from '@/lib/auth/session'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/analytics' })
 
 /**
  * GET /api/workflow/analytics - Get workflow analytics and insights
@@ -99,7 +102,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error('Error getting workflow analytics:', error)
+    log.error({ err: error }, 'Error getting workflow analytics')
     return NextResponse.json(
       { error: 'Failed to get workflow analytics' },
       { status: 500 }

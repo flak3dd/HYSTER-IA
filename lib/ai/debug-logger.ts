@@ -6,6 +6,7 @@
  */
 
 import { createHash } from 'crypto';
+import { serverEnv } from '@/lib/env';
 
 export interface ToolCallLog {
   timestamp: number;
@@ -41,12 +42,9 @@ class DebugLogger {
 
   constructor() {
     // Set log level from environment
-    if (process.env.AI_DEBUG_LOG_LEVEL) {
-      this.logLevel = process.env.AI_DEBUG_LOG_LEVEL as any;
-    }
-    if (process.env.AI_DEBUG_CONSOLE === 'false') {
-      this.enableConsoleLogging = false;
-    }
+    const env = serverEnv();
+    this.logLevel = env.AI_DEBUG_LOG_LEVEL;
+    this.enableConsoleLogging = env.AI_DEBUG_CONSOLE;
   }
 
   /**

@@ -1,0 +1,12 @@
+server: 4.223.70.45:443
+auth: token-def456
+tls:
+  sni: 4.223.70.45
+  insecure: false
+obfs:
+  type: salamander
+  salamander:
+    password: ifb%$^6svs
+bandwidth:
+  up: 500 mbps
+  down: 1000 mbps

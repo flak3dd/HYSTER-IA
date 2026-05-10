@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { WorkflowEngine } from '@/lib/workflow/engine'
 import { CreateWorkflowSessionInput } from '@/lib/workflow/types'
 import { readSession } from '@/lib/auth/session'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/sessions' })
 
 /**
  * POST /api/workflow/sessions - Create a new workflow session
@@ -29,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(processResult)
   } catch (error) {
-    console.error('Error creating workflow session:', error)
+    log.error({ err: error }, 'Error creating workflow session')
     return NextResponse.json(
       { error: 'Failed to create workflow session' },
       { status: 500 }
@@ -60,7 +63,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ sessions })
   } catch (error) {
-    console.error('Error listing workflow sessions:', error)
+    log.error({ err: error }, 'Error listing workflow sessions')
     return NextResponse.json(
       { error: 'Failed to list workflow sessions' },
       { status: 500 }

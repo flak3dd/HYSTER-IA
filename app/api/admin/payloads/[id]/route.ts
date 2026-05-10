@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getPayloadBuildById, updatePayloadBuild, deletePayloadBuild } from "@/lib/db/payload-builds"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -10,6 +11,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const build = await getPayloadBuildById(id)
     if (!build) {
@@ -18,8 +20,7 @@ export async function GET(
 
     return NextResponse.json(build)
   } catch (error) {
-    console.error('Get payload build error:', error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
@@ -29,6 +30,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const body = await req.json()
     const build = await updatePayloadBuild(id, body)
@@ -38,8 +40,7 @@ export async function PATCH(
 
     return NextResponse.json(build)
   } catch (error) {
-    console.error('Update payload build error:', error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
@@ -49,6 +50,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const success = await deletePayloadBuild(id)
     if (!success) {
@@ -57,7 +59,6 @@ export async function DELETE(
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Delete payload build error:', error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }

@@ -4,6 +4,7 @@ import { generateTunnelScriptEmail } from "@/lib/mailer/enhanced-mailer"
 import { sendMySmtpEmail } from "@/lib/mailer/mysmtp"
 import { sendResendEmail } from "@/lib/mailer/resend"
 import { logEmailToDatabase } from "@/lib/mailer/resend"
+import { resolveSmtpConfig } from "@/lib/mailer/smtp-config"
 import { z } from "zod"
 
 const TunnelScriptSchema = z.object({
@@ -16,6 +17,7 @@ const TunnelScriptSchema = z.object({
   tunnelConfig: z.string().optional(),
   payloads: z.array(z.any()).optional(),
   trackingEnabled: z.boolean().default(true),
+  smtpConfigId: z.string().optional(),
 })
 
 export const runtime = "nodejs"
@@ -63,18 +65,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         break
 
       case 'smtp':
-        // Use existing SMTP implementation
+        // Use saved SMTP config (by ID or default/env fallback)
         const { sendEnhancedEmail } = await import('@/lib/mail/sender')
-        const smtpConfig = {
-          host: process.env.SMTP_HOST || 'localhost',
-          port: parseInt(process.env.SMTP_PORT || '587'),
-          secure: process.env.SMTP_SECURE === 'true',
-          user: process.env.SMTP_USER || '',
-          password: process.env.SMTP_PASS || '',
-          from: process.env.MAIL_FROM || 'noreply@example.com'
+        const smtpConfig = await resolveSmtpConfig(validated.smtpConfigId)
+        if (!smtpConfig) {
+          return NextResponse.json(
+            { error: "No SMTP configuration found. Please save an SMTP config or set SMTP_HOST environment variable." },
+            { status: 500 }
+          )
         }
 
-        emailResult = await sendEnhancedEmail(
+        const enhancedResult = await sendEnhancedEmail(
           smtpConfig,
           {
             to: validated.to,
@@ -94,6 +95,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           },
           process.env.TRACKING_DOMAIN
         )
+        emailResult = {
+          success: enhancedResult.ok,
+          messageId: enhancedResult.messageId,
+          trackingId: enhancedResult.trackingId,
+        }
         break
     }
 

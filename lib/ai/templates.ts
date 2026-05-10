@@ -127,4 +127,31 @@ export const AI_TEMPLATES: AiTemplate[] = [
       "List all my payload builds. Show the status of each (pending, building, ready, failed), their platform types, sizes, and provide download links for the ones that are ready. Also show any build errors for failed payloads.",
     category: "payload",
   },
+  {
+    id: "deploy-azure-eastus",
+    label: "Deploy Azure VM to East US",
+    description:
+      "Provision a new Hysteria2 node on Azure in the East US region with pre-configured resource group.",
+    prompt:
+      "Deploy a new Azure VM with provider azure, region eastus, resourceGroup hysteria-rg-eastus, name hysteria-east-01, tags [c2, azure, eastus]. First check prerequisites, then proceed with deployment.",
+    category: "deployment",
+  },
+  {
+    id: "deploy-azure-westeurope",
+    label: "Deploy Azure VM to West Europe",
+    description:
+      "Provision a new Hysteria2 node on Azure in the West Europe region with pre-configured resource group.",
+    prompt:
+      "Deploy a new Azure VM with provider azure, region westeurope, resourceGroup hysteria-rg-westeurope, name hysteria-west-01, tags [c2, azure, westeurope]. First check prerequisites, then proceed with deployment.",
+    category: "deployment",
+  },
+  {
+    id: "deploy-azure-australiaeast",
+    label: "Deploy Azure VM to Australia East",
+    description:
+      "Provision a new Hysteria2 node on Azure in the Australia East region with pre-configured resource group.",
+    prompt:
+      "Deploy a new Azure VM with provider azure, region australiaeast, resourceGroup hysteria-rg-australiaeast, name hysteria-au-01, tags [c2, azure, australiaeast]. First check prerequisites, then proceed with deployment.",
+    category: "deployment",
+  },
 ]

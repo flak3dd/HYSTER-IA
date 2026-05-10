@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getCredentialById, deleteCredential } from "@/lib/db/credentials"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -10,6 +11,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const credential = await getCredentialById(id)
     
@@ -19,8 +21,7 @@ export async function GET(
     
     return NextResponse.json({ credential })
   } catch (error) {
-    console.error("Get credential error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }
 
@@ -30,6 +31,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
+    await verifyAdmin(req)
     const { id } = await params
     const success = await deleteCredential(id)
     
@@ -39,7 +41,6 @@ export async function DELETE(
     
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error("Delete credential error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return toErrorResponse(error)
   }
 }

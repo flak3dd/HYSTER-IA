@@ -106,10 +106,7 @@ export function PayloadsView() {
     setGenerating(true)
 
     try {
-      const config = {
-        type: form.type,
-        name: form.name,
-        description: form.description,
+      const payloadConfig = {
         hysteriaConfig: {
           server: "auto-detect",
           auth: "auto-generate",
@@ -132,7 +129,12 @@ export function PayloadsView() {
       const response = await apiFetch("/api/admin/payloads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify({
+          name: form.name,
+          type: form.type,
+          description: form.description,
+          config: payloadConfig,
+        }),
       })
 
       if (!response.ok) throw new Error("Failed to create payload build")

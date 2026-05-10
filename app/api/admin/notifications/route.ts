@@ -5,6 +5,9 @@ import {
   markAllAsRead,
   getUnreadCount,
 } from '@/lib/notifications/notification-system'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/admin/notifications' })
 
 export async function GET(request: NextRequest) {
   let auth
@@ -28,7 +31,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ success: true, ...result })
   } catch (error) {
-    console.error('Failed to get notifications:', error)
+    log.error({ err: error }, 'Failed to get notifications')
     return NextResponse.json(
       { error: 'Failed to get notifications', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
@@ -55,7 +58,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
   } catch (error) {
-    console.error('Failed to update notifications:', error)
+    log.error({ err: error }, 'Failed to update notifications')
     return NextResponse.json(
       { error: 'Failed to update notifications', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }

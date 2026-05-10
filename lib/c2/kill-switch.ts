@@ -12,6 +12,7 @@ import { promisify } from "node:util"
 import { prisma } from "@/lib/db"
 import { broadcastTask, dispatchC2Task } from "@/lib/c2/dispatch"
 import logger from "@/lib/logger"
+import { serverEnv } from "@/lib/env"
 
 const execAsync = promisify(exec)
 const log = logger.child({ module: "kill-switch" })
@@ -57,7 +58,8 @@ export async function executeKillSwitch(req: KillSwitchRequest): Promise<KillSwi
       }
     }
     // Validate confirmation code
-    const validCode = process.env.KILL_SWITCH_CONFIRM_CODE
+    const env = serverEnv();
+    const validCode = env.KILL_SWITCH_CONFIRM_CODE;
     if (validCode && req.confirmationCode !== validCode) {
       log.warn({ triggeredBy: req.triggeredBy }, "Kill switch rejected — invalid confirmation code")
       return {
@@ -188,7 +190,8 @@ async function shutdownNode(nodeId: string, mode: string, triggeredBy: string): 
   log.info({ nodeId, hostname: node.hostname, mode, triggeredBy }, "Shutting down node")
 
   // Try Hysteria admin API first
-  const adminUrl = process.env.HYSTERIA_ADMIN_API_URL
+  const env = serverEnv();
+  const adminUrl = env.HYSTERIA_ADMIN_API_URL
   if (adminUrl) {
     try {
       const response = await fetch(`${adminUrl}/node/${nodeId}/shutdown`, {
@@ -205,8 +208,8 @@ async function shutdownNode(nodeId: string, mode: string, triggeredBy: string): 
   }
 
   // Fallback: SSH shutdown
-  const sshKey = process.env.DEPLOY_SSH_KEY
-  const sshUser = process.env.DEPLOY_SSH_USER || "root"
+  const sshKey = env.DEPLOY_SSH_KEY
+  const sshUser = env.DEPLOY_SSH_USER
   if (sshKey && node.hostname) {
     try {
       const cmd = mode === "immediate"

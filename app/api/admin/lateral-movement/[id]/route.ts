@@ -1,15 +1,25 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { getLateralMovementById, updateLateralMovementStatus } from "@/lib/db/lateral-movement"
 import { MovementStatus } from "@/lib/db/schema"
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
+import logger from "@/lib/logger"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
+
+const log = logger.child({ module: "api/admin/lateral-movement/[id]" })
 
 // GET /api/admin/lateral-movement/[id] - Get lateral movement details
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  try {
+    await verifyAdmin(req)
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+
   try {
     const { id } = await params
     const movement = await getLateralMovementById(id)
@@ -20,7 +30,7 @@ export async function GET(
     
     return NextResponse.json({ movement })
   } catch (error) {
-    console.error("Get lateral movement error:", error)
+    log.error({ err: error }, "Get lateral movement error")
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
@@ -30,6 +40,12 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
+  try {
+    await verifyAdmin(req)
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+
   try {
     const { id } = await params
     const body = await req.json()
@@ -51,7 +67,7 @@ export async function PATCH(
     
     return NextResponse.json({ movement })
   } catch (error) {
-    console.error("Update lateral movement error:", error)
+    log.error({ err: error }, "Update lateral movement error")
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

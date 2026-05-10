@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import { reasoningTraceSystem } from '@/lib/ai/reasoning/reasoning-trace'
 import { metaCognitionEngine } from '@/lib/ai/reasoning/meta-cognition'
 import { cotEngine } from '@/lib/ai/reasoning/chain-of-thought'
@@ -19,6 +20,7 @@ import { cotEngine } from '@/lib/ai/reasoning/chain-of-thought'
  */
 export async function GET(request: NextRequest) {
   try {
+    await verifyAdmin(request)
     const searchParams = request.nextUrl.searchParams
     const sessionId = searchParams.get('sessionId')
     const since = searchParams.get('since')
@@ -39,14 +41,7 @@ export async function GET(request: NextRequest) {
       count: traces.length,
     })
   } catch (error) {
-    console.error('Error listing reasoning traces:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to list traces',
-      },
-      { status: 500 }
-    )
+    return toErrorResponse(error)
   }
 }
 
@@ -56,6 +51,7 @@ export async function GET(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
+    await verifyAdmin(request)
     const searchParams = request.nextUrl.searchParams
     const maxAge = searchParams.get('maxAge')
     
@@ -70,13 +66,6 @@ export async function DELETE(request: NextRequest) {
       message: 'Traces cleared successfully',
     })
   } catch (error) {
-    console.error('Error clearing reasoning traces:', error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to clear traces',
-      },
-      { status: 500 }
-    )
+    return toErrorResponse(error)
   }
 }

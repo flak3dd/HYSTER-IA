@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { z } from "zod"
 import { getImplantByImplantId, updateImplantLastSeen, createImplantTask, getPendingTasksForImplant, updateImplantTask } from "@/lib/db/implants"
+import logger from "@/lib/logger"
+
+const log = logger.child({ module: "api/dpanel/implant/tasks" })
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       total: tasks.length 
     })
   } catch (error) {
-    console.error('Task request error:', error)
+    log.error({ err: error }, 'Task request error')
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   }
 }

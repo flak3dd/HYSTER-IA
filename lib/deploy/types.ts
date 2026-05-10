@@ -65,6 +65,11 @@ export type Deployment = z.infer<typeof Deployment>
 export type VpsCreateResult = {
   vpsId: string
   ip: string | null
+  // Default SSH username for the freshly created VM. Most providers use
+  // "root" (the default) but Azure cloud-inits with "azureuser" and root
+  // SSH disabled, so callers must connect as that user and sudo for
+  // privileged commands.
+  sshUsername?: string
 }
 
 export type ProviderPreset = {

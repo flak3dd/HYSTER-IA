@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readSession } from '@/lib/auth/session'
 import { randomUUID } from 'crypto'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/scheduled' })
 
 /**
  * GET /api/workflow/scheduled - Get all scheduled workflows
@@ -23,7 +26,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ scheduledWorkflows })
   } catch (error) {
-    console.error('Error getting scheduled workflows:', error)
+    log.error({ err: error }, 'Error getting scheduled workflows')
     return NextResponse.json(
       { error: 'Failed to get scheduled workflows' },
       { status: 500 }
@@ -75,7 +78,7 @@ export async function POST(request: NextRequest) {
       scheduledWorkflow,
     })
   } catch (error) {
-    console.error('Error creating scheduled workflow:', error)
+    log.error({ err: error }, 'Error creating scheduled workflow')
     return NextResponse.json(
       { error: 'Failed to create scheduled workflow' },
       { status: 500 }

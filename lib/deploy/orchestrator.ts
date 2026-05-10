@@ -129,8 +129,25 @@ export async function validateDeploymentConfig(config: DeploymentConfig): Promis
   return { valid: !issues.some((i) => i.severity === "error"), issues }
 }
 
+/**
+ * Clean up cloud resources on deployment failure.
+ * This prevents orphaned resources (Public IPs, VMs, etc.) from consuming quota.
+ */
+async function cleanupFailedDeployment(provider: Awaited<ReturnType<typeof resolveProviderAsync>>, vpsId: string | undefined, providerName: string): Promise<void> {
+  if (!vpsId) return
+  try {
+    console.log(`[Deployment Cleanup] Destroying ${providerName} resources for ${vpsId}...`)
+    await provider.destroyServer(vpsId)
+    console.log(`[Deployment Cleanup] Successfully cleaned up ${vpsId}`)
+  } catch (cleanupErr) {
+    // Log but don't throw - cleanup is best effort
+    console.error(`[Deployment Cleanup] Failed to destroy ${vpsId}:`, cleanupErr)
+  }
+}
+
 async function runDeployment(id: string, config: DeploymentConfig): Promise<void> {
   const provider = await resolveProviderAsync(config.provider)
+  let vpsId: string | undefined
 
   // Pre-flight validation: catch blockers before generating SSH keys or calling cloud APIs
   emit(id, "pending", `Pre-flight validation for ${config.provider} deployment...`)
@@ -166,13 +183,20 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
       sshKeyContent: keyPair.publicKey,
       resourceGroup: config.resourceGroup,
     })
+    vpsId = result.vpsId
   } catch (err) {
     emit(id, "failed", `VPS creation failed`, err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
 
   const deployment = activeDeployments.get(id)!
   deployment.vpsId = result.vpsId
+
+  // Most providers default to root SSH; Azure (and some others) use a
+  // non-root admin user and require sudo. We thread this through every
+  // SSH call below.
+  const sshUsername = result.sshUsername ?? "root"
 
   // Wait for IP
   emit(id, "waiting_for_ip", "Waiting for server to get a public IP...")
@@ -181,17 +205,25 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     ip = result.ip ?? (await provider.waitForIp(result.vpsId))
   } catch (err) {
     emit(id, "failed", "Timed out waiting for IP", err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
   deployment.vpsIp = ip
   emit(id, "waiting_for_ip", `Server IP: ${ip}`)
 
-  // Wait for SSH
-  emit(id, "provisioning", `Waiting for SSH to become available on ${ip}...`)
+  // Wait for SSH (Azure D-series + cloud-init can take 5-8 min; B-series 1-3 min;
+  // Vultr/DO are faster. 600s covers the slowest realistic boot path.)
+  emit(id, "provisioning", `Waiting for SSH to become available on ${ip} as ${sshUsername}...`)
   try {
-    await waitForSsh({ host: ip, privateKey: keyPair.privateKey, timeoutMs: 180_000 })
+    await waitForSsh({
+      host: ip,
+      privateKey: keyPair.privateKey,
+      username: sshUsername,
+      timeoutMs: 600_000,
+    })
   } catch (err) {
     emit(id, "failed", "SSH not reachable", err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
   emit(id, "provisioning", "SSH connection established")
@@ -233,21 +265,30 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
   })
 
   emit(id, "installing_hysteria", "Running Hysteria 2 installation script...")
+  // For non-root SSH users (e.g. Azure's `azureuser`), the provision script
+  // needs to run under sudo since it touches /etc, installs apt packages,
+  // and writes systemd units.
+  const provisionCmd = sshUsername === "root"
+    ? script
+    : `sudo -n bash -s <<'__DEVIN_PROVISION_EOF__'\n${script}\n__DEVIN_PROVISION_EOF__\n`
   let execResult
   try {
     execResult = await sshExec({
       host: ip,
       privateKey: keyPair.privateKey,
-      command: script,
+      username: sshUsername,
+      command: provisionCmd,
       timeoutMs: 300_000,
     })
   } catch (err) {
     emit(id, "failed", "Provisioning script failed", err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
 
   if (execResult.code !== 0) {
     emit(id, "failed", `Provisioning script exited with code ${execResult.code}`, execResult.stderr.slice(0, 500))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
   emit(id, "installing_hysteria", "Hysteria 2 installed and service started")
@@ -255,10 +296,12 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
   // Test connectivity
   emit(id, "testing_connectivity", `Testing Hysteria 2 connectivity on ${ip}:${config.port}...`)
   try {
+    const testCmd = `systemctl is-active hysteria-server && curl -sf http://127.0.0.1:25000/ -H "Authorization: ${trafficSecret}" || echo "traffic-api-check-failed"`
     const testResult = await sshExec({
       host: ip,
       privateKey: keyPair.privateKey,
-      command: `systemctl is-active hysteria-server && curl -sf http://127.0.0.1:25000/ -H "Authorization: ${trafficSecret}" || echo "traffic-api-check-failed"`,
+      username: sshUsername,
+      command: sshUsername === "root" ? testCmd : `sudo -n bash -c '${testCmd.replace(/'/g, "'\\''")}'`,
       timeoutMs: 30_000,
     })
     if (testResult.stdout.includes("active")) {
@@ -291,6 +334,7 @@ async function runDeployment(id: string, config: DeploymentConfig): Promise<void
     emit(id, "registering_node", `Node registered: ${node.id}`)
   } catch (err) {
     emit(id, "failed", "Failed to register node", err instanceof Error ? err.message : String(err))
+    await cleanupFailedDeployment(provider, vpsId, config.provider)
     return
   }
 

@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { z } from "zod"
 import { getImplantByImplantId, listImplantTasks, updateImplantTask } from "@/lib/db/implants"
+import logger from "@/lib/logger"
+
+const log = logger.child({ module: "api/dpanel/implant/result" })
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -52,7 +55,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       received: true
     })
   } catch (error) {
-    console.error('Task result error:', error)
+    log.error({ err: error }, 'Task result error')
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   }
 }
@@ -86,7 +89,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       total: results.length
     })
   } catch (error) {
-    console.error('Get results error:', error)
+    log.error({ err: error }, 'Get results error')
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

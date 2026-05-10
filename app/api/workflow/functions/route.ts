@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readSession } from '@/lib/auth/session'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/functions' })
 
 /**
  * GET /api/workflow/functions - Get all available backend functions
@@ -18,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ functions })
   } catch (error) {
-    console.error('Error getting workflow functions:', error)
+    log.error({ err: error }, 'Error getting workflow functions')
     return NextResponse.json(
       { error: 'Failed to get workflow functions' },
       { status: 500 }

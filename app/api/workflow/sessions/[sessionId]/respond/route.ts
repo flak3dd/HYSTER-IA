@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { WorkflowEngine } from '@/lib/workflow/engine'
 import { readSession } from '@/lib/auth/session'
+import logger from '@/lib/logger'
+
+const log = logger.child({ module: 'api/workflow/sessions/[sessionId]/respond' })
 
 /**
  * POST /api/workflow/sessions/[sessionId]/respond - Handle user response to a workflow step
@@ -37,7 +40,7 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error) {
-    console.error('Error handling user response:', error)
+    log.error({ err: error }, 'Error handling user response')
     return NextResponse.json(
       { error: 'Failed to handle user response' },
       { status: 500 }

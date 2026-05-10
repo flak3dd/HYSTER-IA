@@ -1,18 +1,16 @@
 /**
- * Reasoning-First Chat Orchestrator
+ * Advanced LLM Reasoning Orchestrator
  *
- * This module integrates the Chain-of-Thought and Meta-Cognition engines
- * into the main chat loop, replacing the old "LLM → tools → answer" flow
- * with a structured reasoning pipeline:
+ * Replaces static pre-planning with dynamic, LLM-driven reasoning:
  *
  * 1. RECEIVE  — Accept user message
- * 2. REASON   — Decompose task, assess uncertainty, detect knowledge gaps
- * 3. PLAN     — Generate execution plan with tool ordering and dependencies
- * 4. EXECUTE  — Run tools in planned order with validated arguments
- * 5. VERIFY   — Cross-check results against the plan
- * 6. REPORT   — Format operational response with reasoning trace
+ * 2. REASON   — LLM classifies intent and assesses requirements
+ * 3. EXECUTE  — Iterative LLM tool calling with result feedback
+ * 4. VERIFY   — LLM validates completion against original goal
+ * 5. REPORT   — Synthesize final response with reasoning trace
  *
- * All regex-based logic has been replaced with AI-powered structured extraction.
+ * Key change: No static arg pre-planning. The LLM dynamically decides
+ * tool arguments based on conversation context and previous results.
  */
 
 import { generateObject } from 'ai'
@@ -20,28 +18,35 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { chatComplete, type ChatMessage } from '@/lib/ai/llm'
-import { aiToolDefinitions, runAiTool, AI_TOOL_NAMES, AI_TOOLS } from '@/lib/ai/tools'
+import { aiToolDefinitions, AI_TOOL_NAMES, AI_TOOLS } from '@/lib/ai/tools'
 import type { AgentTool } from '@/lib/ai/tool-types'
-import { extractToolArgs, detectIntent } from '@/lib/ai/argument-extractor'
 import { getExtractorModel } from '@/lib/ai/reasoning/extractor-provider'
-import {
-  DecompositionSchema,
-  ThoughtAnalysisSchema,
-  VerificationSchema,
-} from '@/lib/ai/reasoning/schemas'
 import logger from '@/lib/logger'
 import { sanitizeMessageContent } from '@/lib/ai/robustness'
 import { serverEnv } from '@/lib/env'
+import { runAiToolRobust } from '@/lib/ai/tool-runner'
+import { isToolNeedsInput, formatNeedsInputMessage } from '@/lib/ai/tool-result'
+import {
+  createOpenRouterOpenAICompat,
+  getOpenRouterModelId,
+  hasOpenRouterKey,
+} from '@/lib/ai/openrouter/stack'
 
 const log = logger.child({ module: 'ai-reasoning-orchestrator' })
 
 // ============================================================
-// MODEL PROVIDER - xAI/Grok as primary (Anthropic may have invalid keys)
+// MODEL PROVIDER - Anthropic Primary
 // ============================================================
 
-function getReasoningOrchestratorModel() {
+function getReasoningModel() {
   const env = serverEnv()
-  // Primary: xAI/Grok (most reliably available — Anthropic keys may be invalid/expired)
+  if (hasOpenRouterKey(env)) {
+    const client = createOpenRouterOpenAICompat(env)
+    return client(getOpenRouterModelId(env, 'reasoning_json'))
+  }
+  if (env.ANTHROPIC_API_KEY) {
+    return anthropic(env.ANTHROPIC_MODEL || 'claude-sonnet-4-5-20251001')
+  }
   if (env.XAI_API_KEY) {
     const client = createOpenAI({
       baseURL: env.XAI_BASE_URL,
@@ -49,34 +54,9 @@ function getReasoningOrchestratorModel() {
     })
     return client(env.XAI_MODEL)
   }
-  // Fallback to getExtractorModel for other providers (OpenAI, Anthropic, etc.)
   return getExtractorModel()
 }
 
-// Also provide Anthropic as an option for the extractor when xAI is unavailable
-function getAnthropicFallbackModel() {
-  const env = serverEnv()
-  if (env.ANTHROPIC_API_KEY) {
-    return anthropic(env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001')
-  }
-  return getExtractorModel()
-}
-
-// ============================================================
-// CONTROL CHARACTER SANITIZER
-// The Vercel AI SDK validates message content and rejects
-// control characters (\n, \t, \r, etc.). Tool results often
-// contain JSON with these characters, so we must sanitize
-// before passing content to the AI SDK.
-// Uses the project's existing sanitizeMessageContent from
-// the robustness module.
-// ============================================================
-
-/**
- * Safely stringify a tool result for AI SDK message content.
- * Handles objects by first JSON-stringifying, then sanitizing
- * control characters that would cause validation failures.
- */
 function safeStringifyForContent(value: unknown): string {
   if (typeof value === 'string') {
     return sanitizeMessageContent(value)
@@ -88,56 +68,63 @@ function safeStringifyForContent(value: unknown): string {
   }
 }
 
+// Normalize tool arguments to handle common AI mistakes
+function normalizeToolArguments(args: any): any {
+  if (!args || typeof args !== 'object') return args
+
+  const normalized = { ...args }
+
+  // Handle tags parameter - convert object to array if needed
+  if (args.tags && !Array.isArray(args.tags)) {
+    if (typeof args.tags === 'object') {
+      normalized.tags = Object.values(args.tags).filter((v: any) => typeof v === 'string')
+    } else {
+      normalized.tags = []
+    }
+  }
+
+  // Handle other common array parameters that might receive objects
+  const arrayFields = ['nodeIds', 'profileIds', 'targetIds', 'allowedIPs']
+  arrayFields.forEach(field => {
+    if (args[field] && !Array.isArray(args[field])) {
+      if (typeof args[field] === 'object') {
+        normalized[field] = Object.values(args[field]).filter((v: any) => typeof v === 'string')
+      } else if (typeof args[field] === 'string') {
+        normalized[field] = [args[field]]
+      } else {
+        normalized[field] = []
+      }
+    }
+  })
+
+  return normalized
+}
+
 // ============================================================
 // REASONING SCHEMAS
-// All schemas are designed for OpenAI structured output compatibility:
-// - NO .optional() — use defaults (empty arrays/strings) instead
-// - NO z.record() — use explicit object properties instead
-// - ALL fields have .describe() — required by OpenAI
 // ============================================================
 
 const TaskClassificationSchema = z.object({
   taskType: z.enum([
-    'simple_query',       // Direct question, no tools needed
-    'single_tool',        // One tool call will answer the question
-    'multi_step',         // Multiple tool calls with dependencies
-    'ambiguous',          // Needs clarification before proceeding
-    'destructive',        // Needs confirmation before proceeding
-  ]).describe('Classification of the task type'),
-  confidence: z.number().min(0).max(1).describe('Confidence in classification from 0 to 1'),
+    'simple_query',
+    'action_required',
+    'ambiguous',
+    'destructive',
+  ]).describe('Classification of the task'),
+  confidence: z.number().min(0).max(1).describe('Confidence in classification'),
   reasoning: z.string().describe('Why this classification was chosen'),
-  requiredTools: z.array(z.string()).describe('Tools that will likely be needed. Empty array if no tools needed.'),
-  dependencies: z.array(z.object({
-    tool: z.string().describe('Tool name'),
-    dependsOn: z.array(z.string()).describe('Tools that must run first. Empty array if no dependencies.'),
-  })).describe('Tool execution dependencies. Empty array if no dependencies.'),
-  clarificationNeeded: z.array(z.string()).describe('Questions to ask if ambiguous. Empty array if not ambiguous.'),
-  riskLevel: z.enum(['none', 'low', 'medium', 'high', 'critical']).describe('Risk level of the operation'),
-})
-
-const ExecutionPlanStepSchema = z.object({
-  order: z.number().describe('Execution order (1-based)'),
-  tool: z.string().describe('Tool name to call'),
-  purpose: z.string().describe('Why this tool is needed'),
-  expectedOutput: z.string().describe('What we expect to learn from this tool'),
-  dependsOn: z.array(z.number()).describe('Step numbers this depends on. Empty array if no dependencies.'),
-  argKeys: z.array(z.string()).describe('Names of known argument keys. Empty array if no args known.'),
-  argValues: z.array(z.string()).describe('String values for known arguments (same order as argKeys). Empty array if no args known.'),
-})
-
-const ExecutionPlanSchema = z.object({
-  steps: z.array(ExecutionPlanStepSchema).describe('Ordered execution steps. Empty array if no tools needed.'),
-  estimatedRounds: z.number().min(1).describe('Estimated number of LLM rounds needed'),
-  verificationStrategy: z.string().describe('How to verify the results are correct'),
+  likelyTools: z.array(z.string()).describe('Tools likely needed'),
+  clarificationNeeded: z.array(z.string()).describe('Questions if ambiguous'),
+  riskLevel: z.enum(['none', 'low', 'medium', 'high', 'critical']).describe('Risk level'),
 })
 
 const VerificationResultSchema = z.object({
   isComplete: z.boolean().describe('Whether the task is fully complete'),
   allToolsSucceeded: z.boolean().describe('Whether all tool calls succeeded'),
-  contradictions: z.array(z.string()).describe('Any contradictions found between tool results. Empty array if none.'),
-  missingInformation: z.array(z.string()).describe('Information still needed. Empty array if none.'),
-  confidence: z.number().min(0).max(1).describe('Confidence in the results from 0 to 1'),
-  recommendation: z.enum(['accept', 'retry_failed', 'gather_more', 'ask_user']).describe('What to do next'),
+  contradictions: z.array(z.string()).describe('Any contradictions found'),
+  missingInformation: z.array(z.string()).describe('Information still needed'),
+  confidence: z.number().min(0).max(1).describe('Confidence in results'),
+  recommendation: z.enum(['accept', 'retry_failed', 'gather_more', 'ask_user']).describe('Next step'),
 })
 
 // ============================================================
@@ -145,35 +132,30 @@ const VerificationResultSchema = z.object({
 // ============================================================
 
 export type TaskClassification = z.infer<typeof TaskClassificationSchema>
-export type ExecutionPlan = z.infer<typeof ExecutionPlanSchema>
 export type VerificationResult = z.infer<typeof VerificationResultSchema>
-
-export type ReasoningPhase = 'classify' | 'plan' | 'execute' | 'verify' | 'report'
+export type ReasoningPhase = 'classify' | 'execute' | 'verify' | 'report'
 
 export type ReasoningProgress = {
   phase: ReasoningPhase
   detail: string
   classification?: TaskClassification
-  plan?: ExecutionPlan
   verification?: VerificationResult
 }
 
 export type ReasoningProgressCallback = (progress: ReasoningProgress) => Promise<void> | void
 
 // ============================================================
-// REASONING-FIRST ORCHESTRATOR
+// MAIN ORCHESTRATOR
 // ============================================================
 
 /**
- * Run a reasoning-first chat interaction.
+ * Run a reasoning-first chat interaction using advanced LLM reasoning.
  *
- * Instead of blindly calling the LLM and executing whatever tools it suggests,
- * this orchestrator:
- * 1. Classifies the task type and required tools
- * 2. Creates an execution plan with dependencies
- * 3. Executes tools in the planned order
- * 4. Verifies results against the plan
- * 5. Reports with full reasoning trace
+ * Key architectural changes from previous version:
+ * - No static pre-planning with argKeys/argValues
+ * - LLM dynamically decides tool calls based on context
+ * - Tool results fed back to LLM for next-step reasoning
+ * - Natural parameter chaining (e.g., deploymentId from deploy_node → get_deployment_status)
  */
 export async function runReasoningChat(
   conversationMessages: ChatMessage[],
@@ -192,12 +174,11 @@ export async function runReasoningChat(
     toolResult?: { toolCallId: string; name: string; content: string }
   }>
   classification: TaskClassification
-  plan: ExecutionPlan | null
   verification: VerificationResult | null
   providersUsed: string[]
   modelsUsed: string[]
 }> {
-  const { signal, invokerUid, onProgress, maxToolRounds = 10 } = options
+  const { signal, invokerUid, onProgress, maxToolRounds = 15 } = options
   const providersUsed = new Set<string>()
   const modelsUsed = new Set<string>()
   const resultMessages: Array<{
@@ -212,29 +193,22 @@ export async function runReasoningChat(
   // ============================================================
   await onProgress?.({ phase: 'classify', detail: 'Analyzing your request...' })
 
-  const classification = await classifyTask(
-    userMessage,
-    conversationMessages,
-    signal,
-  )
+  const classification = await classifyTask(userMessage, conversationMessages, signal)
 
   await onProgress?.({
     phase: 'classify',
-    detail: `Task classified as: ${classification.taskType} (confidence: ${Math.round(classification.confidence * 100)}%)`,
+    detail: `Task classified: ${classification.taskType} (${Math.round(classification.confidence * 100)}% confidence)`,
     classification,
   })
 
-  log.info(
-    {
-      taskType: classification.taskType,
-      confidence: classification.confidence,
-      requiredTools: classification.requiredTools,
-      riskLevel: classification.riskLevel,
-    },
-    'Task classified',
-  )
+  log.info({
+    taskType: classification.taskType,
+    confidence: classification.confidence,
+    likelyTools: classification.likelyTools,
+    riskLevel: classification.riskLevel,
+  }, 'Task classified')
 
-  // Handle simple queries — no tools needed, just answer directly
+  // Handle simple queries — no tools needed
   if (classification.taskType === 'simple_query') {
     const llmResult = await chatComplete({
       messages: conversationMessages,
@@ -244,36 +218,27 @@ export async function runReasoningChat(
     if (llmResult._provider) providersUsed.add(llmResult._provider)
     if (llmResult._model) modelsUsed.add(llmResult._model)
 
-    resultMessages.push({
-      role: 'assistant',
-      content: llmResult.content ?? '',
-    })
+    resultMessages.push({ role: 'assistant', content: llmResult.content ?? '' })
 
     return {
       messages: resultMessages,
       classification,
-      plan: null,
       verification: null,
       providersUsed: [...providersUsed],
       modelsUsed: [...modelsUsed],
     }
   }
 
-  // Handle ambiguous requests — ask for clarification
-  if (classification.taskType === 'ambiguous' && classification.clarificationNeeded?.length) {
+  // Handle ambiguous requests
+  if (classification.taskType === 'ambiguous' && classification.clarificationNeeded.length > 0) {
     const clarificationText = `I need some clarification before proceeding:\n\n${
       classification.clarificationNeeded.map((q, i) => `${i + 1}. ${q}`).join('\n')
     }`
-
-    resultMessages.push({
-      role: 'assistant',
-      content: clarificationText,
-    })
+    resultMessages.push({ role: 'assistant', content: clarificationText })
 
     return {
       messages: resultMessages,
       classification,
-      plan: null,
       verification: null,
       providersUsed: [...providersUsed],
       modelsUsed: [...modelsUsed],
@@ -281,223 +246,240 @@ export async function runReasoningChat(
   }
 
   // ============================================================
-  // PHASE 2: PLAN
+  // PHASE 2: DYNAMIC EXECUTION WITH LLM REASONING
   // ============================================================
-  await onProgress?.({ phase: 'plan', detail: 'Creating execution plan...' })
+  await onProgress?.({ phase: 'execute', detail: 'Starting dynamic execution with LLM reasoning...' })
 
-  const plan = await createExecutionPlan(
-    userMessage,
-    classification,
-    conversationMessages,
-    signal,
-  )
+  // Build system prompt for reasoning agent
+  const systemPrompt = buildReasoningSystemPrompt(classification)
 
-  await onProgress?.({
-    phase: 'plan',
-    detail: `Plan created: ${plan.steps.length} steps, ~${plan.estimatedRounds} rounds`,
-    classification,
-    plan,
-  })
+  // Initialize conversation for this reasoning session
+  const reasoningMessages: ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `User request: "${userMessage}"\n\nStart by analyzing what needs to be done, then use the available tools to accomplish the task. After each tool result, decide the next step.` },
+  ]
 
-  log.info(
-    {
-      steps: plan.steps.length,
-      tools: plan.steps.map(s => s.tool),
-      estimatedRounds: plan.estimatedRounds,
-    },
-    'Execution plan created',
-  )
+  const toolExecutions: Array<{ toolName: string; success: boolean; result?: unknown; error?: string }> = []
+  let rounds = 0
 
-  // ============================================================
-  // PHASE 3: EXECUTE
-  // ============================================================
-  await onProgress?.({ phase: 'execute', detail: 'Executing plan...' })
-
-  const toolResults: Map<number, { success: boolean; result: unknown; error?: string }> = new Map()
-  const completedSteps = new Set<number>()
-
-  for (const step of plan.steps) {
-    // Check if dependencies are met
-    if (step.dependsOn?.length) {
-      const unmetDeps = step.dependsOn.filter(dep => !completedSteps.has(dep))
-      if (unmetDeps.length > 0) {
-        log.warn(
-          { step: step.order, unmetDeps, tool: step.tool },
-          'Skipping step due to unmet dependencies',
-        )
-        toolResults.set(step.order, {
-          success: false,
-          result: null,
-          error: `Dependencies not met: steps ${unmetDeps.join(', ')} have not completed`,
-        })
-        continue
-      }
-    }
-
-    // Check if signal is aborted
+  while (rounds < maxToolRounds) {
     if (signal?.aborted) break
+    rounds++
 
     await onProgress?.({
       phase: 'execute',
-      detail: `Step ${step.order}/${plan.steps.length}: Running ${step.tool}...`,
-      classification,
-      plan,
+      detail: `Round ${rounds}: Asking LLM to reason next steps...`,
     })
 
-    // Reconstruct args from argKeys/argValues (OpenAI-compatible schema format)
-    let args: Record<string, unknown> = {}
-    if (step.argKeys?.length && step.argValues?.length) {
-      for (let i = 0; i < step.argKeys.length; i++) {
-        args[step.argKeys[i]] = step.argValues[i] ?? ''
+    // Get tool definitions for this round
+    const tools = aiToolDefinitions()
+
+    // Call LLM with tools to get its reasoning and next action
+    const llmResponse = await chatComplete({
+      messages: reasoningMessages,
+      tools,
+      temperature: 0.2,
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
+    })
+
+    if (llmResponse._provider) providersUsed.add(llmResponse._provider)
+    if (llmResponse._model) modelsUsed.add(llmResponse._model)
+
+    // Check if LLM wants to use a tool
+    const toolCalls = llmResponse.toolCalls
+
+    if (!toolCalls || toolCalls.length === 0) {
+      // No tool call - LLM provided final answer or reasoning
+      const content = llmResponse.content || 'No response from LLM'
+
+      resultMessages.push({
+        role: 'assistant',
+        content: content,
+      })
+
+      reasoningMessages.push({ role: 'assistant', content })
+
+      // Check if task appears complete
+      if (content.toLowerCase().includes('complete') ||
+          content.toLowerCase().includes('finished') ||
+          content.toLowerCase().includes('done') ||
+          content.toLowerCase().includes('deployed') ||
+          toolExecutions.length > 0) {
+        break
       }
-    }
 
-    // Extract additional arguments using AI-powered extraction (no regex)
-    try {
-      const extractionResult = await extractToolArgs(step.tool, args, userMessage, signal)
-      args = extractionResult.args
-    } catch {
-      // If extraction fails, use whatever args we have
-    }
+      // If no tools executed yet and no tool call, we might be stuck
+      if (toolExecutions.length === 0 && rounds > 3) {
+        break
+      }
+    } else {
+      // Process each tool call (typically just one in reasoning mode)
+      for (const call of toolCalls) {
+        const toolName = call.function.name
+        let args: Record<string, unknown> = {}
+        try {
+          args = JSON.parse(call.function.arguments)
+          // Normalize arguments to handle common AI mistakes
+          args = normalizeToolArguments(args)
+        } catch {
+          args = { _raw: call.function.arguments }
+        }
 
-    // Execute the tool
-    const toolCallId = `step-${step.order}-${Date.now()}`
-    try {
-      const toolResult = await runAiTool(step.tool, args, {
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
-        invokerUid,
-      })
+        await onProgress?.({
+          phase: 'execute',
+          detail: `Executing ${toolName}...`,
+        })
 
-      toolResults.set(step.order, { success: true, result: toolResult })
-      completedSteps.add(step.order)
+        log.info({ round: rounds, tool: toolName, args }, 'LLM requested tool execution')
 
-      resultMessages.push({
-        role: 'assistant',
-        content: null,
-        toolCalls: [{ id: toolCallId, name: step.tool, arguments: JSON.stringify(args) }],
-      })
+        // Execute the tool with full robustness (timeout, retry, breaker, validation)
+        const robustResult = await runAiToolRobust(toolName, args, {
+          signal,
+          invokerUid,
+          timeoutMs: 90_000,
+          maxRetries: 1,
+        })
 
-      resultMessages.push({
-        role: 'tool',
-        content: null,
-        toolResult: {
-          toolCallId,
-          name: step.tool,
+        const toolSuccess = robustResult.ok
+        const toolResult = robustResult.result
+        const toolError = robustResult.error
+
+        // Track for result messages
+        const toolCallId = `reasoning-${rounds}-${Date.now()}`
+        resultMessages.push({
+          role: 'assistant',
+          content: null,
+          toolCalls: [{ id: toolCallId, name: toolName, arguments: call.function.arguments }],
+        })
+        resultMessages.push({
+          role: 'tool',
+          content: null,
+          toolResult: {
+            toolCallId,
+            name: toolName,
+            content: safeStringifyForContent(toolResult),
+          },
+        })
+
+        toolExecutions.push({ toolName, success: toolSuccess, result: toolResult, error: toolError })
+
+        log.info(
+          {
+            round: rounds,
+            tool: toolName,
+            success: toolSuccess,
+            attempts: robustResult.attempts,
+            durationMs: robustResult.durationMs,
+            shortCircuited: robustResult.shortCircuited,
+            needsInput: robustResult.needsInput,
+          },
+          'Tool execution completed',
+        )
+
+        // Generic detection: any tool that returns a structured "needs input"
+        // response should pause the assistant and ask the user for clarification
+        // instead of continuing to hallucinate parameters.
+        if (robustResult.needsInput && isToolNeedsInput(toolResult)) {
+          resultMessages.push({
+            role: 'assistant',
+            content: formatNeedsInputMessage(toolResult),
+          })
+          return {
+            messages: resultMessages,
+            classification,
+            verification: null,
+            providersUsed: [...providersUsed],
+            modelsUsed: [...modelsUsed],
+          }
+        }
+
+        // If the circuit breaker rejected the call, surface a clear message to
+        // the LLM so it can pick a different tool instead of looping.
+        if (robustResult.shortCircuited) {
+          reasoningMessages.push({
+            role: 'assistant',
+            content: llmResponse.content || '',
+            tool_calls: toolCalls,
+          })
+          reasoningMessages.push({
+            role: 'tool',
+            content: safeStringifyForContent({
+              error: toolError,
+              hint: `Tool ${toolName} is temporarily unavailable due to repeated failures. Try a different approach or wait before retrying.`,
+            }),
+          })
+          continue
+        }
+
+        // Add assistant's tool request to reasoning context
+        reasoningMessages.push({
+          role: 'assistant',
+          content: llmResponse.content || '',
+          tool_calls: toolCalls,
+        })
+
+        // Add tool result to reasoning context - CRITICAL for parameter chaining
+        reasoningMessages.push({
+          role: 'tool',
           content: safeStringifyForContent(toolResult),
-        },
+        })
+      }
+
+      // Add summary prompt to help LLM decide next step
+      reasoningMessages.push({
+        role: 'user',
+        content: `Based on the tool results above, decide: continue with another tool, or provide final response if complete.`,
       })
-
-      log.info(
-        { step: step.order, tool: step.tool, success: true },
-        'Tool executed successfully',
-      )
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err)
-      toolResults.set(step.order, { success: false, result: null, error: errorMsg })
-      completedSteps.add(step.order) // Mark as completed even if failed (to not block dependents)
-
-      resultMessages.push({
-        role: 'assistant',
-        content: null,
-        toolCalls: [{ id: toolCallId, name: step.tool, arguments: JSON.stringify(args) }],
-      })
-
-      resultMessages.push({
-        role: 'tool',
-        content: null,
-        toolResult: {
-          toolCallId,
-          name: step.tool,
-          content: safeStringifyForContent({ error: errorMsg }),
-        },
-      })
-
-      log.warn(
-        { step: step.order, tool: step.tool, error: errorMsg },
-        'Tool execution failed',
-      )
     }
   }
 
   // ============================================================
-  // PHASE 4: VERIFY
+  // PHASE 3: VERIFY
   // ============================================================
-  await onProgress?.({ phase: 'verify', detail: 'Verifying results...' })
+  await onProgress?.({ phase: 'verify', detail: 'Verifying completion...' })
 
-  const verification = await verifyResults(
+  const verification = await verifyWithLLM(
     userMessage,
-    plan,
-    toolResults,
+    toolExecutions,
+    reasoningMessages,
     signal,
   )
 
   await onProgress?.({
     phase: 'verify',
-    detail: `Verification: ${verification.recommendation} (confidence: ${Math.round(verification.confidence * 100)}%)`,
-    classification,
-    plan,
+    detail: `Verification: ${verification.recommendation} (${Math.round(verification.confidence * 100)}% confidence)`,
     verification,
   })
 
   // ============================================================
-  // PHASE 5: REPORT
+  // PHASE 4: REPORT
   // ============================================================
-  await onProgress?.({ phase: 'report', detail: 'Generating response...' })
+  await onProgress?.({ phase: 'report', detail: 'Generating final response...' })
 
-  // Build the final response using the LLM with all tool results as context
-  const toolResultsSummary = Array.from(toolResults.entries())
-    .map(([step, result]) => {
-      const stepInfo = plan.steps[step - 1]
-      return result.success
-        ? `Step ${step} (${stepInfo?.tool ?? 'unknown'}): SUCCESS — ${safeStringifyForContent(result.result).slice(0, 500)}`
-        : `Step ${step} (${stepInfo?.tool ?? 'unknown'}): FAILED — ${result.error}`
-    })
-    .join('\n')
-
-  const reportPrompt = `Based on the execution results below, provide a clear, actionable response to the user's request.
-
-User's request: "${userMessage}"
-
-Execution plan: ${plan.steps.map(s => `${s.order}. ${s.tool} — ${s.purpose}`).join('\n')}
-
-Results:
-${toolResultsSummary}
-
-Verification: ${verification.isComplete ? 'COMPLETE' : 'INCOMPLETE'} — ${verification.recommendation}
-${verification.contradictions.length > 0 ? `Contradictions: ${verification.contradictions.join(', ')}` : ''}
-${verification.missingInformation.length > 0 ? `Missing info: ${verification.missingInformation.join(', ')}` : ''}
-
-Format your response with these sections:
-- Actions taken: What you actually did
-- Errors: Any failures (or "None")
-- Requirements: Any missing inputs or approvals (or "None")
-- Result: The actual outcome with specific data
-- Completion status: COMPLETE/PARTIAL/BLOCKED/FAILED with percentage
-- Next steps: What to do next (be specific)`
-
-  const reportResult = await chatComplete({
-    messages: [
-      ...conversationMessages,
-      { role: 'user', content: sanitizeMessageContent(userMessage) },
-      { role: 'assistant', content: sanitizeMessageContent(`I've analyzed your request and executed the following plan:\n${plan.steps.map(s => `${s.order}. ${s.tool} — ${s.purpose}`).join('\n')}\n\nNow synthesizing the results...`) },
-      { role: 'user', content: sanitizeMessageContent(reportPrompt) },
-    ],
-    temperature: 0.3,
+  // Generate final operational response
+  const finalResponse = await generateFinalResponse(
+    userMessage,
+    toolExecutions,
+    verification,
+    reasoningMessages,
     signal,
-  })
+  )
 
-  if (reportResult._provider) providersUsed.add(reportResult._provider)
-  if (reportResult._model) modelsUsed.add(reportResult._model)
+  if (finalResponse._provider) providersUsed.add(finalResponse._provider)
+  if (finalResponse._model) modelsUsed.add(finalResponse._model)
 
-  resultMessages.push({
-    role: 'assistant',
-    content: reportResult.content ?? '',
-  })
+  // Only add if we haven't already captured a final assistant message
+  const lastResultMsg = resultMessages[resultMessages.length - 1]
+  if (!lastResultMsg || lastResultMsg.role !== 'assistant' || !lastResultMsg.content) {
+    resultMessages.push({
+      role: 'assistant',
+      content: finalResponse.content,
+    })
+  }
 
   return {
     messages: resultMessages,
     classification,
-    plan,
     verification,
     providersUsed: [...providersUsed],
     modelsUsed: [...modelsUsed],
@@ -505,8 +487,47 @@ Format your response with these sections:
 }
 
 // ============================================================
-// HELPER: CLASSIFY TASK
+// HELPER FUNCTIONS
 // ============================================================
+
+function buildReasoningSystemPrompt(classification: TaskClassification): string {
+  const toolDescriptions = Object.entries(AI_TOOLS as Record<string, AgentTool<unknown, unknown>>)
+    .map(([name, tool]) => `- ${name}: ${tool.description}`)
+    .join('\n')
+
+  return `You are an expert AI assistant managing Hysteria2 C2 infrastructure.
+
+AVAILABLE TOOLS:
+${toolDescriptions}
+
+TASK CONTEXT:
+- Task type: ${classification.taskType}
+- Risk level: ${classification.riskLevel}
+- Likely tools needed: ${classification.likelyTools.join(', ') || 'unknown'}
+
+REASONING INSTRUCTIONS:
+1. Analyze the user's request and available tools
+2. Determine the sequence of tool calls needed to accomplish the task
+3. When calling tools, extract arguments from the user's request or previous tool results
+4. For dependent operations (e.g., deploy followed by status check):
+   - Call the first tool (e.g., deploy_node)
+   - Wait for its result
+   - Extract key values (e.g., deploymentId) from the result
+   - Use those values in subsequent tool calls (e.g., get_deployment_status with deploymentId)
+5. Continue until the task is complete
+6. Provide a clear summary of what was accomplished
+
+PARAMETER CHAINING GUIDE:
+- deploy_node returns: { deploymentId, status, message, defaultsApplied }
+- get_deployment_status requires: { deploymentId }
+- Always extract deploymentId from deploy_node result before calling get_deployment_status
+
+RULES:
+- Only call tools when necessary
+- Use exact tool names and valid arguments
+- Wait for tool results before deciding next steps
+- If a tool fails, decide whether to retry, try alternative, or report failure`
+}
 
 async function classifyTask(
   userMessage: string,
@@ -515,149 +536,168 @@ async function classifyTask(
 ): Promise<TaskClassification> {
   try {
     const recentContext = conversationMessages
-      .slice(-6)
-      .map(m => `${m.role}: ${sanitizeMessageContent(m.content?.slice(0, 200) ?? '')}`)
-      .join('\\n')
+      .slice(-4)
+      .map(m => `${m.role}: ${m.content?.slice(0, 150) ?? ''}`)
+      .join('\n')
 
     const result = await generateObject({
-      model: getReasoningOrchestratorModel(),
+      model: getReasoningModel(),
       schema: TaskClassificationSchema,
       system: `You are a task classifier for an AI assistant that manages Hysteria2 C2 infrastructure.
+
 Available tools: ${AI_TOOL_NAMES.join(', ')}
 
-Classify the user's request into one of these categories:
-- simple_query: Direct question, no tools needed (e.g., "what is Hysteria2?")
-- single_tool: One tool call will answer it (e.g., "list my nodes")
-- multi_step: Multiple tools with dependencies (e.g., "deploy a node and generate a payload")
-- ambiguous: Needs clarification (e.g., "deploy a node" without specifying provider)
-- destructive: Destructive action needing confirmation (e.g., "delete all nodes")
+Classify the user's request:
+- simple_query: Direct question, no tools needed
+- action_required: Requires tool calls to complete (deploy, configure, query, etc.)
+- ambiguous: Missing required information (provider, region, etc.)
+- destructive: Destructive action needing confirmation
 
 Rules:
-- If provider/region/size are not specified for deployment, classify as "ambiguous"
-- If the request involves deletion, stopping, or wiping, classify as "destructive"
-- Be conservative — when in doubt, prefer higher specificity`,
-      prompt: sanitizeMessageContent(`Recent conversation:\n${recentContext}\n\nUser's latest message: "${userMessage}"`),
+- If provider/region not specified for deployment, classify as ambiguous
+- Deletion/stopping/wiping = destructive
+- Prefer action_required when tools might help`,
+      prompt: `Recent conversation:\n${recentContext}\n\nUser's latest message: "${userMessage}"`,
       temperature: 0,
       abortSignal: signal,
     })
 
     return result.object
   } catch (err) {
-    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'Task classification failed, defaulting to single_tool')
+    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'Classification failed, using fallback')
     return {
-      taskType: 'single_tool',
-      confidence: 0.5,
-      reasoning: 'Classification failed, defaulting to single tool assumption',
-      requiredTools: [],
-      dependencies: [],
+      taskType: 'action_required',
+      confidence: 0.7,
+      reasoning: 'Classification failed, assuming action required',
+      likelyTools: [],
       clarificationNeeded: [],
       riskLevel: 'none',
     }
   }
 }
 
-// ============================================================
-// HELPER: CREATE EXECUTION PLAN
-// ============================================================
-
-async function createExecutionPlan(
+async function verifyWithLLM(
   userMessage: string,
-  classification: TaskClassification,
-  conversationMessages: ChatMessage[],
+  toolExecutions: Array<{ toolName: string; success: boolean; result?: unknown; error?: string }>,
+  reasoningMessages: Array<{ role: string; content: string }>,
   signal?: AbortSignal,
-): Promise<ExecutionPlan> {
+): Promise<VerificationResult> {
   try {
+    const executionSummary = toolExecutions
+      .map((t, i) => `${i + 1}. ${t.toolName}: ${t.success ? 'SUCCESS' : `FAILED: ${t.error}`}`)
+      .join('\n')
+
     const result = await generateObject({
-      model: getReasoningOrchestratorModel(),
-      schema: ExecutionPlanSchema,
-      system: `You are an execution planner for an AI assistant that manages Hysteria2 C2 infrastructure.
-Available tools: ${AI_TOOL_NAMES.join(', ')}
+      model: getReasoningModel(),
+      schema: VerificationResultSchema,
+      system: 'You verify task completion. Analyze execution results against the original goal.',
+      prompt: `Original request: "${userMessage}"
 
-Create a step-by-step execution plan for the user's request.
-- Each step should call exactly one tool
-- Specify dependencies between steps (which steps must complete first)
-- Include pre-filled arguments where the user has specified them
-- For deployment operations, ALWAYS include a check_prerequisites step first
-- For multi-step operations, include a generate_plan step if the task is complex
-- Estimate the number of LLM rounds needed
-- Describe a verification strategy to confirm the results are correct`,
-      prompt: sanitizeMessageContent(`User's request: "${userMessage}"
+Tool executions:
+${executionSummary}
 
-Task classification: ${classification.taskType}
-Required tools: ${classification.requiredTools.join(', ')}
-Risk level: ${classification.riskLevel}
-Reasoning: ${classification.reasoning}`),
+Was the task completed successfully? Are there any contradictions or missing steps?`,
       temperature: 0,
       abortSignal: signal,
     })
 
     return result.object
   } catch (err) {
-    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'Plan creation failed, using simple fallback')
+    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'LLM verification failed')
 
-    // Fallback: create a simple plan with the required tools
+    const successful = toolExecutions.filter(t => t.success).length
+    const total = toolExecutions.length
+
     return {
-      steps: classification.requiredTools.map((tool, index) => ({
-        order: index + 1,
-        tool,
-        purpose: `Execute ${tool} as part of the requested operation`,
-        expectedOutput: `Result from ${tool}`,
-        dependsOn: index > 0 ? [index] : [] as number[],
-        argKeys: [] as string[],
-        argValues: [] as string[],
-      })),
-      estimatedRounds: classification.requiredTools.length,
-      verificationStrategy: 'Check that all tool calls returned successful results',
+      isComplete: successful === total && total > 0,
+      allToolsSucceeded: successful === total,
+      contradictions: [],
+      missingInformation: [],
+      confidence: total > 0 ? successful / total : 0,
+      recommendation: successful === total ? 'accept' : 'retry_failed',
     }
   }
 }
 
-// ============================================================
-// HELPER: VERIFY RESULTS
-// ============================================================
-
-async function verifyResults(
+async function generateFinalResponse(
   userMessage: string,
-  plan: ExecutionPlan,
-  toolResults: Map<number, { success: boolean; result: unknown; error?: string }>,
+  toolExecutions: Array<{ toolName: string; success: boolean; result?: unknown; error?: string }>,
+  verification: VerificationResult,
+  reasoningMessages: ChatMessage[],
   signal?: AbortSignal,
-): Promise<VerificationResult> {
+): Promise<{ content: string; _provider?: string; _model?: string }> {
   try {
-    const resultsSummary = Array.from(toolResults.entries())
-      .map(([step, result]) => `Step ${step}: ${result.success ? 'SUCCESS' : `FAILED: ${result.error}`}`)
-      .join('\n')
+    // Build execution summary
+    const actions = toolExecutions.map(t =>
+      t.success
+        ? `${t.toolName}: SUCCESS`
+        : `${t.toolName}: FAILED - ${t.error}`,
+    )
 
-    const result = await generateObject({
-      model: getReasoningOrchestratorModel(),
-      schema: VerificationResultSchema,
-      system: `You are a results verifier for an AI assistant. Given the original request, the execution plan, and the tool results, verify whether the task is complete and the results are correct.`,
-      prompt: `Original request: "${userMessage}"
+    const results = toolExecutions
+      .filter(t => t.success && t.result)
+      .map(t => {
+        const resultStr = typeof t.result === 'object'
+          ? JSON.stringify(t.result).slice(0, 300)
+          : String(t.result).slice(0, 300)
+        return `${t.toolName}: ${resultStr}`
+      })
+      .join('\n\n')
 
-Execution plan:
-${plan.steps.map(s => `${s.order}. ${s.tool} — ${s.purpose}`).join('\n')}
+    const completionStatus = verification.isComplete
+      ? 'COMPLETE'
+      : verification.allToolsSucceeded
+        ? 'PARTIAL'
+        : 'FAILED'
+
+    const systemPrompt = `You are an AI assistant reporting on completed infrastructure operations.
+
+Format your response with:
+- Actions taken: List of what was done
+- Errors: Any failures (or "None")
+- Requirements: Any missing inputs (or "None")
+- Result: The actual outcome with specific data
+- Completion status: ${completionStatus}
+- Next steps: What to do next
+
+Be specific, actionable, and professional.`
+
+    const userPrompt = `Original request: "${userMessage}"
+
+Actions executed:
+${actions.join('\n') || 'None'}
 
 Results:
-${resultsSummary}
+${results || 'No results'}
 
-Verify the results. Are all steps complete? Are there contradictions? Is there missing information?`,
-      temperature: 0,
-      abortSignal: signal,
+Verification: ${verification.isComplete ? 'COMPLETE' : 'INCOMPLETE'} - ${verification.recommendation}
+${verification.missingInformation.length > 0 ? `Missing: ${verification.missingInformation.join(', ')}` : ''}
+
+Provide a clear operational response.`
+
+    const result = await chatComplete({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.3,
+      signal,
     })
 
-    return result.object
-  } catch (err) {
-    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'Verification failed, using simple check')
-
-    const totalSteps = plan.steps.length
-    const successfulSteps = Array.from(toolResults.values()).filter(r => r.success).length
-
     return {
-      isComplete: successfulSteps === totalSteps,
-      allToolsSucceeded: successfulSteps === totalSteps,
-      contradictions: [],
-      missingInformation: [],
-      confidence: totalSteps > 0 ? successfulSteps / totalSteps : 0,
-      recommendation: successfulSteps === totalSteps ? 'accept' : 'retry_failed',
+      content: result.content || 'No response generated',
+      _provider: result._provider,
+      _model: result._model,
+    }
+  } catch (err) {
+    log.warn({ error: err instanceof Error ? err.message : String(err) }, 'Final response generation failed')
+
+    // Fallback summary
+    const successCount = toolExecutions.filter(t => t.success).length
+    return {
+      content: `Actions: ${successCount}/${toolExecutions.length} tools executed successfully.
+Verification: ${verification.recommendation}
+Completion: ${verification.isComplete ? 'COMPLETE' : 'INCOMPLETE'}`,
     }
   }
 }
