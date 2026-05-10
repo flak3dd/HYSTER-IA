@@ -1,6 +1,8 @@
 import { chatComplete, type ChatMessage } from "@/lib/ai/llm"
 import { aiToolDefinitions, runAiTool, AI_TOOL_NAMES, AI_TOOLS } from "@/lib/ai/tools"
 import type { AgentTool } from "@/lib/ai/tool-types"
+import { runAiToolRobust } from "@/lib/ai/tool-runner"
+import { isToolNeedsInput, formatNeedsInputMessage } from "@/lib/ai/tool-result"
 import { appendMessages, getConversationForUser } from "@/lib/ai/conversations"
 import type { AiMessage } from "@/lib/ai/types"
 import { buildSystemPrompt, Role, buildDynamicContext } from "@/lib/ai/system-prompt"
@@ -43,6 +45,7 @@ type RunChatOptions = {
   clientMessageId?: string
   requestId?: string
   timeoutMs?: number
+  provider?: "openrouter" | "anthropic" | "openai" | "google" | "azure" | "legacy" | "xai" | "grok"
 }
 
 type ToolExecutionSummary = {
@@ -248,13 +251,48 @@ function formatOperationalResponse(options: {
 function parseToolArguments(rawArguments: string): { ok: true; value: unknown } | { ok: false; error: string } {
   if (!rawArguments) return { ok: true, value: {} }
   try {
-    return { ok: true, value: JSON.parse(rawArguments) }
+    const parsed = JSON.parse(rawArguments)
+    // Normalize arguments to handle common AI mistakes
+    const normalized = normalizeToolArguments(parsed)
+    return { ok: true, value: normalized }
   } catch (err) {
     return {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     }
   }
+}
+
+// Normalize tool arguments to handle common AI mistakes
+function normalizeToolArguments(args: any): any {
+  if (!args || typeof args !== 'object') return args
+
+  const normalized = { ...args }
+
+  // Handle tags parameter - convert object to array if needed
+  if (args.tags && !Array.isArray(args.tags)) {
+    if (typeof args.tags === 'object') {
+      normalized.tags = Object.values(args.tags).filter((v: any) => typeof v === 'string')
+    } else {
+      normalized.tags = []
+    }
+  }
+
+  // Handle other common array parameters that might receive objects
+  const arrayFields = ['nodeIds', 'profileIds', 'targetIds', 'allowedIPs']
+  arrayFields.forEach(field => {
+    if (args[field] && !Array.isArray(args[field])) {
+      if (typeof args[field] === 'object') {
+        normalized[field] = Object.values(args[field]).filter((v: any) => typeof v === 'string')
+      } else if (typeof args[field] === 'string') {
+        normalized[field] = [args[field]]
+      } else {
+        normalized[field] = []
+      }
+    }
+  })
+
+  return normalized
 }
 
 function validateRequiredParameters(toolName: string, args: unknown): { ok: true } | { ok: false; error: string; missing: string[] } {
@@ -629,6 +667,7 @@ export async function runChat(
             useShadowGrok: true,
             enableFallback: true,
             signal: turnSignal,
+            preferredProvider: options.provider,
           })
           if (result._provider) providersUsed.add(result._provider)
           if (result._model) modelsUsed.add(result._model)
@@ -749,11 +788,16 @@ export async function runChat(
             let retrySuccess = false
 
             async function executeTool(args: unknown): Promise<string> {
-              const toolResult = await runAiTool(call.function.name, args, {
+              const robustResult = await runAiToolRobust(call.function.name, args, {
                 signal: toolSignal(turnSignal, 90_000),
                 invokerUid,
+                timeoutMs: 90_000,
+                maxRetries: 1,
               })
-              return JSON.stringify(toolResult)
+              if (!robustResult.ok) {
+                throw new Error(robustResult.error || "tool execution failed")
+              }
+              return JSON.stringify(robustResult.result)
             }
 
             if (!parsedArgs.ok) {

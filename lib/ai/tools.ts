@@ -1,6 +1,7 @@
 import { z } from "zod"
 import type { AgentTool, AgentToolContext } from "@/lib/ai/tool-types"
 import { chatComplete } from "@/lib/ai/llm"
+import { needsInput, TOOL_ERROR_CODES } from "@/lib/ai/tool-result"
 import { listNodes, getNodeById, createNode, updateNode, deleteNode } from "@/lib/db/nodes"
 import { getProfileById, resolveProfileConfig } from "@/lib/db/profiles"
 import { sshExec } from "@/lib/deploy/ssh"
@@ -28,6 +29,23 @@ import { buildClientYamlObject, renderClientYaml, renderClientUri, renderSubscri
 import { listImplants, getImplantStats } from "@/lib/db/implants"
 import { countNodes } from "@/lib/db/nodes"
 import { countCredentials } from "@/lib/db/credentials"
+import {
+  analyzeIpAddress,
+  analyzeDomain,
+  analyzeUrl,
+  analyzeFileHash,
+} from "@/lib/threatintel/virustotal"
+import {
+  checkMalwareBazaarHash,
+  checkUrlhausUrl,
+  checkThreatFoxIoc,
+} from "@/lib/threatintel/abusech"
+import {
+  analyzeOtxIpv4,
+  analyzeOtxDomain,
+  analyzeOtxUrl,
+  analyzeOtxFileHash,
+} from "@/lib/threatintel/alienvault"
 
 /* ------------------------------------------------------------------ */
 /*  Tool: generate_config                                             */
@@ -60,7 +78,7 @@ Key Hysteria2 server config fields:
 - tls: { cert: path, key: path } OR acme: { domains: [...], email: ... }
 - obfs: { type: "salamander", salamander: { password: "..." } }
 - bandwidth: { up: "1 gbps", down: "1 gbps" }
-- masquerade: { type: "proxy", proxy: { url: "https://example.com", rewriteHost: true } }
+- masquerade: { type: "proxy", proxy: { url: "https://<your-masquerade-target>", rewriteHost: true } }
 - trafficStats: { listen: ":25000", secret: "..." }
 - auth: { type: "http", http: { url: "http://panel-url/api/hysteria/auth", insecure: false } }
 
@@ -113,9 +131,26 @@ export const generateConfigTool: AgentTool<
   async run(input, ctx) {
     const description = input.description?.trim()
     if (!description) {
+      // Return a structured error that the reasoning orchestrator can detect
       return {
-        yaml: "# Error: No description provided.\n# Please describe what kind of Hysteria2 config you want (e.g., obfuscated, high-throughput, minimal).",
-      }
+        yaml: "",
+        ...needsInput(
+          "Please describe what kind of Hysteria2 config you want (e.g., obfuscated, high-throughput, minimal, stealth with masquerade).",
+          {
+            code: TOOL_ERROR_CODES.MISSING_DESCRIPTION,
+            missingFields: ["description"],
+            prompt: {
+              question: "What kind of Hysteria2 config do you want?",
+              options: [
+                { label: "Stealth", value: "stealth obfuscated config on port 443 with masquerade", description: "Salamander obfuscation + masquerade target for OPSEC" },
+                { label: "High-throughput", value: "high-throughput config with 1Gbps bandwidth", description: "Tuned for maximum throughput" },
+                { label: "Minimal", value: "minimal config with defaults", description: "Bare-minimum config to get the server running" },
+                { label: "Production ACME", value: "production config with ACME TLS and bandwidth limits", description: "ACME-issued cert + sane bandwidth limits" },
+              ],
+            },
+          },
+        ),
+      } as any
     }
 
     // Generate config
@@ -689,8 +724,34 @@ export const generatePayloadTool: AgentTool<
     required: ["description"],
   },
   async run(input, ctx) {
+    const description = input.description?.trim()
+    if (!description) {
+      // Return a structured error that the reasoning orchestrator can detect
+      return {
+        buildId: "",
+        preview: {} as any,
+        explanation: "",
+        ...needsInput(
+          "Please describe the payload you want to build (e.g., Windows EXE with medium obfuscation, or Linux ELF with AMSI bypass). Include platform, format, and any specific features needed.",
+          {
+            code: TOOL_ERROR_CODES.MISSING_DESCRIPTION,
+            missingFields: ["description"],
+            prompt: {
+              question: "What kind of payload do you want to build?",
+              options: [
+                { label: "Windows EXE", value: "Windows x64 EXE with medium obfuscation, scheduled-task persistence, AMSI bypass", description: "Stealth Windows beacon" },
+                { label: "Linux ELF", value: "Linux x64 ELF with light obfuscation, systemd persistence", description: "Linux beacon for servers" },
+                { label: "PowerShell", value: "PowerShell script with AMSI bypass and base64 encoding", description: "In-memory PowerShell payload" },
+                { label: "Python", value: "Python script with light obfuscation for cross-platform", description: "Cross-platform script payload" },
+              ],
+            },
+          },
+        ),
+      } as any
+    }
+
     const { config, explanation } = await generatePayloadFromDescription(
-      input.description,
+      description,
       ctx.invokerUid || 'system'
     )
     const build = await createPayloadBuild(config, ctx.invokerUid || 'system')
@@ -850,6 +911,7 @@ const DeployNodeInput = z.object({
   port: z.coerce.number().int().min(1).max(65535).default(443).describe("Port to listen on"),
   tags: z.array(z.string().max(40)).default([]).describe("Tags for the node"),
   panelUrl: z.string().url().optional().describe("Panel URL for auth backend (auto-detected)"),
+  cloudflareTunnelUrl: z.string().url().optional().describe("Public Cloudflare Tunnel URL when the panel runs locally (e.g. https://panel.anzstaff-club.au)"),
   bandwidthUp: z.string().optional().describe("Upload bandwidth limit"),
   bandwidthDown: z.string().optional().describe("Download bandwidth limit"),
   resourceGroup: z.string().optional().describe("Azure: existing resource group name (avoids permission issues)"),
@@ -895,6 +957,7 @@ export const deployNodeTool: AgentTool<
       port: { type: "integer", default: 443, description: "Port (default: 443)" },
       tags: { type: "array", items: { type: "string" }, description: "Tags for organization" },
       panelUrl: { type: "string", description: "Public panel URL for auth backend — MUST be a publicly reachable URL, never localhost or 127.0.0.1 (auto-detected from env)" },
+      cloudflareTunnelUrl: { type: "string", description: "Public Cloudflare Tunnel URL override when panel runs locally (e.g. https://panel.anzstaff-club.au)" },
       bandwidthUp: { type: "string", description: "Upload bandwidth (e.g., 1 gbps)" },
       bandwidthDown: { type: "string", description: "Download bandwidth (e.g., 10 gbps)" },
       resourceGroup: { type: "string", description: "MANDATORY for Azure: existing resource group name to avoid permission issues — you MUST provide this when provider is azure" },
@@ -908,6 +971,32 @@ export const deployNodeTool: AgentTool<
     let provider = input.provider
     if (!provider || !validProviders.includes(provider)) {
       provider = "hetzner"
+    }
+
+    // Azure needs an existing resource group — its service principal cannot
+    // create or list groups, so we MUST ask the user instead of guessing.
+    if (provider === "azure" && !input.resourceGroup?.trim()) {
+      return {
+        deploymentId: "",
+        status: "needs_input",
+        message: "Azure deployment requires an existing resource group.",
+        defaultsApplied: {},
+        ...needsInput(
+          "Azure deployments require an existing resource group. Please provide the resourceGroup name.",
+          {
+            code: TOOL_ERROR_CODES.MISSING_REQUIRED_INPUT,
+            missingFields: ["resourceGroup"],
+            prompt: {
+              question: "Which Azure resource group should I deploy into?",
+              options: [
+                { label: "hysteria-rg-eastus", value: "hysteria-rg-eastus", description: "East US (Virginia)" },
+                { label: "hysteria-rg-westeurope", value: "hysteria-rg-westeurope", description: "West Europe (Amsterdam)" },
+                { label: "hysteria-rg-australiaeast", value: "hysteria-rg-australiaeast", description: "Australia East (Sydney)" },
+              ],
+            },
+          },
+        ),
+      } as any
     }
 
     const defaults = DEPLOY_DEFAULTS[provider]
@@ -935,6 +1024,7 @@ export const deployNodeTool: AgentTool<
       port: input.port,
       tags: input.tags,
       panelUrl,
+      cloudflareTunnelUrl: input.cloudflareTunnelUrl,
       bandwidthUp: input.bandwidthUp,
       bandwidthDown: input.bandwidthDown,
       resourceGroup: input.resourceGroup,
@@ -1937,31 +2027,132 @@ export const threatIntelligenceTool: AgentTool<
     }> = []
     const recommendations: string[] = []
 
-    const sourcesToQuery = input.sources.includes("all") 
-      ? ["virustotal", "abusech", "otx"] 
+    const sourcesToQuery = input.sources.includes("all")
+      ? ["virustotal", "abusech", "otx"]
       : input.sources
 
-    // This is a mock implementation - in production, you'd integrate with actual threat intelligence APIs
+    let totalDetections = 0
+    let maliciousCount = 0
+    let confidenceSum = 0
+    let queriedCount = 0
+
     for (const source of sourcesToQuery) {
-      details.push({
-        source,
-        result: "Threat intelligence integration requires API keys for production use",
-        severity: "unknown"
-      })
+      try {
+        if (source === "virustotal") {
+          let result: { malicious: boolean; detectionPercentage: number } | null = null
+          if (input.iocType === "ip") {
+            result = await analyzeIpAddress(input.iocValue)
+          } else if (input.iocType === "domain") {
+            result = await analyzeDomain(input.iocValue)
+          } else if (input.iocType === "url") {
+            result = await analyzeUrl(input.iocValue)
+          } else if (input.iocType === "hash") {
+            result = await analyzeFileHash(input.iocValue)
+          }
+          if (result) {
+            queriedCount++
+            const detections = result.detectionPercentage
+            totalDetections += detections
+            confidenceSum += detections
+            if (result.malicious) maliciousCount++
+            const severity: "malicious" | "suspicious" | "clean" | "unknown" =
+              detections >= 10 ? "malicious" : detections > 0 ? "suspicious" : "clean"
+            details.push({
+              source: "virustotal",
+              result: `${detections}% detection rate (${result.malicious ? "malicious" : "clean"})`,
+              severity,
+            })
+          }
+        } else if (source === "abusech") {
+          if (input.iocType === "hash") {
+            const { malicious, samples } = await checkMalwareBazaarHash(input.iocValue)
+            queriedCount++
+            if (malicious) maliciousCount++
+            totalDetections += samples.length
+            confidenceSum += samples.length > 0 ? 50 : 0
+            details.push({
+              source: "abusech",
+              result: malicious
+                ? `Found in MalwareBazaar (${samples.length} sample(s))`
+                : "Not found in MalwareBazaar",
+              severity: malicious ? "malicious" : "clean",
+            })
+          } else if (input.iocType === "url") {
+            const { malicious, urls } = await checkUrlhausUrl(input.iocValue)
+            queriedCount++
+            if (malicious) maliciousCount++
+            totalDetections += urls.length
+            confidenceSum += urls.length > 0 ? 50 : 0
+            details.push({
+              source: "abusech",
+              result: malicious
+                ? `Found in URLhaus (${urls.length} record(s))`
+                : "Not found in URLhaus",
+              severity: malicious ? "malicious" : "clean",
+            })
+          } else {
+            const { threat, indicators } = await checkThreatFoxIoc(input.iocValue)
+            queriedCount++
+            if (threat) maliciousCount++
+            totalDetections += indicators.length
+            confidenceSum += indicators.length > 0 ? 40 : 0
+            details.push({
+              source: "abusech",
+              result: threat
+                ? `Found in ThreatFox (${indicators.length} indicator(s))`
+                : "Not found in ThreatFox",
+              severity: threat ? "malicious" : "clean",
+            })
+          }
+        } else if (source === "otx") {
+          let result: { malicious: boolean; pulseCount: number; reputation?: number } | null = null
+          if (input.iocType === "ip") {
+            result = await analyzeOtxIpv4(input.iocValue)
+          } else if (input.iocType === "domain") {
+            result = await analyzeOtxDomain(input.iocValue)
+          } else if (input.iocType === "url") {
+            result = await analyzeOtxUrl(input.iocValue)
+          } else if (input.iocType === "hash") {
+            result = await analyzeOtxFileHash(input.iocValue)
+          }
+          if (result) {
+            queriedCount++
+            const detections = result.pulseCount
+            totalDetections += detections
+            confidenceSum += result.reputation !== undefined ? Math.max(0, 100 - result.reputation) / 2 : detections > 0 ? 30 : 0
+            if (result.malicious) maliciousCount++
+            const severity: "malicious" | "suspicious" | "clean" | "unknown" =
+              result.malicious ? "malicious" : detections > 0 ? "suspicious" : "clean"
+            details.push({
+              source: "otx",
+              result: `${detections} pulse(s) (${result.malicious ? "malicious" : "clean"})`,
+              severity,
+            })
+          }
+        }
+      } catch (err) {
+        details.push({
+          source,
+          result: err instanceof Error ? err.message : String(err),
+          severity: "unknown",
+        })
+      }
     }
 
-    recommendations.push("Configure API keys for threat intelligence sources in environment variables")
-    recommendations.push("Set up automated IOC scanning for new connections")
-    recommendations.push("Implement blocklists based on threat intelligence feeds")
-    recommendations.push("Regularly update threat intelligence data")
+    if (maliciousCount > 0) {
+      recommendations.push("Consider blocking this IOC at the firewall or proxy level")
+    }
+    if (queriedCount === 0) {
+      recommendations.push("No threat intelligence sources could be queried — verify API keys are configured")
+    }
 
     return {
       ioc: input.iocValue,
       analysis: {
-        malicious: false,
-        confidence: 0,
+        malicious: maliciousCount > 0,
+        confidence: queriedCount > 0 ? Math.round(confidenceSum / queriedCount) : 0,
         sourcesQueried: sourcesToQuery,
-        detections: 0,
+        detections: totalDetections,
       },
       details,
       recommendations,
@@ -3531,15 +3722,15 @@ export const promptUserTool: AgentTool<
     // 3. The frontend would poll or use WebSocket to get the prompt
     // 4. User selects an option
     // 5. The tool is called again with the selection
-    //
-    // For now, we'll return a simulated response for testing
+    // The prompt_user tool forwards the question to the user interface.
+    // It returns the question details so the frontend can render the prompt.
     return {
       question: input.question,
       options: input.options,
       multiSelect: input.multiSelect,
       userSelection: undefined,
       status: "pending",
-      message: "Waiting for user selection. In a full implementation, this would present a UI prompt to the user."
+      message: "Waiting for user selection."
     }
   },
 }

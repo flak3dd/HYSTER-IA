@@ -18,12 +18,14 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { chatComplete, type ChatMessage } from '@/lib/ai/llm'
-import { aiToolDefinitions, runAiTool, AI_TOOL_NAMES, AI_TOOLS } from '@/lib/ai/tools'
+import { aiToolDefinitions, AI_TOOL_NAMES, AI_TOOLS } from '@/lib/ai/tools'
 import type { AgentTool } from '@/lib/ai/tool-types'
 import { getExtractorModel } from '@/lib/ai/reasoning/extractor-provider'
 import logger from '@/lib/logger'
 import { sanitizeMessageContent } from '@/lib/ai/robustness'
 import { serverEnv } from '@/lib/env'
+import { runAiToolRobust } from '@/lib/ai/tool-runner'
+import { isToolNeedsInput, formatNeedsInputMessage } from '@/lib/ai/tool-result'
 import {
   createOpenRouterOpenAICompat,
   getOpenRouterModelId,
@@ -64,6 +66,38 @@ function safeStringifyForContent(value: unknown): string {
   } catch {
     return sanitizeMessageContent(String(value))
   }
+}
+
+// Normalize tool arguments to handle common AI mistakes
+function normalizeToolArguments(args: any): any {
+  if (!args || typeof args !== 'object') return args
+
+  const normalized = { ...args }
+
+  // Handle tags parameter - convert object to array if needed
+  if (args.tags && !Array.isArray(args.tags)) {
+    if (typeof args.tags === 'object') {
+      normalized.tags = Object.values(args.tags).filter((v: any) => typeof v === 'string')
+    } else {
+      normalized.tags = []
+    }
+  }
+
+  // Handle other common array parameters that might receive objects
+  const arrayFields = ['nodeIds', 'profileIds', 'targetIds', 'allowedIPs']
+  arrayFields.forEach(field => {
+    if (args[field] && !Array.isArray(args[field])) {
+      if (typeof args[field] === 'object') {
+        normalized[field] = Object.values(args[field]).filter((v: any) => typeof v === 'string')
+      } else if (typeof args[field] === 'string') {
+        normalized[field] = [args[field]]
+      } else {
+        normalized[field] = []
+      }
+    }
+  })
+
+  return normalized
 }
 
 // ============================================================
@@ -285,6 +319,8 @@ export async function runReasoningChat(
         let args: Record<string, unknown> = {}
         try {
           args = JSON.parse(call.function.arguments)
+          // Normalize arguments to handle common AI mistakes
+          args = normalizeToolArguments(args)
         } catch {
           args = { _raw: call.function.arguments }
         }
@@ -296,59 +332,84 @@ export async function runReasoningChat(
 
         log.info({ round: rounds, tool: toolName, args }, 'LLM requested tool execution')
 
-        // Execute the tool
-        let toolResult: unknown
-        let toolSuccess = false
-        let toolError: string | undefined
+        // Execute the tool with full robustness (timeout, retry, breaker, validation)
+        const robustResult = await runAiToolRobust(toolName, args, {
+          signal,
+          invokerUid,
+          timeoutMs: 90_000,
+          maxRetries: 1,
+        })
 
-        try {
-          toolResult = await runAiTool(toolName, args, {
-            signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
-            invokerUid,
-          })
-          toolSuccess = true
+        const toolSuccess = robustResult.ok
+        const toolResult = robustResult.result
+        const toolError = robustResult.error
 
-          // Track for result messages
-          const toolCallId = `reasoning-${rounds}-${Date.now()}`
-          resultMessages.push({
-            role: 'assistant',
-            content: null,
-            toolCalls: [{ id: toolCallId, name: toolName, arguments: call.function.arguments }],
-          })
-          resultMessages.push({
-            role: 'tool',
-            content: null,
-            toolResult: {
-              toolCallId,
-              name: toolName,
-              content: safeStringifyForContent(toolResult),
-            },
-          })
-        } catch (err) {
-          toolError = err instanceof Error ? err.message : String(err)
-          toolSuccess = false
-          toolResult = { error: toolError }
-
-          const toolCallId = `reasoning-${rounds}-${Date.now()}`
-          resultMessages.push({
-            role: 'assistant',
-            content: null,
-            toolCalls: [{ id: toolCallId, name: toolName, arguments: call.function.arguments }],
-          })
-          resultMessages.push({
-            role: 'tool',
-            content: null,
-            toolResult: {
-              toolCallId,
-              name: toolName,
-              content: safeStringifyForContent({ error: toolError }),
-            },
-          })
-        }
+        // Track for result messages
+        const toolCallId = `reasoning-${rounds}-${Date.now()}`
+        resultMessages.push({
+          role: 'assistant',
+          content: null,
+          toolCalls: [{ id: toolCallId, name: toolName, arguments: call.function.arguments }],
+        })
+        resultMessages.push({
+          role: 'tool',
+          content: null,
+          toolResult: {
+            toolCallId,
+            name: toolName,
+            content: safeStringifyForContent(toolResult),
+          },
+        })
 
         toolExecutions.push({ toolName, success: toolSuccess, result: toolResult, error: toolError })
 
-        log.info({ round: rounds, tool: toolName, success: toolSuccess }, 'Tool execution completed')
+        log.info(
+          {
+            round: rounds,
+            tool: toolName,
+            success: toolSuccess,
+            attempts: robustResult.attempts,
+            durationMs: robustResult.durationMs,
+            shortCircuited: robustResult.shortCircuited,
+            needsInput: robustResult.needsInput,
+          },
+          'Tool execution completed',
+        )
+
+        // Generic detection: any tool that returns a structured "needs input"
+        // response should pause the assistant and ask the user for clarification
+        // instead of continuing to hallucinate parameters.
+        if (robustResult.needsInput && isToolNeedsInput(toolResult)) {
+          resultMessages.push({
+            role: 'assistant',
+            content: formatNeedsInputMessage(toolResult),
+          })
+          return {
+            messages: resultMessages,
+            classification,
+            verification: null,
+            providersUsed: [...providersUsed],
+            modelsUsed: [...modelsUsed],
+          }
+        }
+
+        // If the circuit breaker rejected the call, surface a clear message to
+        // the LLM so it can pick a different tool instead of looping.
+        if (robustResult.shortCircuited) {
+          reasoningMessages.push({
+            role: 'assistant',
+            content: llmResponse.content || '',
+            tool_calls: toolCalls,
+          })
+          reasoningMessages.push({
+            role: 'tool',
+            content: safeStringifyForContent({
+              error: toolError,
+              hint: `Tool ${toolName} is temporarily unavailable due to repeated failures. Try a different approach or wait before retrying.`,
+            }),
+          })
+          continue
+        }
 
         // Add assistant's tool request to reasoning context
         reasoningMessages.push({
