@@ -4,6 +4,7 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server"
+import { z } from "zod"
 import { verifyAdmin, toErrorResponse } from "@/lib/auth/admin"
 import {
   parseCSV,
@@ -19,7 +20,7 @@ const log = logger.child({ module: 'api-bulk-campaign' })
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const BulkCampaignRequest = {
+const requestSchema = z.object({
   name: z.string().min(1).max(100),
   csvContent: z.string().min(1),
   templateId: z.enum(['tunnel', 'tunnel-with-payloads', 'custom']),
@@ -31,11 +32,7 @@ const BulkCampaignRequest = {
   nodeId: z.string().optional(),
   tunnelType: z.string().optional(),
   customMessage: z.string().optional(),
-}
-
-import { z } from "zod"
-
-const requestSchema = z.object(BulkCampaignRequest)
+})
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
@@ -164,13 +161,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         maxRateLimitPerHour: 1000,
         maxBatchSize: 100,
       },
-      example: {
-        name: "Forex Trader Campaign Q2",
-        csvContent: "firstName,lastName,email,country,countryCode,phone\nJohn,Doe,john@example.com,Australia,61,412345678",
-        templateId: "tunnel",
-        rateLimitPerHour: 100,
-        batchSize: 10,
-        dryRun: true,
+      requiredFields: {
+        csvContent: "firstName,lastName,email,country,countryCode,phone (must be provided, no hardcoded defaults)",
+        templateId: "tunnel | tunnel-with-payloads | custom",
       },
     })
   } catch (err) {

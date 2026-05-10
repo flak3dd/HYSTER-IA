@@ -783,6 +783,26 @@ model EmailHarvestResult {
   @@map("email_harvest_results")
 }
 
+model SmtpConfig {
+  id        String   @id @default(cuid())
+  name      String
+  host      String
+  port      Int      @default(587)
+  secure    Boolean  @default(false)
+  username  String?
+  password  String?
+  fromEmail String
+  fromName  String?
+  isDefault Boolean  @default(false)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isDefault])
+  @@index([enabled])
+  @@map("smtp_configs")
+}
+
 // ---------------------------------------------------------------------------
 // Multi-Agent Swarm Architecture Models
 // ---------------------------------------------------------------------------
