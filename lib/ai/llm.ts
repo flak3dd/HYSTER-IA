@@ -7,6 +7,11 @@ import { validateToolCalls } from './tool-validator'
 import { executeWithFallback } from './provider-fallback'
 import { normalizeToolCalls } from './tool-normalizer'
 import { createHash } from 'crypto'
+import {
+  buildConfiguredProviderOrder,
+  createOpenRouterOpenAICompat,
+  getOpenRouterModelId,
+} from '@/lib/ai/openrouter/stack'
 
 // Robustness imports
 import {
@@ -384,9 +389,15 @@ export async function chatComplete(options: ChatCompleteOptions): Promise<ChatCo
   if (validateInput) {
     // Validate messages
     for (const msg of messages) {
-      const contentValidation = validateMessageContent(msg.content || '', 50000)
-      if (!contentValidation.valid) {
-        throw AiErrors.requestValidation('message.content', contentValidation.errors.join('; '))
+      // Assistant messages with tool_calls can have empty/null content
+      // Tool-role messages carry the tool result and may also be empty
+      const hasToolCalls = msg.role === 'assistant' && msg.tool_calls?.length
+      const isToolResult = msg.role === 'tool'
+      if (!hasToolCalls && !isToolResult) {
+        const contentValidation = validateMessageContent(msg.content || '', 50000)
+        if (!contentValidation.valid) {
+          throw AiErrors.requestValidation('message.content', contentValidation.errors.join('; '))
+        }
       }
     }
 
@@ -427,16 +438,8 @@ export async function chatComplete(options: ChatCompleteOptions): Promise<ChatCo
     timeoutMs,
   })
 
-  // Build list of available providers - ANTHROPIC is PRIMARY
-  const availableProviders: string[] = []
-  if (env.ANTHROPIC_API_KEY) availableProviders.push('anthropic') // PRIMARY: Claude first
-  if (env.OPENAI_API_KEY) availableProviders.push('openai')
-  if (useShadowGrok && env.SHADOWGROK_ENABLED && env.XAI_API_KEY) availableProviders.push('xai')
-  if (env.GOOGLE_API_KEY) availableProviders.push('google')
-  if (env.AZURE_OPENAI_ENDPOINT && env.AZURE_OPENAI_API_KEY) availableProviders.push('azure')
-  if (env.OPENROUTER_API_KEY) availableProviders.push('openrouter')
-  if (env.LLM_PROVIDER_API_KEY) availableProviders.push('legacy')
-  availableProviders.push('grok') // Always available as fallback
+  // OpenRouter-first when OPENROUTER_API_KEY is set; same order as fallback chain
+  const availableProviders = buildConfiguredProviderOrder(env, { useShadowGrok })
 
   // Select provider based on preference, health, or priority
   let selectedProvider = preferredProvider
@@ -671,12 +674,10 @@ async function executeSingleProvider(
       break
     case 'openrouter':
       if (env.OPENROUTER_API_KEY) {
-        const openRouterClient = createOpenAI({
-          baseURL: env.OPENROUTER_BASE_URL,
-          apiKey: env.OPENROUTER_API_KEY,
-        })
-        selectedModel = openRouterClient(model || env.OPENROUTER_MODEL)
-        selectedModelName = model || env.OPENROUTER_MODEL
+        const openRouterClient = createOpenRouterOpenAICompat(env)
+        const resolvedOrModel = model ?? getOpenRouterModelId(env, 'chat_tooling')
+        selectedModel = openRouterClient(resolvedOrModel)
+        selectedModelName = resolvedOrModel
         providerUsed = 'openrouter'
       }
       break

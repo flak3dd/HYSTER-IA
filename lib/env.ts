@@ -84,10 +84,18 @@ const ServerEnvSchema = z.object({
   // Azure AI Foundry project endpoint (for Foundry SDK / future features)
   AZURE_AI_FOUNDRY_ENDPOINT: z.string().url().or(z.literal("")).optional(),   // e.g. https://your-resource.services.ai.azure.com/api/projects/YOUR-PROJECT
 
-  // OpenRouter Configuration (second priority)
+  // OpenRouter Configuration (OpenRouter-first when OPENROUTER_API_KEY is set)
   OPENROUTER_API_KEY: z.string().min(1).or(z.literal("")).optional(),
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   OPENROUTER_MODEL: z.string().min(1).default("anthropic/claude-3.5-sonnet"),
+  /** App title for OpenRouter leaderboards / attribution (optional X-OpenRouter-Title) */
+  OPENROUTER_APP_TITLE: z.string().min(1).default("Hysteria2 Panel"),
+  /** Default chat/tooling model slug; empty uses OPENROUTER_MODEL */
+  OPENROUTER_MODEL_CHAT_DEFAULT: z.string().min(1).or(z.literal("")).optional(),
+  /** Structured JSON / reasoning model slug; empty uses OPENROUTER_MODEL */
+  OPENROUTER_MODEL_REASONING_JSON: z.string().min(1).or(z.literal("")).optional(),
+  /** Optional cheaper model slug for high-volume paths; empty falls back to chat default */
+  OPENROUTER_MODEL_CHEAP: z.string().min(1).or(z.literal("")).optional(),
 
   // Anthropic Configuration
   ANTHROPIC_API_KEY: z.string().min(1).or(z.literal("")).optional(),
