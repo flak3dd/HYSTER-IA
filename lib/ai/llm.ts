@@ -1,7 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { anthropic } from '@ai-sdk/anthropic'
 import { google } from '@ai-sdk/google'
-import { generateText } from 'ai'
+import { generateText, type ModelMessage } from 'ai'
 import { serverEnv } from '@/lib/env'
 import { validateToolCalls } from './tool-validator'
 import { executeWithFallback } from './provider-fallback'
@@ -722,13 +722,11 @@ async function executeSingleProvider(
     .map(m => m.content)
     .join('\n\n')
 
-  // Filter out tool and system messages, keep only user/assistant
-  const filteredMessages = messages
-    .filter(m => m.role !== 'tool' && m.role !== 'system')
-    .map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }))
+  // Translate our internal OpenAI-style ChatMessage[] into AI SDK v6 ModelMessage[].
+  // The previous implementation stripped tool messages and the tool_calls field on
+  // assistant messages, which made multi-round tool calling fail (round 2 saw an
+  // assistant tool_use with no matching tool_result and every provider rejected it).
+  const filteredMessages: ModelMessage[] = toModelMessages(messages)
 
   // Create timeout signal
   const timeoutSignal = AbortSignal.timeout(timeoutMs)
@@ -755,6 +753,97 @@ async function executeSingleProvider(
     monitor.emitProviderCallFailure(providerUsed, requestId, toAiError(error))
     throw error
   }
+}
+
+// ============================================================
+// MESSAGE TRANSLATION (OpenAI-style → AI SDK v6 ModelMessage[])
+// ============================================================
+
+/**
+ * Translate our internal OpenAI-style `ChatMessage[]` into AI SDK v6
+ * `ModelMessage[]`. System messages are skipped (they're hoisted into
+ * generateText's `system` option). Assistant tool calls and `role: 'tool'`
+ * results are preserved as `tool-call` / `tool-result` parts so multi-round
+ * tool calling actually round-trips through Anthropic / OpenAI / OpenRouter.
+ */
+export function toModelMessages(messages: ChatMessage[]): ModelMessage[] {
+  const out: ModelMessage[] = []
+  // toolCallId -> toolName lookup, populated as we walk assistant messages,
+  // so subsequent role:'tool' messages can be paired with the right tool name.
+  const toolNamesById = new Map<string, string>()
+
+  for (const msg of messages) {
+    if (msg.role === 'system') continue
+
+    if (msg.role === 'user') {
+      out.push({ role: 'user', content: msg.content ?? '' })
+      continue
+    }
+
+    if (msg.role === 'assistant') {
+      const calls = msg.tool_calls ?? []
+      if (calls.length === 0) {
+        out.push({ role: 'assistant', content: msg.content ?? '' })
+        continue
+      }
+
+      const parts: Array<
+        | { type: 'text'; text: string }
+        | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
+      > = []
+      const text = (msg.content ?? '').trim()
+      if (text.length > 0) {
+        parts.push({ type: 'text', text })
+      }
+      for (const tc of calls) {
+        const toolName = tc.function?.name ?? ''
+        toolNamesById.set(tc.id, toolName)
+        let input: unknown = {}
+        try {
+          input = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {}
+        } catch {
+          input = { _raw: tc.function?.arguments ?? '' }
+        }
+        parts.push({
+          type: 'tool-call',
+          toolCallId: tc.id,
+          toolName,
+          input,
+        })
+      }
+      out.push({ role: 'assistant', content: parts })
+      continue
+    }
+
+    if (msg.role === 'tool') {
+      const toolCallId = msg.tool_call_id ?? ''
+      const toolName = toolNamesById.get(toolCallId) ?? 'unknown_tool'
+      const raw = msg.content ?? ''
+      // Prefer json output when the result string is parseable JSON;
+      // otherwise treat as text. Either is valid per ToolResultOutput.
+      let output: { type: 'text'; value: string } | { type: 'json'; value: unknown }
+      try {
+        const parsed = JSON.parse(raw)
+        output = { type: 'json', value: parsed }
+      } catch {
+        output = { type: 'text', value: raw }
+      }
+      out.push({
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId,
+            toolName,
+            output,
+          },
+        ],
+      })
+      continue
+    }
+  }
+
+  return out
 }
 
 // Process generateText result into ChatCompleteResult

@@ -22,6 +22,7 @@ import {
   getOpenRouterModelId,
   buildConfiguredProviderOrder,
 } from '@/lib/ai/openrouter/stack';
+import { toModelMessages, type ChatMessage } from '@/lib/ai/llm';
 
 // Robustness imports
 import {
@@ -41,10 +42,7 @@ type GenerateTextOptions = Parameters<typeof generateText>[0];
 type GenerateTextModel = GenerateTextOptions['model'];
 type GenerateTextTools = GenerateTextOptions['tools'];
 type ProviderClient = (model: string) => GenerateTextModel;
-type ProviderMessage = {
-  role: string;
-  content: string;
-};
+type ProviderMessage = ChatMessage;
 
 // Default Grok client — replaces OpenAI as the primary provider
 function createGrokClient(apiKey?: string) {
@@ -367,13 +365,9 @@ export async function executeWithFallback(
         .map(m => m.content)
         .join('\n\n')
 
-      // Filter out tool and system messages, keep only user/assistant
-      const filteredMessages = messages
-        .filter(m => m.role !== 'tool' && m.role !== 'system')
-        .map(m => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        }))
+      // Translate to AI SDK v6 ModelMessage[] preserving tool-call / tool-result
+      // pairing so multi-round tool calling works on every provider.
+      const filteredMessages = toModelMessages(messages)
 
       const effectiveTimeout = degradedOptions?.timeoutMs || timeoutMs;
       const timeoutSignal = AbortSignal.timeout(effectiveTimeout);
